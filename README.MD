@@ -218,7 +218,7 @@ affiliated with or endorsed by INTELLOOP LLC or Grashjs. See [`NOTICE.md`](./NOT
   `LICENSE_KEY`, license file, Keygen, or Paddle integration is required.
 - All `LicenseEntitlement` values and all `PlanFeatures` are enabled; there are
   no per-resource usage caps for self-hosted deployments.
-- `LICENSE` and `COMMERCIAL_LICENSE.MD` are kept verbatim for attribution and
+- `LICENSE` are kept verbatim for attribution and
   traceability, but this fork adopts **only** the AGPLv3; the Commercial
   License Agreement does not apply to the fork.
 - Trademarks (name "Atlas CMMS", logos) belong to INTELLOOP LLC and are **not**
