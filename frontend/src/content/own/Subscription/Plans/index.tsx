@@ -34,7 +34,6 @@ import { fireGa4Event } from '../../../../utils/overall';
 import { initializePaddle, Paddle } from '@paddle/paddle-js';
 import {
   apiUrl,
-  homeUrl,
   isCloudVersion,
   PADDLE_SECRET_TOKEN,
   paddleEnvironment
@@ -66,6 +65,8 @@ function SubscriptionPlans() {
   let paddle = useRef<Paddle | null>(null);
 
   useEffect(() => {
+    if (!isCloudVersion) return;
+
     const initPaddle = async () => {
       paddle.current = await initializePaddle({
         token: PADDLE_SECRET_TOKEN,
@@ -210,13 +211,10 @@ function SubscriptionPlans() {
   };
 
   useEffect(() => {
-    fireGa4Event('pricing_view');
-    if (!isCloudVersion)
-      window.location.href = getLocalizedHomeUrl(
-        'pricing?type=selfhosted',
-        i18n.language
-      );
+    if (isCloudVersion) fireGa4Event('pricing_view');
   }, []);
+
+  if (!isCloudVersion) return <PermissionErrorMessage message={'no_access_page'} />;
 
   if (user.ownsCompany)
     return (

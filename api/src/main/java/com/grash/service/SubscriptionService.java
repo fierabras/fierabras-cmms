@@ -16,6 +16,7 @@ import com.grash.repository.SubscriptionRepository;
 import com.grash.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.quartz.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,9 @@ public class SubscriptionService {
     private final UserRepository userRepository;
     private final Scheduler scheduler;
     private final ScheduleRepository scheduleRepository;
+
+    @Value("${cloud.version}")
+    private boolean cloudVersion;
 
     public void upgrade(Collection<Long> usersIds, User user) {
         if (user.isOwnsCompany()) {
@@ -93,7 +97,11 @@ public class SubscriptionService {
     public Subscription create(Subscription subscription) {
         Subscription savedSubscription = subscriptionRepository.saveAndFlush(subscription);
         em.refresh(savedSubscription);
-        scheduleEnd(savedSubscription);
+        if (cloudVersion) {
+            scheduleEnd(savedSubscription);
+        } else {
+            applyAgplSubscriptionPolicy(savedSubscription);
+        }
         return savedSubscription;
     }
 

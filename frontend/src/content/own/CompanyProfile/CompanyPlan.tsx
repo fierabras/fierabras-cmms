@@ -54,6 +54,8 @@ function CompanyPlan(props: CompanyPlanProps) {
       .finally(() => setLoadingBilling(false));
   };
 
+  if (!isCloudVersion) return null;
+
   return (
     <Card
       sx={{
@@ -127,14 +129,8 @@ function CompanyPlan(props: CompanyPlanProps) {
           <Button
             sx={{ mr: 2 }}
             variant="contained"
-            component={isCloudVersion ? RouterLink : 'a'}
-            {...(isCloudVersion
-              ? { to: '/app/subscription/plans' }
-              : {
-                  href: 'https://atlas-cmms.com/pricing?type=selfhosted',
-                  target: '_blank',
-                  rel: 'noopener noreferrer'
-                })}
+            component={RouterLink}
+            to="/app/subscription/plans"
           >
             {t('upgrade_now')}
           </Button>

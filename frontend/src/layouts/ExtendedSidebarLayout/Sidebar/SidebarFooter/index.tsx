@@ -60,7 +60,7 @@ function SidebarFooter() {
       alignItems="center"
       justifyContent="center"
     >
-      {user.ownsCompany && user.superAccountRelations.length === 0 && (
+      {isCloudVersion && user.ownsCompany && user.superAccountRelations.length === 0 && (
         <LightTooltip placement="top" arrow title={t('upgrade_now')}>
           <IconButton
             sx={{
@@ -73,14 +73,8 @@ function SidebarFooter() {
                 color: `${theme.colors.alpha.trueWhite[100]}`
               }
             }}
-            component={isCloudVersion ? RouterLink : 'a'}
-            {...(isCloudVersion
-              ? { to: '/app/subscription/plans' }
-              : {
-                  href: 'https://atlas-cmms.com/pricing?type=selfhosted',
-                  target: '_blank',
-                  rel: 'noopener noreferrer'
-                })}
+            component={RouterLink}
+            to="/app/subscription/plans"
           >
             <UpgradeTwoToneIcon fontSize="small" />
           </IconButton>

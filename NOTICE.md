@@ -8,12 +8,9 @@ v3.0 (AGPLv3) under which this fork is distributed.
 
 This software is a **fork of Atlas CMMS** maintained at
 <https://github.com/Grashjs/cmms> by INTELLOOP LLC. All original copyright,
-trademark, and other notices are preserved. The original project is
-dual-licensed (AGPLv3 and a separate Commercial License Agreement);
-this fork adopts **only** the GNU AGPLv3 provided in [`LICENSE`](./LICENSE).
-The original Commercial License Agreement in [`COMMERCIAL_LICENSE.MD`](./COMMERCIAL_LICENSE.MD)
-is kept verbatim for attribution and traceability and does **not** apply to
-this fork.
+trademark, and other notices are preserved. This fork is distributed
+**only** under the GNU AGPLv3 provided in [`LICENSE`](./LICENSE)
+(AGPL-3.0-only).
 
 ## Status
 
