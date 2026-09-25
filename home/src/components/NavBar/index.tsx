@@ -340,16 +340,6 @@ export default function NavBar() {
                     </Grid>
                   </Box>
                 </Menu>
-                <Button
-                  component={Link}
-                  href="/pricing"
-                  sx={{
-                    ml: 2,
-                    size: { xs: "small", md: "medium" },
-                  }}
-                >
-                  {t("pricing")}
-                </Button>
                 {!isWhiteLabeled && (
                   <Button
                     component={"a"}
@@ -510,18 +500,6 @@ export default function NavBar() {
                           </Collapse>
                         </Box>
                       </Slide>
-                      <Slide direction="left" in={open} mountOnEnter unmountOnExit>
-                        <ListItem component={Link} href="/pricing" onClick={handleMenuClose} sx={{ py: 2 }}>
-                          <ListItemText
-                            primary={t("pricing")}
-                            primaryTypographyProps={{
-                              variant: "h3",
-                              sx: { fontWeight: "bold" },
-                            }}
-                          />
-                        </ListItem>
-                      </Slide>
-
                       <Slide direction="left" in={open} mountOnEnter unmountOnExit timeout={{ enter: 400 }}>
                         <ListItem
                           component="a"

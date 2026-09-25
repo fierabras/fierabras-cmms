@@ -2,7 +2,6 @@ import { getTranslations } from "next-intl/server";
 import { Box, Container, Grid, Typography } from "@mui/material";
 import { getBrandServer as getBrandConfig } from "src/utils/serverBrand";
 import FeatureTabs from "./FeatureTabs";
-import PricingSection from "./PricingSection";
 import {
   BoxHighlights,
   BoxLayouts,
@@ -17,7 +16,7 @@ import {
 } from "./styles";
 import Image from "next/image";
 
-async function Highlights({ hidePricing }: { hidePricing?: boolean }) {
+async function Highlights() {
   const t = await getTranslations();
   const brandConfig = await getBrandConfig();
 
@@ -128,7 +127,6 @@ async function Highlights({ hidePricing }: { hidePricing?: boolean }) {
         </Grid>
         <FeatureTabs brandConfig={brandConfig} />
       </Container>
-      <PricingSection hidePricing={hidePricing} />
     </BoxHighlights>
   );
 }

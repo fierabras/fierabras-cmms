@@ -8,9 +8,9 @@ const ldJson = [
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    name: "Atlas CMMS",
+    name: "Fierabras CMMS",
     description:
-      "Atlas CMMS is a free, open-source CMMS to manage work orders, preventive maintenance, assets, and facilities.",
+      "Fierabras CMMS is a free, open-source CMMS to manage work orders, preventive maintenance, assets, and facilities.",
     applicationCategory: "BusinessApplication",
     operatingSystem: "Web",
     url: "https://atlas-cmms.com/",
@@ -24,7 +24,7 @@ const ldJson = [
     // },
     publisher: {
       "@type": "Organization",
-      name: "Atlas CMMS",
+      name: "Fierabras CMMS",
       url: "https://atlas-cmms.com/",
     },
     offers: {

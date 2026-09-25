@@ -3,7 +3,6 @@ const path = require('path');
 
 const filesToClean = [
   'src/components/NavBar/index.tsx',
-  'src/content/pricing/index.tsx',
   'src/content/terms-of-service/index.tsx',
   'src/content/privacyPolicy/index.tsx'
 ];
