@@ -96,7 +96,6 @@ export default async function Footer() {
       title: "Company",
       type: "links",
       items: [
-        { href: "/pricing", text: t("pricing") },
         { href: "/privacy", text: "Privacy Policy" },
         { href: "/terms-of-service", text: "Terms of Service" },
       ],

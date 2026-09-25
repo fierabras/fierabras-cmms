@@ -14,11 +14,8 @@ import PowerSettingsNewTwoToneIcon from '@mui/icons-material/PowerSettingsNewTwo
 import CodeTwoToneIcon from '@mui/icons-material/CodeTwoTone';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import useAuth from 'src/hooks/useAuth';
-import UpgradeTwoToneIcon from '@mui/icons-material/UpgradeTwoTone';
 import QuestionMarkTwoToneIcon from '@mui/icons-material/QuestionMarkTwoTone';
-import { homeUrl, isCloudVersion, sourceTreeUrl } from '../../../../config';
-import { useContext } from 'react';
-import { CompanySettingsContext } from '../../../../contexts/CompanySettingsContext';
+import { sourceTreeUrl } from '../../../../config';
 
 const LightTooltip = styled(({ className, ...props }: TooltipProps) => (
   <Tooltip {...props} classes={{ popper: className }} />
@@ -39,7 +36,6 @@ function SidebarFooter() {
   const { t }: { t: any } = useTranslation();
   const theme = useTheme();
   const { logout, user } = useAuth();
-  const { requestSubscriptionChange } = useContext(CompanySettingsContext);
   const navigate = useNavigate();
 
   const handleLogout = async (): Promise<void> => {
@@ -60,32 +56,6 @@ function SidebarFooter() {
       alignItems="center"
       justifyContent="center"
     >
-      {user.ownsCompany && user.superAccountRelations.length === 0 && (
-        <LightTooltip placement="top" arrow title={t('upgrade_now')}>
-          <IconButton
-            sx={{
-              background: `${theme.colors.alpha.trueWhite[10]}`,
-              color: `${theme.colors.alpha.trueWhite[70]}`,
-              transition: `${theme.transitions.create(['all'])}`,
-
-              '&:hover': {
-                background: `${alpha(theme.colors.alpha.trueWhite[100], 0.2)}`,
-                color: `${theme.colors.alpha.trueWhite[100]}`
-              }
-            }}
-            component={isCloudVersion ? RouterLink : 'a'}
-            {...(isCloudVersion
-              ? { to: '/app/subscription/plans' }
-              : {
-                  href: 'https://atlas-cmms.com/pricing?type=selfhosted',
-                  target: '_blank',
-                  rel: 'noopener noreferrer'
-                })}
-          >
-            <UpgradeTwoToneIcon fontSize="small" />
-          </IconButton>
-        </LightTooltip>
-      )}
       <LightTooltip placement="top" arrow title={t('documentation')}>
         <IconButton
           sx={{

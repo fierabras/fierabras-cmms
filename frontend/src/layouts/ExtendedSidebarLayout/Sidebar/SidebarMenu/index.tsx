@@ -1,13 +1,9 @@
 import {
   alpha,
   Box,
-  Button,
-  Link,
   List,
   ListSubheader,
-  Stack,
-  styled,
-  Typography
+  styled
 } from '@mui/material';
 import { matchPath, useLocation } from 'react-router-dom';
 import SidebarMenuItem from './item';
@@ -19,8 +15,6 @@ import { getUrgentWorkOrdersCount } from '../../../../slices/workOrder';
 import { useDispatch, useSelector } from '../../../../store';
 import { getPendingRequestsCount } from '../../../../slices/request';
 import { PermissionEntity } from '../../../../models/owns/role';
-import dayjs from 'dayjs';
-import { isCloudVersion } from 'src/config';
 
 const MenuWrapper = styled(Box)(
   ({ theme }) => `
@@ -247,12 +241,9 @@ function SidebarMenu() {
   const location = useLocation();
   const { t }: { t: any } = useTranslation();
   const dispatch = useDispatch();
-  const { hasViewPermission, hasFeature, user, company } = useAuth();
+  const { hasViewPermission, hasFeature, user } = useAuth();
   const { urgentCount } = useSelector((state) => state.workOrders);
   const { pendingCount } = useSelector((state) => state.requests);
-  const TRIAL_DAYS = 15;
-  const daysPassed = dayjs().diff(dayjs(company.createdAt), 'day');
-  const daysLeft = TRIAL_DAYS - daysPassed;
 
   useEffect(() => {
     if (user.id) {
@@ -262,40 +253,6 @@ function SidebarMenu() {
   }, [user.id]);
   return (
     <>
-      {isCloudVersion &&
-        !company.demo &&
-        user.ownsCompany &&
-        !company.subscription.activated &&
-        user.superAccountRelations.length === 0 && (
-          <Stack
-            sx={{
-              backgroundColor: 'rgb(51, 194, 255)',
-              p: 2,
-              mx: 2,
-              mt: 2,
-              borderRadius: 2
-            }}
-            spacing={1}
-          >
-            <Typography color={'white'} fontSize={'16px'} fontWeight={'bold'}>
-              {daysLeft > 0
-                ? `Your trial ends in ${daysLeft} days`
-                : `Your trial has ended`}
-            </Typography>
-            <Typography color={'white'} fontSize={'14px'}>
-              You are on the {company.subscription.subscriptionPlan.name} plan
-            </Typography>
-            <Button
-              component={Link}
-              href={'/app/subscription/plans'}
-              variant="contained"
-              color="primary"
-              sx={{ mt: 1 }}
-            >
-              Upgrade
-            </Button>
-          </Stack>
-        )}
       <>
         {(user.superAccountRelations.length
           ? [

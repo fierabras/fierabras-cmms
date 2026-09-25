@@ -125,9 +125,6 @@ const TimeCategories = Loader(
 const CostCategories = Loader(
   lazy(() => import('../content/own/Categories/Cost'))
 );
-const SubscriptionPlans = Loader(
-  lazy(() => import('../content/own/Subscription/Plans'))
-);
 const Files = Loader(lazy(() => import('../content/own/Files')));
 const Meters = Loader(lazy(() => import('../content/own/Meters')));
 const PurchaseOrders = Loader(
@@ -270,15 +267,6 @@ const appRoutes = [
       {
         path: 'company-profile',
         element: <CompanyProfile />
-      }
-    ]
-  },
-  {
-    path: 'subscription',
-    children: [
-      {
-        path: 'plans',
-        element: <SubscriptionPlans />
       }
     ]
   },

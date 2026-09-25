@@ -6,6 +6,10 @@
 atlas_backups
 docker-compose-dev.yml
 logo
+!frontend/public/static/images/logo/
+!frontend/public/static/images/logo/icon-192x192.png
+!frontend/public/static/images/logo/icon-512x512.png
 *.lic
 docker-compose-minio.yml
 /fierabras/
+/docs/
