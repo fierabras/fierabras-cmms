@@ -11,8 +11,7 @@ filesToClean.forEach(file => {
   const fullPath = path.join(process.cwd(), file);
   if (fs.existsSync(fullPath)) {
     let content = fs.readFileSync(fullPath, 'utf8');
-    content = content.replace(/import\s+LanguageSwitcher\s+from\s+['"].*LanguageSwitcher['"];
-?/g, '');
+    content = content.replace(/import\s+LanguageSwitcher\s+from\s+['"].*LanguageSwitcher['"];?/g, '');
     content = content.replace(/<LanguageSwitcher\s*\/?>(?:<\/LanguageSwitcher>)?/g, '');
     content = content.replace(/<LanguageSwitcher\s*[^>]*>(?:<\/LanguageSwitcher>)?/g, '');
     fs.writeFileSync(fullPath, content);
