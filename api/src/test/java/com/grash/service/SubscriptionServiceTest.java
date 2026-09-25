@@ -287,7 +287,7 @@ class SubscriptionServiceTest {
     class Create {
 
         @Test
-        void savesFlushesRefreshesAndSchedulesEnd() throws SchedulerException {
+        void savesFlushesRefreshesAndAppliesAgplPolicy() throws SchedulerException {
             subscription.setEndsOn(new Date(System.currentTimeMillis() + 60_000));
             when(subscriptionRepository.saveAndFlush(subscription)).thenReturn(subscription);
             when(scheduler.checkExists(any(JobKey.class))).thenReturn(false);
@@ -296,7 +296,10 @@ class SubscriptionServiceTest {
 
             assertEquals(subscription, result);
             verify(em).refresh(subscription);
-            verify(scheduler).scheduleJob(any(JobDetail.class), any(Trigger.class));
+            assertEquals(Integer.MAX_VALUE, subscription.getUsersCount());
+            assertNull(subscription.getEndsOn());
+            verify(subscriptionRepository).save(subscription);
+            verify(scheduler, never()).scheduleJob(any(JobDetail.class), any(Trigger.class));
         }
     }
 
