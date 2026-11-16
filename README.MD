@@ -238,10 +238,19 @@ exact Corresponding Source for the deployed revision:
   `intelloop/atlas-cmms-frontend` images are **not** used for the fork.
 - Set `SOURCE_CODE_URL` and `SOURCE_REVISION` to keep the source offer accurate.
 
-### Sync with upstream
+### Relationship with Atlas CMMS
 
-See [`fierabras/docs/planFork.md`](./fierabras/docs/planFork.md) for the
-synchronization strategy, the rationale, and the per-UPstream-integration
-checklist.
+- Fierabras CMMS is derived from [Atlas CMMS](https://github.com/Grashjs/cmms) up
+  to commit `44069b69`.
+- Since 2026-11-16 it evolves independently, without synchronization
+  with upstream.
+- Attribution and AGPLv3 obligations are retained; see
+  [`NOTICE.md`](./NOTICE.md).
+
+### Upstream policy
+
+- Fierabras CMMS does not synchronize with Atlas CMMS.
+- Applicable security fixes are ported or reimplemented individually.
+- Derivation base: upstream commit `44069b69`.
 
 <img src="https://api.star-history.com/svg?repos=grashjs/cmms&type=Date"/>
