@@ -56,6 +56,7 @@ export interface IField {
     | 'asset-categories';
   name: string;
   placeholder?: string;
+  maxLength?: number;
   fileType?: 'file' | 'image';
   helperText?: string;
   fullWidth?: boolean;

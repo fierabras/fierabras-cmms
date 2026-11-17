@@ -29,6 +29,7 @@ import {
 } from '../../../../slices/location';
 import { getAssetsMini, getPublicAssetsMini } from '../../../../slices/asset';
 import { FIELD_DEFS } from '../../Settings/Features/RequestPortal/components/RequestPortalModal';
+import { TITLE_MAX_LENGTH } from '../../../../utils/woBase';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -381,6 +382,7 @@ function PreviewFieldRender({
             required={config.required}
             error={!!error}
             helperText={error}
+            inputProps={{ maxLength: TITLE_MAX_LENGTH }}
             onChange={(e) => onTitleChange?.(e.target.value)}
           />
         );
