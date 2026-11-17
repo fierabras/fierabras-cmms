@@ -35,7 +35,7 @@ import Form from '../components/form';
 import * as Yup from 'yup';
 import { IField } from '../type';
 import RequestDetails from './RequestDetails';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { isNumeric } from '../../../utils/validators';
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import PriorityWrapper from '../components/PriorityWrapper';
@@ -176,7 +176,6 @@ function Requests() {
     fieldMapping
   });
   const { showSnackBar } = useContext(CustomSnackBarContext);
-  const navigate = useNavigate();
   const handleOpenDrawer = (request: Request) => {
     setCurrentRequest(request);
     window.history.replaceState(
@@ -256,11 +255,7 @@ function Requests() {
   const handleOpenDetails = (id: number) => {
     const foundRequest = requests.content.find((request) => request.id === id);
     if (foundRequest) {
-      if (foundRequest.workOrder) {
-        navigate(`/app/work-orders/${foundRequest.workOrder.id}`);
-      } else {
-        handleOpenDrawer(foundRequest);
-      }
+      handleOpenDrawer(foundRequest);
     }
   };
   const handleCloseDetails = () => {
