@@ -76,6 +76,7 @@ import { CompanySettingsContext } from '../../../../contexts/CompanySettingsCont
 import {
   getAssetUrl,
   getPreventiveMaintenanceUrl,
+  getRequestUrl,
   getUserUrl,
   getWorkOrderUrl
 } from '../../../../utils/urlPaths';
@@ -125,8 +126,14 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
   const { getFormattedDate, getUserNameById, getFormattedCurrency } =
     useContext(CompanySettingsContext);
   const { t }: { t: any } = useTranslation();
-  const { user, hasEditPermission, hasDeletePermission, hasCreatePermission } =
-    useAuth();
+  const {
+    user,
+    hasEditPermission,
+    hasDeletePermission,
+    hasCreatePermission,
+    hasViewPermission,
+    hasViewOtherPermission
+  } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const commentIdParam = searchParams.get('commentId');
@@ -864,6 +871,30 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                   >
                     {getUserNameById(workOrder.parentRequest.createdBy)}
                   </Link>
+                </Grid>
+              )}
+              {workOrder.parentRequest && (
+                <Grid item xs={12} lg={6}>
+                  <Typography
+                    variant="h6"
+                    sx={{ color: theme.colors.alpha.black[70] }}
+                  >
+                    {t('request')}
+                  </Typography>
+                  {hasViewPermission(PermissionEntity.REQUESTS) &&
+                  (hasViewOtherPermission(PermissionEntity.REQUESTS) ||
+                    workOrder.parentRequest.createdBy === user.id) ? (
+                    <Link
+                      variant="h6"
+                      href={getRequestUrl(workOrder.parentRequest.id)}
+                    >
+                      {workOrder.parentRequest.customId}
+                    </Link>
+                  ) : (
+                    <Typography variant="h6">
+                      {workOrder.parentRequest.customId}
+                    </Typography>
+                  )}
                 </Grid>
               )}
               {primaryTime && (
