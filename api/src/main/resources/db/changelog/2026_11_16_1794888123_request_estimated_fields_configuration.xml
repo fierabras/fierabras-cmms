@@ -18,13 +18,10 @@
                               WHERE fc.work_order_request_configuration_id = c.id
                                 AND fc.field_name = f.field_name);
             ]]></sql>
-        <rollback>
-            <sql><![CDATA[
-                DELETE FROM field_configuration
-                WHERE work_order_request_configuration_id IS NOT NULL
-                  AND field_name IN ('estimatedStartDate', 'estimatedDuration');
-                ]]></sql>
-        </rollback>
+        <!-- No-op rollback: the inserted rows cannot be told apart from rows created later by the
+             application or reconfigured by users (e.g. HIDDEN), and remaining rows are harmless
+             for previous code. -->
+        <rollback/>
     </changeSet>
 
 </databaseChangeLog>
