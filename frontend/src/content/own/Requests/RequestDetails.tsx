@@ -44,6 +44,7 @@ import BasicField from '../components/BasicField';
 import { editAsset } from '../../../slices/asset';
 import { AssetStatus, assetStatuses } from '../../../models/owns/asset';
 import { getCustomFieldValuesForDetails } from '../type';
+import { isRequestFieldHidden } from './requestFieldConfiguration';
 
 interface RequestDetailsProps {
   request: Request;
@@ -71,8 +72,14 @@ export default function RequestDetails({
     hasDeletePermission,
     hasViewPermission,
     hasCreatePermission,
-    user
+    user,
+    companySettings
   } = useAuth();
+  const isFieldShown = (fieldName: string): boolean =>
+    !isRequestFieldHidden(
+      companySettings?.workOrderRequestConfiguration,
+      fieldName
+    );
   const navigate = useNavigate();
   const { getFormattedDate, getUserNameById } = useContext(
     CompanySettingsContext
@@ -112,21 +119,24 @@ export default function RequestDetails({
     },
     {
       label: t('due_date'),
-      value: getFormattedDate(request.dueDate)
+      value: isFieldShown('dueDate') ? getFormattedDate(request.dueDate) : null
     },
     {
       label: t('estimated_start_date'),
-      value: getFormattedDate(request.estimatedStartDate)
-    },
-    {
-      label: t('estimated_duration'),
-      value: !!request.estimatedDuration
-        ? t('estimated_hours_in_text', { hours: request.estimatedDuration })
+      value: isFieldShown('estimatedStartDate')
+        ? getFormattedDate(request.estimatedStartDate)
         : null
     },
     {
+      label: t('estimated_duration'),
+      value:
+        isFieldShown('estimatedDuration') && !!request.estimatedDuration
+          ? t('estimated_hours_in_text', { hours: request.estimatedDuration })
+          : null
+    },
+    {
       label: t('category'),
-      value: request.category?.name
+      value: isFieldShown('category') ? request.category?.name : null
     },
     {
       label: t('feedback'),
@@ -359,7 +369,7 @@ export default function RequestDetails({
                   </Link>
                 </Grid>
               )}
-              {request?.primaryUser && (
+              {request?.primaryUser && isFieldShown('primaryUser') && (
                 <Grid item xs={12} lg={6}>
                   <Typography
                     variant="h6"
@@ -372,7 +382,7 @@ export default function RequestDetails({
                   </Link>
                 </Grid>
               )}
-              {request?.team && (
+              {request?.team && isFieldShown('team') && (
                 <Grid item xs={12} lg={6}>
                   <Typography
                     variant="h6"

@@ -76,6 +76,10 @@ import CircleTwoToneIcon from '@mui/icons-material/CircleTwoTone';
 import SearchInput from '../components/SearchInput';
 import * as React from 'react';
 import WorkOrder from '../../../models/owns/workOrder';
+import {
+  getRequestFieldType,
+  isRequestFieldHidden
+} from './requestFieldConfiguration';
 
 const QUERY_SEARCH_FIELDS = new Set<keyof Request>([
   'title',
@@ -339,7 +343,11 @@ function Requests() {
       cell: (info) => getFormattedDate(info.getValue()),
       size: 150
     })
-  ];
+  ].filter(
+    (column) =>
+      column.id !== 'dueDate' ||
+      !isRequestFieldHidden(workOrderRequestConfiguration, 'dueDate')
+  );
   const defaultFields: Array<IField> = [...getWOBaseFields(t, customFields)];
   const defaultShape = {
     title: Yup.string().required(t('required_request_name')),
@@ -358,17 +366,20 @@ function Requests() {
       'primaryUser',
       'category',
       'dueDate',
-      'team'
+      'team',
+      'estimatedStartDate',
+      'estimatedDuration'
     ];
     fieldsToConfigure.forEach((name) => {
-      const fieldConfig =
-        workOrderRequestConfiguration.fieldConfigurations.find(
-          (fc) => fc.fieldName === name
-        );
+      const fieldType = getRequestFieldType(
+        workOrderRequestConfiguration,
+        name
+      );
       const fieldIndexInFields = fields.findIndex(
         (field) => field.name === name
       );
-      if (fieldConfig.fieldType === 'REQUIRED') {
+      if (fieldIndexInFields === -1) return;
+      if (fieldType === 'REQUIRED') {
         fields[fieldIndexInFields] = {
           ...fields[fieldIndexInFields],
           required: true
@@ -390,8 +401,9 @@ function Requests() {
             break;
         }
         shape[name] = yupSchema;
-      } else if (fieldConfig.fieldType === 'HIDDEN') {
+      } else if (fieldType === 'HIDDEN') {
         fields.splice(fieldIndexInFields, 1);
+        delete shape[name];
       }
     });
 
