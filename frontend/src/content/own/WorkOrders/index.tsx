@@ -67,7 +67,7 @@ import { patchTasksOfWorkOrder } from '../../../slices/task';
 import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext';
 import useAuth from '../../../hooks/useAuth';
 import { useLicenseEntitlement } from '../../../hooks/useLicenseEntitlement';
-import { getWOBaseValues } from '../../../utils/woBase';
+import { getWOBaseValues, TITLE_MAX_LENGTH } from '../../../utils/woBase';
 import { PermissionEntity } from '../../../models/owns/role';
 import ConfirmDialog from '../components/ConfirmDialog';
 import {
@@ -648,7 +648,8 @@ function WorkOrders() {
       type: 'text',
       label: t('title'),
       placeholder: t('wo.title_description'),
-      required: true
+      required: true,
+      maxLength: TITLE_MAX_LENGTH
     },
     {
       name: 'description',

@@ -7,6 +7,8 @@ import {
 } from '../content/own/type';
 import { CustomField, CustomFieldEntityType } from '../models/owns/customField';
 
+export const TITLE_MAX_LENGTH = 64;
+
 export const getWOBaseFields = (
   t: any,
   customFields: CustomField[] = [],
@@ -18,7 +20,8 @@ export const getWOBaseFields = (
       type: 'text',
       label: t('title'),
       placeholder: t('enter_wo_title'),
-      required: true
+      required: true,
+      maxLength: TITLE_MAX_LENGTH
     },
     {
       name: 'description',

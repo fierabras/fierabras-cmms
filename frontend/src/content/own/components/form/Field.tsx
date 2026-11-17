@@ -47,7 +47,8 @@ export default (props: PropsType) => {
         }
       }
       inputProps={{
-        min: '0'
+        min: '0',
+        maxLength: props.maxLength
       }}
     />
   );
