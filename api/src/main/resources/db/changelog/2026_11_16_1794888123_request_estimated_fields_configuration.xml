@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- RF-01: add estimatedStartDate and estimatedDuration request field configurations
+         to existing companies as OPTIONAL (field_type = 0), so behavior does not change. -->
+    <changeSet id="2026_11_16_1794888123_request_estimated_fields_configuration" author="fierabras">
+        <sql><![CDATA[
+            INSERT INTO field_configuration (id, field_name, field_type, work_order_request_configuration_id)
+            SELECT nextval('field_configuration_seq'), f.field_name, 0, c.id
+            FROM work_order_request_configuration c
+                     CROSS JOIN (VALUES ('estimatedStartDate'), ('estimatedDuration')) AS f(field_name)
+            WHERE NOT EXISTS (SELECT 1
+                              FROM field_configuration fc
+                              WHERE fc.work_order_request_configuration_id = c.id
+                                AND fc.field_name = f.field_name);
+            ]]></sql>
+        <!-- No-op rollback: the inserted rows cannot be told apart from rows created later by the
+             application or reconfigured by users (e.g. HIDDEN), and remaining rows are harmless
+             for previous code. -->
+        <rollback/>
+    </changeSet>
+
+</databaseChangeLog>

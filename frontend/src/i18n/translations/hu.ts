@@ -305,6 +305,7 @@ const locale = {
   'wo.title_description': 'Add meg a Munkarendelés címét',
   image: 'Kép',
   estimated_duration: 'Becsült Időtartam Órákban',
+  estimated_start_date: 'Becsült kezdési dátum',
   primary_worker: 'Elsődleges Dolgozó',
   additional_workers: 'További Dolgozók',
   select_team: 'Csapat kiválasztása',

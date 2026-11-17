@@ -225,4 +225,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_07_16_00000000001_create_unaccent.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_16_1794888123_request_estimated_fields_configuration.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

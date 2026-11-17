@@ -21,7 +21,9 @@ function ConfigureRequestFields() {
     { label: t('primary_worker'), name: 'primaryUser' },
     { label: t('due_date'), name: 'dueDate' },
     { label: t('category'), name: 'category' },
-    { label: t('team'), name: 'team' }
+    { label: t('team'), name: 'team' },
+    { label: t('estimated_start_date'), name: 'estimatedStartDate' },
+    { label: t('estimated_duration'), name: 'estimatedDuration' }
   ];
 
   useEffect(() => {

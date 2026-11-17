@@ -274,6 +274,7 @@ const locale = {
   'wo.title_description': '输入工单标题',
   image: '图像',
   estimated_duration: '预计持续时间（小时）',
+  estimated_start_date: '预计开始日期',
   primary_worker: '主要工人',
   additional_workers: '其他工人',
   select_team: '选择团队',
