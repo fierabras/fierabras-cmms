@@ -907,7 +907,8 @@ public class WorkOrderService {
      */
     private void assertClosingRequirements(WorkOrder workOrder, boolean persisted, String signature, User user) {
         // Read from the database, not from the cached user, so a configuration change applies at once
-        Company company = companyService.findById(user.getCompany().getId()).orElse(user.getCompany());
+        Company company = companyService.findById(user.getCompany().getId())
+                .orElseThrow(() -> new CustomException("Company not found", HttpStatus.NOT_FOUND));
         Collection<FieldConfiguration> fields =
                 company.getCompanySettings().getWorkOrderConfiguration().getWorkOrderFieldConfigurations();
         Predicate<String> required = name -> fields.stream().anyMatch(field -> name.equals(field.getFieldName())

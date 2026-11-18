@@ -1081,6 +1081,22 @@ class WorkOrderServiceTest {
             lenient().when(laborService.findByWorkOrder(1L)).thenReturn(Collections.emptyList());
             lenient().when(licenseService.hasEntitlement(LicenseEntitlement.SIGNATURE_CAPTURE)).thenReturn(true);
             lenient().when(workflowService.findByMainConditionAndCompany(any(), anyLong())).thenReturn(Collections.emptyList());
+            // INC-02 (T-15): the closing requirements read the company configuration from the database
+            lenient().when(companyService.findById(company.getId())).thenReturn(Optional.of(company));
+        }
+
+        @Test
+        void transitionToComplete_companyNotInDatabase_throwsNotFoundWithoutSaving() {
+            // INC-02 (T-15): no silent fallback to the cached company and its possibly stale configuration
+            stubBasic();
+            when(companyService.findById(company.getId())).thenReturn(Optional.empty());
+            dto.setStatus(Status.COMPLETE);
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> workOrderService.changeStatus(dto, 1L, user, "web"));
+
+            assertEquals(HttpStatus.NOT_FOUND, ex.getHttpStatus());
+            verify(workOrderRepository, never()).saveAndFlush(any());
         }
 
         @Test
@@ -1283,6 +1299,7 @@ class WorkOrderServiceTest {
             when(laborService.findByWorkOrder(1L)).thenReturn(Collections.emptyList());
             doNothing().when(assetService).stopDownTime(anyLong(), any());
             when(workOrderRepository.findByAsset_Id(10L)).thenReturn(Collections.emptyList());
+            when(companyService.findById(company.getId())).thenReturn(Optional.of(company));
 
             dto.setStatus(Status.COMPLETE);
             workOrderService.changeStatus(dto, 1L, user, "ios");
@@ -2809,6 +2826,7 @@ class WorkOrderServiceTest {
             dto.setStatus(Status.COMPLETE);
 
             when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
+            when(companyService.findById(company.getId())).thenReturn(Optional.of(company));
             when(workOrderRepository.saveAndFlush(any())).thenAnswer(inv -> {
                 WorkOrder saved = inv.getArgument(0);
                 saved.setId(1L);
@@ -2845,6 +2863,7 @@ class WorkOrderServiceTest {
             dto.setStatus(Status.COMPLETE);
 
             when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
+            when(companyService.findById(company.getId())).thenReturn(Optional.of(company));
             when(workOrderRepository.saveAndFlush(any())).thenAnswer(inv -> {
                 WorkOrder saved = inv.getArgument(0);
                 saved.setId(1L);
