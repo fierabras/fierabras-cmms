@@ -10,9 +10,11 @@ import com.grash.model.Role;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.RoleRepository;
+import com.grash.repository.UserRepository;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -26,6 +28,7 @@ public class RoleService {
     private final RoleMapper roleMapper;
     private final CompanySettingsService companySettingsService;
     private final LicenseService licenseService;
+    private final UserRepository userRepository;
 
     public Role create(Role role) {
         if (role.getCode().equals(RoleCode.USER_CREATED) && !licenseService.hasEntitlement(LicenseEntitlement.CUSTOM_ROLES))
@@ -44,8 +47,22 @@ public class RoleService {
         return roleRepository.findAll();
     }
 
+    /**
+     * A role assigned to at least one user is never deleted (INC-02, C8). The foreign key own_user.role_id
+     * (ON DELETE RESTRICT) rejects a user assigned between the check and the deletion.
+     */
     public void delete(Long id) {
-        roleRepository.deleteById(id);
+        if (userRepository.existsByRole_Id(id)) throw roleInUse();
+        try {
+            roleRepository.deleteById(id);
+        } catch (DataIntegrityViolationException e) {
+            throw roleInUse();
+        }
+    }
+
+    private static CustomException roleInUse() {
+        return new CustomException("This role is assigned to at least one user. Assign another role to those users " +
+                "before deleting it", HttpStatus.CONFLICT);
     }
 
     public Optional<Role> findById(Long id) {

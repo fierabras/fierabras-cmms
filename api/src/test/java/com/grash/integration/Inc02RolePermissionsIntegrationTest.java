@@ -13,6 +13,7 @@ import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.model.enums.Status;
 import com.grash.repository.*;
+import com.grash.service.CompanyService;
 import com.grash.service.RoleService;
 import com.grash.utils.Consts;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -65,6 +67,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private RoleService roleService;
     @Autowired
+    private CompanyService companyService;
+    @Autowired
     private RoleRepository roleRepository;
     @Autowired
     private UserRepository userRepository;
@@ -92,8 +96,12 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     void cleanUp() {
         // Other integration tests count users globally, so nothing committed here may survive the test.
         for (Long companyId : createdCompanyIds) {
-            Long settingsId = jdbcTemplate.queryForObject(
+            List<Long> settingsIds = jdbcTemplate.queryForList(
                     "SELECT company_settings_id FROM company WHERE id = ?", Long.class, companyId);
+            if (settingsIds.isEmpty()) {
+                continue; // the test itself deleted the company
+            }
+            Long settingsId = settingsIds.get(0);
             // ON DELETE CASCADE from company removes its settings, roles, users, requests and work orders.
             jdbcTemplate.update("DELETE FROM company WHERE id = ?", companyId);
             assertEquals(0, count("SELECT count(*) FROM own_user WHERE company_id = ?", companyId),
@@ -570,6 +578,41 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                             requestReferences(request.getId()), "request references (createdBy, primaryUser, assignedTo)"),
                     () -> assertEquals(new References(user.getId(), user.getId(), List.of(user.getId())),
                             workOrderReferences(workOrder.getId()), "work order references (createdBy, primaryUser, assignedTo)"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C8 (T-01): the database rejects deleting a role assigned to a user, even bypassing the service")
+        void deleteRoleWithUser_directRepositoryDelete_rejectedByConstraint() {
+            Tenant tenant = newTenant("C8-schema");
+            Role role = createCustomRole(tenant.company(), "C8 schema role", new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set()));
+            User user = createUser(tenant.company(), role);
+
+            assertThrows(DataIntegrityViolationException.class, () -> roleRepository.deleteById(role.getId()),
+                    "FK own_user.role_id must restrict the deletion");
+
+            assertAll(
+                    () -> assertTrue(roleRepository.existsById(role.getId()), "role must still exist"),
+                    () -> assertTrue(userRepository.existsById(user.getId()), "user must still exist"),
+                    () -> assertEquals(role.getId(), roleIdOfUser(user.getId()), "user must keep the role"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C8 (T-01): deleting a company still removes its custom roles and the users holding them")
+        void deleteCompany_withAssignedCustomRole_removesRolesAndUsers() {
+            Tenant tenant = newTenant("C8-company");
+            Role role = createCustomRole(tenant.company(), "C8 company role", new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set()));
+            User user = createUser(tenant.company(), role);
+
+            // Same path as account deletion by the owner (AuthController) and the demo cleanup job.
+            companyService.delete(tenant.company().getId());
+
+            assertAll(
+                    () -> assertFalse(companyRepository.existsById(tenant.company().getId()), "company must be gone"),
+                    () -> assertFalse(roleRepository.existsById(role.getId()), "custom role must be gone"),
+                    () -> assertFalse(userRepository.existsById(user.getId()), "user must be gone"),
+                    () -> assertFalse(userRepository.existsById(tenant.admin().getId()), "owner must be gone"));
         }
 
         @Test

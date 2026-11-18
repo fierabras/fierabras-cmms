@@ -33,6 +33,8 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
 
     Optional<User> findByIdAndCompany_Id(Long id, Long companyId);
 
+    boolean existsByRole_Id(Long roleId);
+
     @Query("select u from User u where u.company.id=:id and u.role.code not in :roleCodes")
     Collection<User> findWorkersByCompany(@Param("id") Long id, @Param("roleCodes") List<RoleCode> roleCodes);
 

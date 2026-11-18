@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- INC-02: deleting a role must never delete the users that hold it. Replaces the ON DELETE CASCADE set by
+         2026_01_29_own_user_role_id_cascade (that changeset is left untouched). The service rejects the deletion
+         with 409 first; this constraint covers any other path and a concurrent assignment. Deleting a company
+         still removes its roles and users through the company cascades. -->
+    <changeSet id="2026_11_18_1795016833_own_user_role_id_restrict" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkrlvsrdrcmmbtbgeqr8y4j69p4"/>
+        <addForeignKeyConstraint baseColumnNames="role_id" baseTableName="own_user"
+                                 constraintName="fkrlvsrdrcmmbtbgeqr8y4j69p4" referencedColumnNames="id"
+                                 referencedTableName="role" onDelete="RESTRICT"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkrlvsrdrcmmbtbgeqr8y4j69p4"/>
+            <addForeignKeyConstraint baseColumnNames="role_id" baseTableName="own_user"
+                                     constraintName="fkrlvsrdrcmmbtbgeqr8y4j69p4" referencedColumnNames="id"
+                                     referencedTableName="role" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

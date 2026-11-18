@@ -9,11 +9,13 @@ import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.RoleRepository;
+import com.grash.repository.UserRepository;
 import com.grash.utils.Helper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,6 +41,8 @@ class RoleServiceTest {
     private CompanySettingsService companySettingsService;
     @Mock
     private LicenseService licenseService;
+    @Mock
+    private UserRepository userRepository;
 
     private Role adminRole;
     private Role customRole;
@@ -162,6 +166,26 @@ class RoleServiceTest {
             roleService.delete(1L);
 
             verify(roleRepository).deleteById(1L);
+        }
+
+        @Test
+        void roleWithUsers_throwsConflictAndDoesNotDelete() {
+            when(userRepository.existsByRole_Id(1L)).thenReturn(true);
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            verify(roleRepository, never()).deleteById(anyLong());
+        }
+
+        @Test
+        void userAssignedConcurrently_constraintViolation_throwsConflict() {
+            doThrow(new DataIntegrityViolationException("fkrlvsrdrcmmbtbgeqr8y4j69p4"))
+                    .when(roleRepository).deleteById(1L);
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
         }
     }
 
