@@ -130,11 +130,13 @@ function Roles() {
     newValues.companySettings = { id: companySettings.id };
     newValues.roleType = 'ROLE_CLIENT';
 
+    // INC-02 (T-05): always work on copies. The role arrays come from the Redux state, which can be frozen; pushing
+    // into them threw a TypeError and the edit was silently not sent.
     permissionRoots.forEach((root) => {
       if (useDefaultPermissions) {
         newValues[root] = [...defaultPermissions[root]];
-      } else if (!newValues[root]) {
-        newValues[root] = [];
+      } else {
+        newValues[root] = [...(newValues[root] ?? [])];
       }
     });
 
