@@ -44,6 +44,7 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
     private final MailServiceFactory mailServiceFactory;
     private final CompanyService companyService;
     private final RoleService roleService;
+    private final CacheService cacheService;
 
     @Value("${mail.recipients:#{null}}")
     private String[] recipients;
@@ -98,6 +99,8 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
                 }
             }
 
+            // INC-02 (D-1): as the password signin does, drop the cached user so the new session uses the current role
+            cacheService.evictUserFromCache(user.getEmail());
             // Generate JWT token
             String token = jwtTokenProvider.createToken(user.getEmail(),
                     Collections.singletonList(user.getRole().getRoleType()));

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -56,6 +57,8 @@ class OAuth2AuthenticationSuccessHandlerTest {
     private MailService mailService;
     @Mock
     private RoleService roleService;
+    @Mock
+    private CacheService cacheService;
 
     @Mock
     private HttpServletRequest request;
@@ -136,6 +139,23 @@ class OAuth2AuthenticationSuccessHandlerTest {
 
             assertTrue(result.startsWith(successUrl));
             assertTrue(result.contains("token=jwt-token"));
+        }
+
+        @Test
+        void existingUser_evictsAuthorizationCacheBeforeIssuingToken() {
+            // INC-02 (D-1, C5): like the password signin, an OAuth2 login must not reuse cached role permissions.
+            String email = "john@test.com";
+            stubOAuthFlow("google", Map.of("email", email, "given_name", "John", "family_name", "Doe", "sub", "123"));
+            when(request.getParameter("redirect_uri")).thenReturn(null);
+            when(oAuth2Properties.getSuccessRedirectUrl()).thenReturn(successUrl);
+            when(userRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(createUser(email, "google", "123")));
+            when(jwtTokenProvider.createToken(eq(email), anyList())).thenReturn("jwt-token");
+
+            handler.determineTargetUrl(request, response, authToken);
+
+            InOrder inOrder = inOrder(cacheService, jwtTokenProvider);
+            inOrder.verify(cacheService).evictUserFromCache(email);
+            inOrder.verify(jwtTokenProvider).createToken(eq(email), anyList());
         }
 
         @Test
