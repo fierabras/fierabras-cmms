@@ -146,8 +146,10 @@ public class UserController {
                                   @Parameter(hidden = true) @CurrentUser User requester) {
         if (!requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS))
             throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
-        return userMapper.toResponseDto(userService.enableUser(userService.findByIdAndCompany(id,
-                requester.getCompany().getId()).get()));
+        User userToEnable = userService.findByIdAndCompany(id, requester.getCompany().getId()).get();
+        // INC-02 (D-23): enabling a user is managing that user
+        userService.assertCanManage(requester, userToEnable);
+        return userMapper.toResponseDto(userService.enableUser(userToEnable));
     }
 
     @PatchMapping("/soft-delete/{id}")

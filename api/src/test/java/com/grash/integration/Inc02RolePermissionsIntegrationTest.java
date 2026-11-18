@@ -1177,6 +1177,38 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        @DisplayName("INC-02 D-23: enabling a superior user or the company owner returns 403 and keeps them disabled")
+        void enable_superiorOrOwner_forbidden() throws Exception {
+            Scenario s = scenario("D23-enable");
+            User target = disabled(createUser(s.tenant().company(), createCustomRole(s.tenant().company(),
+                    "D23 superior", superior)));
+            User owner = disabled(owner(s));
+            String token = login(s.manager());
+
+            HttpResult superiorResult = call(patch("/users/" + target.getId() + "/enable"), token);
+            HttpResult ownerResult = call(patch("/users/" + owner.getId() + "/enable"), token);
+
+            assertAll(
+                    () -> assertEquals(403, superiorResult.status(), "PATCH /users/{id}/enable: " + superiorResult),
+                    () -> assertEquals(403, ownerResult.status(), "PATCH /users/{ownerId}/enable: " + ownerResult),
+                    () -> assertFalse(isEnabled(target), "superior user must stay disabled"),
+                    () -> assertFalse(isEnabled(owner), "owner must stay disabled"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-23: enabling a lesser user succeeds")
+        void enable_lesserUser_succeeds() throws Exception {
+            Scenario s = scenario("D23-enable-ok");
+            User target = disabled(createUser(s.tenant().company(), s.lesserRole()));
+
+            HttpResult result = call(patch("/users/" + target.getId() + "/enable"), login(s.manager()));
+
+            assertAll(
+                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}/enable: " + result),
+                    () -> assertTrue(isEnabled(target), "user must be enabled"));
+        }
+
+        @Test
         @DisplayName("INC-02 R-09: a people manager without the settings permission lists the roles of their company only")
         void listRoles_peopleManagerWithoutSettings_ownCompanyOnly() throws Exception {
             Tenant tenant = newTenant("R09-roles");
@@ -1250,6 +1282,13 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
 
         private boolean isEnabled(User user) {
             return inTx(() -> userRepository.findById(user.getId()).orElseThrow().isEnabled());
+        }
+
+        private User disabled(User user) {
+            User saved = userRepository.findById(user.getId()).orElseThrow();
+            saved.setEnabled(false);
+            saved.setEnabledInSubscription(false);
+            return userRepository.save(saved);
         }
     }
 

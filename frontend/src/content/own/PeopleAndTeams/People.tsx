@@ -454,7 +454,7 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
                 }}
               />
             )}
-            {!user.enabled && (
+            {!user.enabled && canManage(user) && (
               <CheckCircleIcon
                 fontSize="small"
                 color="success"
