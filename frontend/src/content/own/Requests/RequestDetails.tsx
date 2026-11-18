@@ -111,7 +111,7 @@ export default function RequestDetails({
       value: request.description
     },
     {
-      label: t('id'),
+      label: t('folio'),
       value: request.customId
     },
     {

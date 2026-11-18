@@ -237,6 +237,7 @@ const locale = {
   details: 'Details',
   updates: 'Updates',
   id: 'ID',
+  folio: 'ID',
   due_date: 'Due Date',
   location: 'Location',
   asset: 'Asset',
