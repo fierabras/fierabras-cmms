@@ -352,7 +352,8 @@ export default function RequestDetails({
                   >
                     {t('work_order')}
                   </Typography>
-                  {hasViewPermission(PermissionEntity.WORK_ORDERS) ? (
+                  {hasViewPermission(PermissionEntity.WORK_ORDERS) ||
+                  request.createdBy === user.id ? (
                     <Link
                       variant="h6"
                       href={getWorkOrderUrl(request.workOrder.id)}
