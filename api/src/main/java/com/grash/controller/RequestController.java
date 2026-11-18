@@ -231,8 +231,8 @@ public class RequestController {
                                     @Parameter(description = "Request approval data") @RequestBody RequestApproveDTO requestApproveDTO,
                                     HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<Request> optionalRequest = requestService.findById(id);
         assertCanReview(user);
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
             assertPending(savedRequest);
@@ -296,8 +296,8 @@ public class RequestController {
                                  @RequestParam @Parameter(description = "Reason of the request") String reason,
                                  HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<Request> optionalRequest = requestService.findById(id);
         assertCanReview(user);
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
             assertPending(savedRequest);

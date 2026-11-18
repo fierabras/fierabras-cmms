@@ -155,6 +155,15 @@ public class RequestService {
         return requestRepository.findById(id);
     }
 
+    /**
+     * INC-02 (R-07): the request to approve or reject, locked until the review transaction ends. A concurrent review
+     * of the same request waits and then reads it already reviewed, so only one review wins and only the winner runs
+     * the effects (work order, notifications, workflows, webhooks).
+     */
+    public Optional<Request> findByIdForReview(Long id) {
+        return requestRepository.findByIdForUpdate(id);
+    }
+
     public Collection<Request> findByCompany(Long id) {
         return requestRepository.findByCompany_Id(id);
     }

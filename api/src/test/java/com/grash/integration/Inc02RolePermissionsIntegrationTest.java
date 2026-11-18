@@ -42,6 +42,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -576,6 +577,78 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertTrue(result.is4xx(), "PATCH /requests/{id}/cancel on a rejected request: " + result),
                     () -> assertEquals("INC-02 rejection", inTx(() -> requestRepository.findById(request.getId())
                             .orElseThrow().getCancellationReason()), "the first reason must be kept"));
+        }
+
+        // ----- R-07: two concurrent reviews of the same request, only one wins -----
+
+        @Test
+        @DisplayName("INC-02 R-07: two concurrent approvals of a pending request create one work order, the other gets 406")
+        void concurrentApprovals_onlyOneWins() throws Exception {
+            Tenant tenant = newTenant("R07-approve");
+            String first = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "R07 reviewer A", requestReviewer)));
+            String second = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "R07 reviewer B", requestReviewer)));
+            for (int round = 0; round < 5; round++) {
+                Request request = createRequest(tenant.company(), tenant.admin(), null);
+
+                List<HttpResult> results = concurrently(() -> approve(first, request.getId()),
+                        () -> approve(second, request.getId()));
+
+                int currentRound = round;
+                assertAll("round " + round,
+                        () -> assertEquals(1, results.stream().filter(HttpResult::is2xx).count(),
+                                "round " + currentRound + ", exactly one approval wins: " + results),
+                        () -> assertEquals(1, results.stream().filter(result -> result.status() == 406).count(),
+                                "round " + currentRound + ", the other one gets 406: " + results),
+                        () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE parent_request_id = ?",
+                                request.getId()), "round " + currentRound + ", one work order for the request"));
+            }
+        }
+
+        @Test
+        @DisplayName("INC-02 R-07: a concurrent approval and rejection of a pending request leave it either approved or rejected")
+        void concurrentApprovalAndRejection_onlyOneWins() throws Exception {
+            Tenant tenant = newTenant("R07-mixed");
+            String approver = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "R07 approver", requestReviewer)));
+            String rejecter = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "R07 rejecter", requestReviewer)));
+            for (int round = 0; round < 5; round++) {
+                Request request = createRequest(tenant.company(), tenant.admin(), null);
+
+                List<HttpResult> results = concurrently(() -> approve(approver, request.getId()),
+                        () -> reject(rejecter, request.getId()));
+
+                int currentRound = round;
+                boolean approved = workOrderIdOf(request.getId()) != null;
+                assertAll("round " + round,
+                        () -> assertEquals(1, results.stream().filter(HttpResult::is2xx).count(),
+                                "round " + currentRound + ", exactly one review wins: " + results),
+                        () -> assertNotEquals(approved, isCancelled(request.getId()),
+                                "round " + currentRound + ", approved or rejected, not both"),
+                        () -> assertEquals(approved ? 1 : 0, count(
+                                "SELECT count(*) FROM work_order WHERE parent_request_id = ?", request.getId()),
+                                "round " + currentRound + ", a work order only if approved"));
+            }
+        }
+
+        private List<HttpResult> concurrently(Callable<HttpResult> a, Callable<HttpResult> b) throws Exception {
+            CyclicBarrier start = new CyclicBarrier(2);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<HttpResult> first = executor.submit(() -> {
+                    start.await();
+                    return a.call();
+                });
+                Future<HttpResult> second = executor.submit(() -> {
+                    start.await();
+                    return b.call();
+                });
+                return List.of(first.get(60, TimeUnit.SECONDS), second.get(60, TimeUnit.SECONDS));
+            } finally {
+                executor.shutdownNow();
+            }
         }
 
         // ----- T-10: the generic PATCH never changes the review state of a request -----
