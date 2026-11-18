@@ -32,7 +32,8 @@ import {
   getAssetUrl,
   getLocationUrl,
   getTeamUrl,
-  getUserUrl
+  getUserUrl,
+  getWorkOrderUrl
 } from '../../../utils/urlPaths';
 import useAuth from '../../../hooks/useAuth';
 import { PermissionEntity } from '../../../models/owns/role';
@@ -341,6 +342,29 @@ export default function RequestDetails({
                   <Link variant="h6" href={getUserUrl(request.createdBy)}>
                     {getUserNameById(request.createdBy)}
                   </Link>
+                </Grid>
+              )}
+              {request?.workOrder && (
+                <Grid item xs={12} lg={6}>
+                  <Typography
+                    variant="h6"
+                    sx={{ color: theme.colors.alpha.black[70] }}
+                  >
+                    {t('work_order')}
+                  </Typography>
+                  {hasViewPermission(PermissionEntity.WORK_ORDERS) ||
+                  request.createdBy === user.id ? (
+                    <Link
+                      variant="h6"
+                      href={getWorkOrderUrl(request.workOrder.id)}
+                    >
+                      {request.workOrder.customId}
+                    </Link>
+                  ) : (
+                    <Typography variant="h6">
+                      {request.workOrder.customId}
+                    </Typography>
+                  )}
                 </Grid>
               )}
               {request?.asset && (
