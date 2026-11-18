@@ -80,6 +80,9 @@ public class RoleController {
                       @PathVariable("id") Long id,
                       HttpServletRequest req) {
         User user = userService.whoami(req);
+        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
+            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+        }
         Optional<Role> optionalRole = roleService.findById(id);
 
         if (optionalRole.isPresent()) {

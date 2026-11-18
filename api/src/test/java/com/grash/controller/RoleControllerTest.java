@@ -34,8 +34,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -293,6 +295,20 @@ class RoleControllerTest extends AbstractControllerTest {
 
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
+        }
+
+        @Test
+        void patch_withoutSettingsPermission_returns403() throws Exception {
+            setCurrentUser(clientUserWithoutPermission);
+            when(userService.whoami(any())).thenReturn(clientUserWithoutPermission);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Updated\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
         }
     }
 
