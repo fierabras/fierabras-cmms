@@ -33,6 +33,7 @@ import java.util.Set;
 
 import static com.grash.utils.Helper.setCurrentUser;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -421,6 +422,33 @@ class RoleControllerTest extends AbstractControllerTest {
             assertEquals(RoleCode.USER_CREATED, captured.getCode());
             assertEquals(RoleType.ROLE_CLIENT, captured.getRoleType());
             assertTrue(captured.isPaid());
+            assertSame(company.getCompanySettings(), captured.getCompanySettings());
+        }
+
+        @Test
+        void create_ignoresClientIdAndServerFields() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.create(any(Role.class))).thenReturn(companyRole);
+
+            mockMvc.perform(post("/roles")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"id\":5,\"name\":\"New Role\",\"description\":\"d\",\"externalId\":\"x\"," +
+                                    "\"code\":\"ADMIN\",\"roleType\":\"ROLE_SUPER_ADMIN\"," +
+                                    "\"viewPermissions\":[\"SETTINGS\"]}"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<Role> captor = ArgumentCaptor.forClass(Role.class);
+            verify(roleService).create(captor.capture());
+            Role captured = captor.getValue();
+            assertNull(captured.getId());
+            assertEquals("New Role", captured.getName());
+            assertEquals("d", captured.getDescription());
+            assertEquals("x", captured.getExternalId());
+            assertEquals(RoleCode.USER_CREATED, captured.getCode());
+            assertEquals(RoleType.ROLE_CLIENT, captured.getRoleType());
+            assertEquals(Set.of(PermissionEntity.SETTINGS), captured.getViewPermissions());
+            assertTrue(captured.getCreatePermissions().isEmpty());
             assertSame(company.getCompanySettings(), captured.getCompanySettings());
         }
 

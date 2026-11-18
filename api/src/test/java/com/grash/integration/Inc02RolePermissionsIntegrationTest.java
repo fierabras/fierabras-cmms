@@ -609,6 +609,98 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // T-06: POST /roles must never write an existing row (Codex A-02)
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 role creation with a client-supplied id")
+    class CreateWithIdTests {
+
+        @Test
+        @DisplayName("INC-02 C10 (T-06): POST /roles with the id of an own custom role creates a new role and keeps the existing one")
+        void ownCustomRoleId_existingRowUnchanged() throws Exception {
+            Tenant tenant = newTenant("T06-own");
+            Role existing = createCustomRole(tenant.company(), "T06 own role", new Perms(
+                    set(PermissionEntity.REQUESTS), set(), set(), set(), set()));
+
+            assertPostWithIdKeepsRow(tenant, existing.getId());
+        }
+
+        @Test
+        @DisplayName("INC-02 C7 (T-06): POST /roles with the id of a default role creates a new role and keeps the default one")
+        void defaultRoleId_existingRowUnchanged() throws Exception {
+            Tenant tenant = newTenant("T06-default");
+            Role existing = roleService.findDefaultRoleWithCode(RoleCode.VIEW_ONLY).orElseThrow();
+            Map<String, Object> row = roleRow(existing.getId());
+            Perms perms = permsInDb(existing.getId());
+            try {
+                assertPostWithIdKeepsRow(tenant, existing.getId());
+            } finally {
+                restoreRole(existing.getId(), row, perms);
+            }
+        }
+
+        @Test
+        @DisplayName("INC-02 C12 (T-06): POST /roles with the id of a role of another company creates a new role and keeps the other one")
+        void otherCompanyRoleId_existingRowUnchanged() throws Exception {
+            Tenant tenant = newTenant("T06-other-A");
+            Tenant other = newTenant("T06-other-B");
+            Role existing = createCustomRole(other.company(), "T06 role B", new Perms(
+                    set(PermissionEntity.REQUESTS), set(), set(), set(), set()));
+
+            assertPostWithIdKeepsRow(tenant, existing.getId());
+        }
+
+        /**
+         * The administrator sends the UI creation payload plus the id of an existing role. The server must ignore the
+         * id: a new role of the requester's company is created and the existing row stays identical.
+         */
+        private void assertPostWithIdKeepsRow(Tenant tenant, Long existingId) throws Exception {
+            Map<String, Object> rowBefore = roleRow(existingId);
+            Perms permsBefore = permsInDb(existingId);
+            ObjectNode payload = uiCreatePayload(tenant.company(), "T06 new role", new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(), set(PermissionEntity.WORK_ORDERS), set(), set()));
+            payload.put("id", existingId);
+
+            HttpResult result = call(post("/roles").contentType(MediaType.APPLICATION_JSON).content(json(payload)),
+                    login(tenant.admin()));
+
+            long newId = result.is2xx() ? objectMapper.readTree(result.body()).get("id").asLong() : -1;
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "POST /roles: " + result),
+                    () -> assertNotEquals(existingId.longValue(), newId, "the server must generate a new id"),
+                    () -> assertEquals(rowBefore, roleRow(existingId), "existing role row must not change"),
+                    () -> assertEquals(permsBefore, permsInDb(existingId), "existing role permissions must not change"),
+                    () -> assertTrue(roleNamesOf(tenant.company()).contains("T06 new role"),
+                            "the new role must belong to the requester's company"));
+        }
+
+        private Map<String, Object> roleRow(Long roleId) {
+            return jdbcTemplate.queryForMap("SELECT name, description, external_id, code, role_type, paid, " +
+                    "company_settings_id FROM role WHERE id = ?", roleId);
+        }
+
+        /**
+         * Puts a shared default role back exactly as it was, in case the request managed to overwrite it.
+         */
+        private void restoreRole(Long roleId, Map<String, Object> row, Perms perms) {
+            jdbcTemplate.update("UPDATE role SET name = ?, description = ?, external_id = ?, code = ?, role_type = ?, " +
+                            "paid = ?, company_settings_id = ? WHERE id = ?", row.get("name"), row.get("description"),
+                    row.get("external_id"), row.get("code"), row.get("role_type"), row.get("paid"),
+                    row.get("company_settings_id"), roleId);
+            inTx(() -> {
+                Role role = roleRepository.findById(roleId).orElseThrow();
+                role.setViewPermissions(new HashSet<>(perms.view()));
+                role.setViewOtherPermissions(new HashSet<>(perms.viewOther()));
+                role.setCreatePermissions(new HashSet<>(perms.create()));
+                role.setEditOtherPermissions(new HashSet<>(perms.editOther()));
+                role.setDeleteOtherPermissions(new HashSet<>(perms.deleteOther()));
+                return roleRepository.save(role);
+            });
+        }
+    }
+
+    // =====================================================================================================
     // Deletion and default roles
     // =====================================================================================================
 

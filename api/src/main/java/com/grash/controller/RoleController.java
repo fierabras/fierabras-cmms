@@ -24,7 +24,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/roles")
@@ -66,12 +68,24 @@ public class RoleController {
         User user = userService.whoami(req);
         if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
                 && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.ROLE)) {
-            roleReq.setPaid(true);
-            roleReq.setCode(RoleCode.USER_CREATED);
-            roleReq.setRoleType(RoleType.ROLE_CLIENT);
-            roleReq.setCompanySettings(user.getCompany().getCompanySettings());
-            roleService.assertCanGrant(user.getRole(), roleReq);
-            return roleService.create(roleReq);
+            // INC-02 (T-06): always a new role. The client id is ignored, otherwise JPA would merge the request
+            // into an existing role (a default one or one of another company). Company and type come from the server.
+            Role role = Role.builder()
+                    .name(roleReq.getName())
+                    .description(roleReq.getDescription())
+                    .externalId(roleReq.getExternalId())
+                    .createPermissions(copyOf(roleReq.getCreatePermissions()))
+                    .viewPermissions(copyOf(roleReq.getViewPermissions()))
+                    .viewOtherPermissions(copyOf(roleReq.getViewOtherPermissions()))
+                    .editOtherPermissions(copyOf(roleReq.getEditOtherPermissions()))
+                    .deleteOtherPermissions(copyOf(roleReq.getDeleteOtherPermissions()))
+                    .paid(true)
+                    .code(RoleCode.USER_CREATED)
+                    .roleType(RoleType.ROLE_CLIENT)
+                    .companySettings(user.getCompany().getCompanySettings())
+                    .build();
+            roleService.assertCanGrant(user.getRole(), role);
+            return roleService.create(role);
         } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
     }
 
@@ -113,6 +127,10 @@ public class RoleController {
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
+    }
+
+    private static Set<PermissionEntity> copyOf(Set<PermissionEntity> permissions) {
+        return permissions == null ? new HashSet<>() : new HashSet<>(permissions);
     }
 
 }
