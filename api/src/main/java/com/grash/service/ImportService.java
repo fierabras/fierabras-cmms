@@ -1,7 +1,11 @@
 package com.grash.service;
 
 import com.grash.dto.imports.*;
+import com.grash.exception.CustomException;
 import com.grash.model.*;
+import com.grash.model.enums.PermissionEntity;
+import com.grash.model.enums.Status;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
@@ -20,6 +24,31 @@ public class ImportService {
     private final WorkOrderService workOrderService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
 
+    /**
+     * Work order import requested by a user. INC-02 (T-11), approved exception for historical data: a COMPLETE row
+     * keeps its closing user from the file, but it takes the permission to close work orders of others (edit-other on
+     * work orders), and updating an existing work order takes the same right as editing it. Nothing is imported if a
+     * row is rejected.
+     */
+    @Transactional
+    public ImportResponse importWorkOrders(List<WorkOrderImportDTO> toImport, Company company, User importer) {
+        boolean closesOthers = importer.getRole().getEditOtherPermissions().contains(PermissionEntity.WORK_ORDERS);
+        List<Long> ids = toImport.stream().map(WorkOrderImportDTO::getId).filter(Objects::nonNull).toList();
+        Collection<WorkOrder> existing = ids.isEmpty() ? List.of() : workOrderService.findByIdsAndCompany(ids,
+                company.getId());
+        for (WorkOrderImportDTO dto : toImport) {
+            if (Status.getStatusFromString(dto.getStatus()) == Status.COMPLETE && !closesOthers)
+                throw new CustomException("You are not allowed to import completed work orders",
+                        HttpStatus.FORBIDDEN);
+        }
+        if (existing.stream().anyMatch(workOrder -> !workOrder.canBeEditedBy(importer)))
+            throw new CustomException("You are not allowed to update some of these work orders", HttpStatus.FORBIDDEN);
+        return importWorkOrders(toImport, company);
+    }
+
+    /**
+     * Also used to load the demo data shipped with the server, which is trusted and has no requesting user.
+     */
     @Transactional
     public ImportResponse importWorkOrders(List<WorkOrderImportDTO> toImport, Company company) {
         List<Long> idsToCheck = toImport.stream()

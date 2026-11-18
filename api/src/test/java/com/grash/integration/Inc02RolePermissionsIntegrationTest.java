@@ -13,7 +13,10 @@ import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.model.enums.Status;
 import com.grash.repository.*;
+import com.grash.dto.imports.WorkOrderImportDTO;
+import com.grash.exception.CustomException;
 import com.grash.service.CompanyService;
+import com.grash.service.ImportService;
 import com.grash.service.RoleService;
 import com.grash.utils.Consts;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -90,6 +94,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private WorkOrderRepository workOrderRepository;
     @Autowired
     private SuperAccountRelationRepository superAccountRelationRepository;
+    @Autowired
+    private ImportService importService;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -759,6 +765,155 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertTrue(result.is4xx(), "DELETE /roles/{idB}: " + result),
                     () -> assertTrue(roleRepository.existsById(roleB.getId()), "role B must still exist"));
         }
+    }
+
+    // =====================================================================================================
+    // T-11: every path that leaves a work order COMPLETE follows the change-status rule (Codex A-09)
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 work order closing paths")
+    class WorkOrderClosingTests {
+
+        private final Perms creatorWithoutEditOther = new Perms(
+                set(PermissionEntity.WORK_ORDERS), set(), set(PermissionEntity.WORK_ORDERS), set(), set());
+        private final Perms creatorWithEditOther = new Perms(
+                set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS),
+                set(PermissionEntity.WORK_ORDERS), set());
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): POST /work-orders as COMPLETE gets closing data from the server, not from the client")
+        void createComplete_closingDataSetByServer() throws Exception {
+            Tenant tenant = newTenant("T11-post-complete");
+            User other = createUser(tenant.company(), createCustomRole(tenant.company(), "T11 other",
+                    creatorWithoutEditOther));
+            Date before = new Date();
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T11 complete").put("status", "COMPLETE")
+                    .put("completedOn", "2020-01-01T00:00:00.000+00:00");
+            body.putObject("completedBy").put("id", other.getId());
+
+            HttpResult result = call(post("/work-orders").contentType(MediaType.APPLICATION_JSON).content(json(body)),
+                    login(tenant.admin()));
+
+            assertTrue(result.is2xx(), "POST /work-orders: " + result);
+            long id = objectMapper.readTree(result.body()).get("id").asLong();
+            ClosingData closing = closingDataOf(id);
+            assertAll(
+                    () -> assertEquals(Status.COMPLETE, closing.status()),
+                    () -> assertEquals(tenant.admin().getId(), closing.completedById(), "completedBy must be the requester"),
+                    () -> assertNotNull(closing.completedOn(), "completedOn must be set by the server"),
+                    () -> assertFalse(closing.completedOn().before(new Date(before.getTime() - 60_000)),
+                            "completedOn must be the server time, not the client one: " + closing.completedOn()));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): POST /work-orders not COMPLETE ignores client closing data")
+        void createOpen_clientClosingDataIgnored() throws Exception {
+            Tenant tenant = newTenant("T11-post-open");
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T11 open")
+                    .put("completedOn", "2020-01-01T00:00:00.000+00:00");
+            body.putObject("completedBy").put("id", tenant.admin().getId());
+
+            HttpResult result = call(post("/work-orders").contentType(MediaType.APPLICATION_JSON).content(json(body)),
+                    login(tenant.admin()));
+
+            assertTrue(result.is2xx(), "POST /work-orders: " + result);
+            ClosingData closing = closingDataOf(objectMapper.readTree(result.body()).get("id").asLong());
+            assertAll(
+                    () -> assertEquals(Status.OPEN, closing.status()),
+                    () -> assertNull(closing.completedById(), "completedBy must stay empty"),
+                    () -> assertNull(closing.completedOn(), "completedOn must stay empty"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): the generic PATCH cannot write closing data")
+        void patch_closingDataIgnored() throws Exception {
+            Tenant tenant = newTenant("T11-patch");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T11 edited")
+                    .put("completedOn", "2020-01-01T00:00:00.000+00:00");
+            body.putObject("completedBy").put("id", tenant.admin().getId());
+
+            HttpResult result = call(patch("/work-orders/" + workOrder.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            ClosingData closing = closingDataOf(workOrder.getId());
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /work-orders/{id}: " + result),
+                    () -> assertNull(closing.completedById(), "completedBy must stay empty"),
+                    () -> assertNull(closing.completedOn(), "completedOn must stay empty"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): importing a COMPLETE work order without edit-other on work orders is rejected and imports nothing")
+        void importComplete_withoutEditOther_forbidden_nothingImported() {
+            Tenant tenant = newTenant("T11-import-403");
+            User importer = createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T11 importer", creatorWithoutEditOther));
+            WorkOrderImportDTO open = WorkOrderImportDTO.builder().title("T11 import open").status("Open").build();
+            WorkOrderImportDTO complete = WorkOrderImportDTO.builder().title("T11 import complete").status("Complete")
+                    .completedByEmail(tenant.admin().getEmail()).build();
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> importService.importWorkOrders(List.of(open, complete), tenant.company(), importer));
+
+            assertAll(
+                    () -> assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                            tenant.company().getId()), "no work order must be imported"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): importing a COMPLETE work order with edit-other keeps the historical closing user")
+        void importComplete_withEditOther_keepsHistoricalCompletedBy() {
+            Tenant tenant = newTenant("T11-import-ok");
+            User importer = createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T11 importer", creatorWithEditOther));
+            WorkOrderImportDTO complete = WorkOrderImportDTO.builder().title("T11 import complete").status("Complete")
+                    .completedByEmail(tenant.admin().getEmail()).build();
+
+            importService.importWorkOrders(List.of(complete), tenant.company(), importer);
+
+            Long id = jdbcTemplate.queryForObject("SELECT id FROM work_order WHERE company_id = ?", Long.class,
+                    tenant.company().getId());
+            ClosingData closing = closingDataOf(id);
+            assertAll(
+                    () -> assertEquals(Status.COMPLETE, closing.status()),
+                    () -> assertEquals(tenant.admin().getId(), closing.completedById(),
+                            "historical import keeps the closing user from the file"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-11): importing an update of a work order the importer cannot edit is rejected and the work order is unchanged")
+        void importUpdate_notEditableByImporter_forbidden_unchanged() {
+            Tenant tenant = newTenant("T11-import-update");
+            User importer = createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T11 importer", creatorWithoutEditOther));
+            WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
+            WorkOrderImportDTO update = WorkOrderImportDTO.builder().id(existing.getId()).title("T11 overwritten")
+                    .status("Open").build();
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> importService.importWorkOrders(List.of(update), tenant.company(), importer));
+
+            assertAll(
+                    () -> assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus()),
+                    () -> assertEquals(existing.getTitle(), jdbcTemplate.queryForObject(
+                            "SELECT title FROM work_order WHERE id = ?", String.class, existing.getId()),
+                            "work order must not change"));
+        }
+
+        private ClosingData closingDataOf(Long workOrderId) {
+            return inTx(() -> {
+                WorkOrder workOrder = workOrderRepository.findById(workOrderId).orElseThrow();
+                return new ClosingData(workOrder.getStatus(),
+                        workOrder.getCompletedBy() == null ? null : workOrder.getCompletedBy().getId(),
+                        workOrder.getCompletedOn());
+            });
+        }
+    }
+
+    private record ClosingData(Status status, Long completedById, Date completedOn) {
     }
 
     // =====================================================================================================

@@ -31,7 +31,7 @@ public class AsyncImportService {
                 return;
             }
 
-            ImportResponse response = importService.importWorkOrders(toImport, user.getCompany());
+            ImportResponse response = importService.importWorkOrders(toImport, user.getCompany(), user);
             messagingTemplate.convertAndSend("/imports/" + uuid, response);
             log.info("Import completed for work-orders, uuid: {}, created: {}, updated: {}", uuid,
                     response.getCreated(), response.getUpdated());

@@ -13,6 +13,9 @@ import org.mapstruct.*;
         , TeamMapper.class, UserMapper.class,
         CustomerMapper.class, AssetMapper.class, CustomFieldValueMapper.class})
 public interface WorkOrderMapper {
+    // INC-02 (T-11): closing data is set only by the server when the status changes (WorkOrderService.changeStatus).
+    @Mapping(target = "completedBy", ignore = true)
+    @Mapping(target = "completedOn", ignore = true)
     WorkOrder updateWorkOrder(@MappingTarget WorkOrder entity, WorkOrderPatchDTO dto);
 
     @Mappings({})

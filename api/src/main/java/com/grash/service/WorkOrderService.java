@@ -1041,6 +1041,10 @@ public class WorkOrderService {
                 && (workOrderReq.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))))
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+        // INC-02 (T-11): as in changeStatus, closing data comes from the server, never from the client.
+        boolean complete = Status.COMPLETE.equals(workOrderReq.getStatus());
+        workOrderReq.setCompletedBy(complete ? user : null);
+        workOrderReq.setCompletedOn(complete ? new Date() : null);
         if (user.getCompany().getCompanySettings().getGeneralPreferences().isAutoAssignWorkOrders()) {
             User primaryUser = workOrderReq.getPrimaryUser();
             workOrderReq.setPrimaryUser(primaryUser == null ? user : primaryUser);
