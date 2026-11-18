@@ -108,7 +108,7 @@ public class PreventiveMaintenanceController {
         User user = userService.whoami(req);
         checkAccessToPreventiveMaintenance(user, preventiveMaintenanceService.findByIdAndCompany(id,
                 user.getCompany().getId()).get());
-        return workOrderService.findLastByPM(id, 10).stream()
+        return workOrderService.findLastByPM(id, 10, user).stream()
                 .map(workOrderMapper::toMiniDto)
                 .collect(Collectors.toList());
     }

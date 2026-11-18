@@ -124,6 +124,10 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private RequestPortalRepository requestPortalRepository;
     @Autowired
     private RequestService requestService;
+    @Autowired
+    private PreventiveMaintenanceRepository preventiveMaintenanceRepository;
+    @Autowired
+    private RelationRepository relationRepository;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -1823,6 +1827,163 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(Set.of(fromRequest.getId()), visibleIds(login(requester), linked),
                     "only the work order of the own request");
+        }
+
+        // ----- R-05: the auxiliary reads of work orders follow the detail rule (WorkOrder.isAccessibleBy) -----
+
+        @Test
+        @DisplayName("INC-02 R-05: with view on work orders but not on others, the search also returns the work order of an own request")
+        void search_ownRequestWorkOrder_visible() throws Exception {
+            Tenant tenant = newTenant("R05-search");
+            Linked linked = linkedEntities(tenant.company());
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "R05 own", ownWorkOrdersOnly));
+            linkedWorkOrder(tenant.company(), tenant.admin(), linked, null);
+            WorkOrder own = linkedWorkOrder(tenant.company(), user, linked, null);
+            WorkOrder fromRequest = linkedWorkOrder(tenant.company(), tenant.admin(), linked,
+                    createRequest(tenant.company(), user, null));
+
+            assertEquals(Set.of(own.getId(), fromRequest.getId()), visibleIds(login(user), linked),
+                    "the own work order and the one of the own request");
+        }
+
+        @Test
+        @DisplayName("INC-02 R-05: the recent work orders of a preventive maintenance are only the visible ones, filtered before the limit")
+        void preventiveMaintenanceRecent_onlyVisible() throws Exception {
+            Tenant tenant = newTenant("R05-pm");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "R05 pm", new Perms(
+                    set(PermissionEntity.WORK_ORDERS, PermissionEntity.PREVENTIVE_MAINTENANCES),
+                    set(PermissionEntity.PREVENTIVE_MAINTENANCES), set(), set(), set())));
+            SecurityContextHolder.clearContext();
+            PreventiveMaintenance pm = new PreventiveMaintenance();
+            pm.setName("R05 pm");
+            pm.setTitle("R05 pm");
+            pm.setCompany(tenant.company());
+            PreventiveMaintenance savedPm = preventiveMaintenanceRepository.save(pm);
+            // The visible work order is the oldest: the endpoint returns the last ten.
+            WorkOrder own = pmWorkOrder(tenant.company(), user, savedPm);
+            for (int i = 0; i < 10; i++) pmWorkOrder(tenant.company(), tenant.admin(), savedPm);
+
+            HttpResult result = call(get("/preventive-maintenances/" + savedPm.getId() + "/recent-work-orders"),
+                    login(user));
+
+            assertEquals(Set.of(own.getId()), idsOfArray(result), "only the visible work order");
+        }
+
+        @Test
+        @DisplayName("INC-02 R-05: planning and exports of every work order need the view of every work order, as the detail")
+        void companyWideReads_viewOtherWithoutView_forbidden() throws Exception {
+            Tenant tenant = newTenant("R05-company");
+            createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(createUser(tenant.company(), createCustomRole(tenant.company(), "R05 view other",
+                    new Perms(set(), set(PermissionEntity.WORK_ORDERS), set(),
+                            set(PermissionEntity.PEOPLE_AND_TEAMS), set()))));
+            String uuid = UUID.randomUUID().toString();
+
+            HttpResult unscheduled = call(get("/workload/unscheduled"), token);
+            HttpResult overview = call(get("/workload/overview").param("startDate", "2026-11-01")
+                    .param("endDate", "2026-11-07"), token);
+            HttpResult export = call(get("/export/work-orders").param("uuid", uuid), token);
+            HttpResult costs = call(get("/export/costs-times").param("uuid", uuid), token);
+            HttpResult adminUnscheduled = call(get("/workload/unscheduled"), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertEquals(403, unscheduled.status(), "GET /workload/unscheduled: " + unscheduled),
+                    () -> assertEquals(403, overview.status(), "GET /workload/overview: " + overview),
+                    () -> assertEquals(403, export.status(), "GET /export/work-orders: " + export),
+                    () -> assertEquals(403, costs.status(), "GET /export/costs-times: " + costs),
+                    () -> assertTrue(adminUnscheduled.is2xx(), "administrator, GET /workload/unscheduled: "
+                            + adminUnscheduled));
+        }
+
+        @Test
+        @DisplayName("INC-02 R-05: the relations of a visible work order hide a related work order that is not visible")
+        void relations_hideNotVisibleWorkOrder() throws Exception {
+            Tenant tenant = newTenant("R05-relations");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "R05 own", ownWorkOrdersOnly));
+            WorkOrder own = createWorkOrder(tenant.company(), user, null);
+            WorkOrder ownOther = createWorkOrder(tenant.company(), user, null);
+            WorkOrder hidden = createWorkOrder(tenant.company(), tenant.admin(), null);
+            Relation visible = relation(tenant.company(), own, ownOther);
+            relation(tenant.company(), hidden, own);
+
+            HttpResult result = call(get("/relations/work-order/" + own.getId()), login(user));
+
+            assertEquals(Set.of(visible.getId()), idsOfArray(result), "only the relation between visible work orders");
+        }
+
+        @Test
+        @DisplayName("INC-02 R-05: the calendar shows the work order of an own request, as the detail")
+        void calendar_ownRequestWorkOrder_visible() throws Exception {
+            Tenant tenant = newTenant("R05-calendar");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "R05 own", ownWorkOrdersOnly));
+            Date due = new Date(System.currentTimeMillis() + 24 * 3600 * 1000L);
+            WorkOrder fromRequest = dueWorkOrder(createWorkOrder(tenant.company(), tenant.admin(), null), due,
+                    createRequest(tenant.company(), user, null));
+            dueWorkOrder(createWorkOrder(tenant.company(), tenant.admin(), null), due, null);
+            ObjectNode range = objectMapper.createObjectNode()
+                    .put("start", System.currentTimeMillis() - 24 * 3600 * 1000L)
+                    .put("end", System.currentTimeMillis() + 3 * 24 * 3600 * 1000L);
+
+            HttpResult result = call(post("/work-orders/events").contentType(MediaType.APPLICATION_JSON)
+                    .content(json(range)), login(user));
+
+            assertTrue(result.is2xx(), "POST /work-orders/events: " + result);
+            Set<Long> ids = new HashSet<>();
+            objectMapper.readTree(result.body()).forEach(event -> ids.add(event.path("event").path("id").asLong()));
+            assertEquals(Set.of(fromRequest.getId()), ids, "only the work order of the own request");
+        }
+
+        @Test
+        @DisplayName("INC-02 R-05: the PDF report follows the detail rule, including the work order of an own request")
+        void report_followsDetailRule() throws Exception {
+            Tenant tenant = newTenant("R05-report");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "R05 own", ownWorkOrdersOnly));
+            WorkOrder fromRequest = createWorkOrder(tenant.company(), tenant.admin(), null);
+            inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(fromRequest.getId()).orElseThrow();
+                saved.setParentRequest(createRequest(tenant.company(), user, null));
+                return workOrderRepository.save(saved);
+            });
+            WorkOrder hidden = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(user);
+
+            HttpResult allowed = call(post("/work-orders/report/" + fromRequest.getId())
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"), token);
+            HttpResult denied = call(post("/work-orders/report/" + hidden.getId())
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"), token);
+
+            assertAll(
+                    // Past the access check the report needs a storage service the test profile lacks.
+                    () -> assertNotEquals(403, allowed.status(), "report of the own request work order: " + allowed),
+                    () -> assertEquals(403, denied.status(), "report of a work order not visible: " + denied));
+        }
+
+        private WorkOrder pmWorkOrder(Company company, User createdBy, PreventiveMaintenance pm) {
+            SecurityContextHolder.clearContext();
+            WorkOrder workOrder = new WorkOrder();
+            workOrder.setTitle("R05 pm work order " + UUID.randomUUID());
+            workOrder.setCompany(company);
+            workOrder.setCreatedBy(createdBy.getId());
+            workOrder.setParentPreventiveMaintenance(pm);
+            return workOrderRepository.save(workOrder);
+        }
+
+        private Relation relation(Company company, WorkOrder parent, WorkOrder child) {
+            SecurityContextHolder.clearContext();
+            Relation relation = new Relation();
+            relation.setParent(parent);
+            relation.setChild(child);
+            relation.setCompany(company);
+            return relationRepository.save(relation);
+        }
+
+        private WorkOrder dueWorkOrder(WorkOrder workOrder, Date dueDate, Request parentRequest) {
+            return inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(workOrder.getId()).orElseThrow();
+                saved.setDueDate(dueDate);
+                saved.setParentRequest(parentRequest);
+                return workOrderRepository.save(saved);
+            });
         }
 
         /**

@@ -3,6 +3,7 @@ package com.grash.controller;
 import com.grash.dto.SuccessResponse;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
+import com.grash.model.WorkOrder;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.service.*;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -34,7 +35,8 @@ public class ExportController {
             "identifier for tracking the export job") @RequestParam String uuid) {
         User user = userService.whoami(req);
 
-        if (user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS)) {
+        // INC-02 (R-05): the export holds every work order of the company, so it takes the detail view of all of them
+        if (WorkOrder.canViewAll(user)) {
             asyncExportService.exportWorkOrders(user, uuid);
             return ResponseEntity.ok()
                     .body(new SuccessResponse(true, uuid));
@@ -127,7 +129,7 @@ public class ExportController {
                                                                @Parameter(description = "Unique identifier for " +
                                                                        "tracking the export job") @RequestParam String uuid) {
         User user = userService.whoami(req);
-        if (user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS)) {
+        if (WorkOrder.canViewAll(user)) {
             asyncExportService.exportCostsAndTimes(user, uuid);
             return ResponseEntity.ok()
                     .body(new SuccessResponse(true, uuid));

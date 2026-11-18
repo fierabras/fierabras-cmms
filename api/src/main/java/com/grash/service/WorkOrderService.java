@@ -356,6 +356,16 @@ public class WorkOrderService {
                 Sort.by(Sort.Direction.DESC, "createdAt")));
     }
 
+    /**
+     * INC-02 (R-05): the last work orders of a preventive maintenance the user can see (detail rule), filtered
+     * before the limit.
+     */
+    public List<WorkOrder> findLastByPM(Long id, int count, User user) {
+        if (WorkOrder.canViewAll(user)) return findLastByPM(id, count).getContent();
+        return workOrderRepository.findByParentPreventiveMaintenance_Id(id, Sort.by(Sort.Direction.DESC, "createdAt"))
+                .stream().filter(workOrder -> workOrder.isAccessibleBy(user)).limit(count).toList();
+    }
+
     public Collection<WorkOrder> findByLocation(Long id) {
         return workOrderRepository.findByLocation_Id(id);
     }
@@ -603,7 +613,13 @@ public class WorkOrderService {
                                             .field("team")
                                             .operation("in")
                                             .value("")
-                                            .values(teamService.findByUser(user.getId()).stream().map(Team::getId).collect(Collectors.toList())).build()
+                                            .values(teamService.findByUser(user.getId()).stream().map(Team::getId).collect(Collectors.toList())).build(),
+                                    // INC-02 (R-05): as in the detail, the work orders of an own request
+                                    FilterField.builder()
+                                            .field("id")
+                                            .operation("in")
+                                            .value("")
+                                            .values(new ArrayList<>(workOrderRepository.findIdsByParentRequestCreatedBy(user.getId()))).build()
                             )).build());
                 } else if (searchCriteria.getFilterFields().stream().anyMatch(filterField -> filterField.getField().equals("assignedToUser"))) {
                     searchCriteria.getFilterFields().add(
@@ -1073,8 +1089,7 @@ public class WorkOrderService {
         Optional<WorkOrder> optionalWorkOrder = findById(id);
         if (optionalWorkOrder.isPresent()) {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
-            if (user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) &&
-                    (user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) || user.getId().equals(savedWorkOrder.getCreatedBy()) || savedWorkOrder.isAssignedTo(user))) {
+            if (savedWorkOrder.isAccessibleBy(user)) {
                 byte[] bytes = generatePdfBytes(savedWorkOrder, user, config);
                 MultipartFile file = new MultipartFileImpl(bytes, "Work Order Report.pdf");
                 return storageServiceFactory.getStorageService().uploadAndSign(file,
@@ -1166,10 +1181,7 @@ public class WorkOrderService {
         }
         WorkOrder savedWorkOrder = optionalWorkOrder.get();
 
-        if (!user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) ||
-                (!user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) &&
-                        !user.getId().equals(savedWorkOrder.getCreatedBy()) &&
-                        !savedWorkOrder.isAssignedTo(user))) {
+        if (!savedWorkOrder.isAccessibleBy(user)) {
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
         }
 
@@ -1242,14 +1254,14 @@ public class WorkOrderService {
                 for (Long compId : companyIds) {
                     result.addAll(preventiveMaintenanceService.getEvents(dateRange.getEnd(), compId).stream()
                             .filter(calendarEvent -> calendarEvent.getDate().after(new Date()))
-                            .filter(calendarEvent -> canViewWorkOrderBase(user, calendarEvent.getEvent()))
+                            .filter(calendarEvent -> canViewPreventiveMaintenance(user, calendarEvent.getEvent()))
                             .map(calendarEvent -> new CalendarEvent<>(calendarEvent.getType(),
                                     preventiveMaintenanceMapper.toBaseMiniDto(calendarEvent.getEvent()),
                                     calendarEvent.getDate()))
                             .toList());
                     result.addAll(findByDueDateBetweenAndCompany(dateRange.getStart(),
                             dateRange.getEnd(),
-                            compId).stream().filter(workOrder -> canViewWorkOrderBase(user, workOrder)).map(workOrderMapper::toBaseMiniDto).map(workOrderMiniDTO -> new CalendarEvent<>("WORK_ORDER",
+                            compId).stream().filter(workOrder -> workOrder.isAccessibleBy(user)).map(workOrderMapper::toBaseMiniDto).map(workOrderMiniDTO -> new CalendarEvent<>("WORK_ORDER",
                             workOrderMiniDTO, workOrderMiniDTO.getDueDate())).toList());
                 }
                 return result;
@@ -1257,11 +1269,13 @@ public class WorkOrderService {
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
 
-    private boolean canViewWorkOrderBase(User user, WorkOrderBase workOrderBase) {
-        boolean canViewOthers =
-                user.getRole().getViewOtherPermissions().contains(workOrderBase instanceof PreventiveMaintenance ?
-                        PermissionEntity.PREVENTIVE_MAINTENANCES : PermissionEntity.WORK_ORDERS);
-        return canViewOthers || (workOrderBase.getCreatedBy() != null && workOrderBase.getCreatedBy().equals(user.getId())) || workOrderBase.isAssignedTo(user);
+    /**
+     * Calendar events of preventive maintenances. Work orders follow the detail rule (INC-02, R-05).
+     */
+    private boolean canViewPreventiveMaintenance(User user, WorkOrderBase preventiveMaintenance) {
+        boolean canViewOthers = user.getRole().getViewOtherPermissions()
+                .contains(PermissionEntity.PREVENTIVE_MAINTENANCES);
+        return canViewOthers || (preventiveMaintenance.getCreatedBy() != null && preventiveMaintenance.getCreatedBy().equals(user.getId())) || preventiveMaintenance.isAssignedTo(user);
 
     }
 
