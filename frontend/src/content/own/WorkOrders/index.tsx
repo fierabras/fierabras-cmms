@@ -504,7 +504,7 @@ function WorkOrders() {
   const columns: CustomDatagridColumn2<WorkOrder>[] = [
     columnHelper.accessor('customId', {
       id: 'customId',
-      header: () => t('id'),
+      header: () => t('folio'),
       cell: (info) => info.getValue() || '',
       size: 80
     }),

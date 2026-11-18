@@ -487,7 +487,7 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
     id?: number;
   }[] => [
     {
-      label: t('id'),
+      label: t('folio'),
       value: workOrder.customId
     },
     {

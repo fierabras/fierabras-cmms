@@ -249,6 +249,7 @@ const esJSON = {
   details: 'Detalles',
   updates: 'Actualizaciones',
   id: 'ID',
+  folio: 'Folio',
   due_date: 'Fecha de vencimiento',
   location: 'Localización',
   asset: 'Activo',
