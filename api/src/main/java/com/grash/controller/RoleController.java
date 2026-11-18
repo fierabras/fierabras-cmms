@@ -105,7 +105,7 @@ public class RoleController {
             if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
-            roleService.assertCanGrant(user.getRole(), role);
+            roleService.assertCanManage(user.getRole(), savedRole, role);
             return roleService.update(id, role);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
     }

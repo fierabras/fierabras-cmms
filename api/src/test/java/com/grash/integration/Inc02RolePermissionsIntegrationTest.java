@@ -470,6 +470,26 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(adminRoleId, roleIdOfUser(tenant.admin().getId()), "own role must not change"));
         }
 
+        @Test
+        @DisplayName("INC-02 C10 (D-6): a manager downgrading a role superior to their own gets 403 and the role is unchanged")
+        void lesserManagerDowngradesSuperiorRole_forbidden_roleUnchanged() throws Exception {
+            Tenant tenant = newTenant("D6-downgrade");
+            Perms roleManager = new Perms(set(PermissionEntity.SETTINGS, PermissionEntity.WORK_ORDERS), set(), set(),
+                    set(), set());
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "D6 manager", roleManager));
+            Perms superiorPerms = new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(),
+                    set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS));
+            Role superior = createCustomRole(tenant.company(), "D6 superior", superiorPerms);
+            // Every set sent is within the manager's role: only the current role is superior.
+            Perms downgraded = new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set());
+
+            HttpResult result = patchRoleLikeUi(login(manager), tenant.company(), superior.getId(), downgraded);
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /roles/{superiorId}: " + result),
+                    () -> assertEquals(superiorPerms, permsInDb(superior.getId()), "superior role must not change"));
+        }
+
         // ----- T-04: role assignment and invitation only with roles the requester could grant -----
 
         private final Perms peopleManager = new Perms(

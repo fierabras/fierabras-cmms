@@ -219,6 +219,42 @@ class RoleServiceTest {
         }
 
         @Test
+        void manage_currentRoleSuperiorToManager_throwsForbiddenEvenWhenDowngrading() {
+            Role superior = requested(Set.of(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS), Set.of(), Set.of(),
+                    Set.of(), Set.of());
+            RolePatchDTO downgrade = new RolePatchDTO();
+            downgrade.setCreatePermissions(List.of(PermissionEntity.WORK_ORDERS));
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> roleService.assertCanManage(grantor, superior, downgrade));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void manage_resultingRoleSuperiorToManager_throwsForbidden() {
+            Role current = requested(Set.of(PermissionEntity.WORK_ORDERS), null, null, null, null);
+            RolePatchDTO escalation = new RolePatchDTO();
+            escalation.setDeleteOtherPermissions(List.of(PermissionEntity.ASSETS));
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> roleService.assertCanManage(grantor, current, escalation));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void manage_currentAndResultingWithinManager_passes() {
+            Role current = requested(Set.of(PermissionEntity.WORK_ORDERS), Set.of(PermissionEntity.SETTINGS),
+                    Set.of(), Set.of(PermissionEntity.REQUESTS), Set.of());
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setViewPermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setEditOtherPermissions(List.of());
+
+            assertDoesNotThrow(() -> roleService.assertCanManage(grantor, current, patch));
+        }
+
+        @Test
         void patchWithinHeldPermissions_passes() {
             RolePatchDTO patch = new RolePatchDTO();
             patch.setCreatePermissions(List.of(PermissionEntity.WORK_ORDERS));

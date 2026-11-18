@@ -336,7 +336,7 @@ class RoleControllerTest extends AbstractControllerTest {
             when(userService.whoami(any())).thenReturn(clientUser);
             when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
             doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
-                    .when(roleService).assertCanGrant(eq(clientUser.getRole()), any(RolePatchDTO.class));
+                    .when(roleService).assertCanManage(eq(clientUser.getRole()), eq(companyRole), any(RolePatchDTO.class));
 
             mockMvc.perform(patch("/roles/4")
                             .contentType(MediaType.APPLICATION_JSON)

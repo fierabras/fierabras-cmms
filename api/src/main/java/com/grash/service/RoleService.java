@@ -60,6 +60,16 @@ public class RoleService {
                 requested.getDeleteOtherPermissions());
     }
 
+    /**
+     * Nobody manages a role superior to their own (INC-02, D-6): both the current permissions of the role and the
+     * resulting ones must be within the manager's role, set by set. A null set in the patch keeps the current one, so
+     * the resulting permissions are covered by checking the current role and every set sent.
+     */
+    public void assertCanManage(Role manager, Role current, RolePatchDTO patch) {
+        assertCanGrant(manager, current);
+        assertCanGrant(manager, patch);
+    }
+
     private void assertCanGrant(Role grantor, Collection<PermissionEntity> create, Collection<PermissionEntity> view,
                                 Collection<PermissionEntity> viewOther, Collection<PermissionEntity> editOther,
                                 Collection<PermissionEntity> deleteOther) {
