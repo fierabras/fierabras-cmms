@@ -112,10 +112,10 @@ function PermissionsMatrix({
                       name={isEditable ? `${root}_${entity}` : undefined}
                       onChange={isEditable ? handleChange : undefined}
                       checked={isChecked(root, entity)}
+                      // Read only (role details) or not held by the grantor (INC-02, D-6, R-11)
                       disabled={
-                        isEditable &&
-                        !!grantor &&
-                        !holdsPermission(grantor, root, entity)
+                        !isEditable ||
+                        (!!grantor && !holdsPermission(grantor, root, entity))
                       }
                     />
                   </TableCell>
