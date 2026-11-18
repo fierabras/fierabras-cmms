@@ -718,6 +718,40 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(superiorPerms, permsInDb(superior.getId()), "superior role must not change"));
         }
 
+        @Test
+        @DisplayName("INC-02 C10 (D-11): a manager deleting a role superior to their own gets 403 and the role still exists")
+        void lesserManagerDeletesSuperiorRole_forbidden_roleKept() throws Exception {
+            Tenant tenant = newTenant("D11-delete");
+            Perms roleManager = new Perms(set(PermissionEntity.SETTINGS, PermissionEntity.WORK_ORDERS), set(), set(),
+                    set(), set());
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "D11 manager", roleManager));
+            Role superior = createCustomRole(tenant.company(), "D11 superior", new Perms(set(PermissionEntity.WORK_ORDERS),
+                    set(), set(), set(PermissionEntity.WORK_ORDERS), set()));
+
+            HttpResult result = call(delete("/roles/" + superior.getId()), login(manager));
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "DELETE /roles/{superiorId}: " + result),
+                    () -> assertTrue(roleRepository.existsById(superior.getId()), "superior role must still exist"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C9 (D-11): a manager deletes an unused role within their own permissions (2xx)")
+        void managerDeletesRoleWithinOwnPermissions_succeeds() throws Exception {
+            Tenant tenant = newTenant("D11-delete-ok");
+            Perms roleManager = new Perms(set(PermissionEntity.SETTINGS, PermissionEntity.WORK_ORDERS), set(), set(),
+                    set(), set());
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "D11 manager", roleManager));
+            Role lesser = createCustomRole(tenant.company(), "D11 lesser", new Perms(set(PermissionEntity.WORK_ORDERS),
+                    set(), set(), set(), set()));
+
+            HttpResult result = call(delete("/roles/" + lesser.getId()), login(manager));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "DELETE /roles/{lesserId}: " + result),
+                    () -> assertFalse(roleRepository.existsById(lesser.getId()), "role must be gone"));
+        }
+
         // ----- T-04: role assignment and invitation only with roles the requester could grant -----
 
         private final Perms peopleManager = new Perms(

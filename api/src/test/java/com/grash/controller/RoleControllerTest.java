@@ -344,6 +344,20 @@ class RoleControllerTest extends AbstractControllerTest {
         }
 
         @Test
+        void delete_roleSuperiorToRequester_returns403AndDoesNotDelete() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(clientUser.getRole(), companyRole);
+
+            mockMvc.perform(delete("/roles/4"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).delete(anyLong());
+        }
+
+        @Test
         void create_permissionsNotHeldByRequester_returns403AndDoesNotCreate() throws Exception {
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);

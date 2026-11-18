@@ -125,6 +125,8 @@ public class RoleController {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
             assertNotDefaultRole(savedRole);
+            // INC-02 (D-11): nobody deletes a role superior to their own.
+            roleService.assertCanGrant(user.getRole(), savedRole);
             roleService.delete(id);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
