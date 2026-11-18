@@ -70,6 +70,7 @@ public class RoleController {
             roleReq.setCode(RoleCode.USER_CREATED);
             roleReq.setRoleType(RoleType.ROLE_CLIENT);
             roleReq.setCompanySettings(user.getCompany().getCompanySettings());
+            roleService.assertCanGrant(user.getRole(), roleReq);
             return roleService.create(roleReq);
         } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
     }
@@ -90,6 +91,7 @@ public class RoleController {
             if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
+            roleService.assertCanGrant(user.getRole(), role);
             return roleService.update(id, role);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
     }

@@ -143,6 +143,93 @@ class RoleServiceTest {
     }
 
     @Nested
+    class AssertCanGrant {
+
+        private Role grantor;
+
+        @BeforeEach
+        void init() {
+            grantor = Role.builder()
+                    .createPermissions(new HashSet<>(Set.of(PermissionEntity.WORK_ORDERS)))
+                    .viewPermissions(new HashSet<>(Set.of(PermissionEntity.WORK_ORDERS, PermissionEntity.SETTINGS)))
+                    .viewOtherPermissions(new HashSet<>(Set.of(PermissionEntity.ASSETS)))
+                    .editOtherPermissions(new HashSet<>(Set.of(PermissionEntity.REQUESTS)))
+                    .deleteOtherPermissions(new HashSet<>(Set.of(PermissionEntity.LOCATIONS)))
+                    .build();
+        }
+
+        private Role requested(Set<PermissionEntity> create, Set<PermissionEntity> view,
+                               Set<PermissionEntity> viewOther, Set<PermissionEntity> editOther,
+                               Set<PermissionEntity> deleteOther) {
+            return Role.builder().createPermissions(create).viewPermissions(view).viewOtherPermissions(viewOther)
+                    .editOtherPermissions(editOther).deleteOtherPermissions(deleteOther).build();
+        }
+
+        @Test
+        void subsetOfEverySet_passes() {
+            Role role = requested(Set.of(PermissionEntity.WORK_ORDERS), Set.of(PermissionEntity.SETTINGS),
+                    Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(PermissionEntity.LOCATIONS));
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, role));
+        }
+
+        @Test
+        void permissionHeldOnlyInAnotherSet_throwsForbidden() {
+            // The grantor views ASSETS of others but cannot create them: sets are compared one by one.
+            List<Role> escalations = List.of(
+                    requested(Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(PermissionEntity.WORK_ORDERS), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(), Set.of(PermissionEntity.ASSETS), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(), Set.of(), Set.of(PermissionEntity.REQUESTS)));
+
+            for (Role escalation : escalations) {
+                CustomException ex = assertThrows(CustomException.class,
+                        () -> roleService.assertCanGrant(grantor, escalation), escalation.toString());
+                assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            }
+        }
+
+        @Test
+        void nullRequestedSets_grantNothing() {
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, requested(null, null, null, null, null)));
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, new RolePatchDTO()));
+        }
+
+        @Test
+        void nullHeldSets_holdNothing() {
+            Role emptyGrantor = Role.builder().build();
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(emptyGrantor, requested(Set.of(), null, Set.of(),
+                    null, Set.of())));
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.assertCanGrant(emptyGrantor,
+                    requested(null, Set.of(PermissionEntity.WORK_ORDERS), null, null, null)));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void patchWithUnheldPermission_throwsForbidden() {
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setViewPermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setEditOtherPermissions(List.of(PermissionEntity.WORK_ORDERS));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.assertCanGrant(grantor, patch));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void patchWithinHeldPermissions_passes() {
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setCreatePermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setViewPermissions(List.of());
+            patch.setEditOtherPermissions(List.of(PermissionEntity.REQUESTS));
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, patch));
+        }
+    }
+
+    @Nested
     class GetAll {
 
         @Test

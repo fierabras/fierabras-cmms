@@ -1,6 +1,7 @@
 package com.grash.controller;
 
 import com.grash.dto.RolePatchDTO;
+import com.grash.exception.CustomException;
 import com.grash.model.Company;
 import com.grash.model.Role;
 import com.grash.model.Subscription;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -37,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -306,6 +309,37 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(patch("/roles/4")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"name\":\"Updated\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
+        }
+
+        @Test
+        void create_permissionsNotHeldByRequester_returns403AndDoesNotCreate() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(eq(clientUser.getRole()), any(Role.class));
+
+            mockMvc.perform(post("/roles")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"New Role\",\"roleType\":\"ROLE_CLIENT\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).create(any(Role.class));
+        }
+
+        @Test
+        void patch_permissionsNotHeldByRequester_returns403AndDoesNotUpdate() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(eq(clientUser.getRole()), any(RolePatchDTO.class));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"viewPermissions\":[\"SETTINGS\"]}"))
                     .andExpect(status().isForbidden());
 
             verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));

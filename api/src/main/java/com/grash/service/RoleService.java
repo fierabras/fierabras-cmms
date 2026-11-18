@@ -7,6 +7,7 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.RoleMapper;
 import com.grash.model.Company;
 import com.grash.model.Role;
+import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.RoleRepository;
@@ -41,6 +42,37 @@ public class RoleService {
             Role savedRole = roleRepository.findById(id).get();
             return roleRepository.save(roleMapper.updateRole(savedRole, role));
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Nobody grants permissions they do not hold (INC-02, C10): each of the five requested sets must be a subset of
+     * the same set of the grantor's role. A null requested set grants nothing; a null held set holds nothing.
+     */
+    public void assertCanGrant(Role grantor, Role requested) {
+        assertCanGrant(grantor, requested.getCreatePermissions(), requested.getViewPermissions(),
+                requested.getViewOtherPermissions(), requested.getEditOtherPermissions(),
+                requested.getDeleteOtherPermissions());
+    }
+
+    public void assertCanGrant(Role grantor, RolePatchDTO requested) {
+        assertCanGrant(grantor, requested.getCreatePermissions(), requested.getViewPermissions(),
+                requested.getViewOtherPermissions(), requested.getEditOtherPermissions(),
+                requested.getDeleteOtherPermissions());
+    }
+
+    private void assertCanGrant(Role grantor, Collection<PermissionEntity> create, Collection<PermissionEntity> view,
+                                Collection<PermissionEntity> viewOther, Collection<PermissionEntity> editOther,
+                                Collection<PermissionEntity> deleteOther) {
+        if (!holds(grantor.getCreatePermissions(), create)
+                || !holds(grantor.getViewPermissions(), view)
+                || !holds(grantor.getViewOtherPermissions(), viewOther)
+                || !holds(grantor.getEditOtherPermissions(), editOther)
+                || !holds(grantor.getDeleteOtherPermissions(), deleteOther))
+            throw new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN);
+    }
+
+    private static boolean holds(Collection<PermissionEntity> held, Collection<PermissionEntity> requested) {
+        return requested == null || requested.isEmpty() || (held != null && held.containsAll(requested));
     }
 
     public Collection<Role> getAll() {

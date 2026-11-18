@@ -429,6 +429,30 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(original, permsInDb(target.getId()), "role permissions must not change"));
         }
 
+        @Test
+        @DisplayName("INC-02 C10 (T-03): creating and editing a role within the requester's permissions succeeds")
+        void createAndEditRoleWithinHeldPermissions_succeeds() throws Exception {
+            Tenant tenant = newTenant("C10-within");
+            Perms roleManager = new Perms(set(PermissionEntity.SETTINGS, PermissionEntity.WORK_ORDERS), set(),
+                    set(PermissionEntity.WORK_ORDERS), set(), set());
+            String token = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "C10 manager", roleManager)));
+            Perms granted = new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(PermissionEntity.WORK_ORDERS),
+                    set(), set());
+
+            HttpResult created = call(post("/roles").contentType(MediaType.APPLICATION_JSON)
+                    .content(json(uiCreatePayload(tenant.company(), "C10 granted role", granted))), token);
+            assertTrue(created.is2xx(), "POST /roles: " + created);
+            long roleId = objectMapper.readTree(created.body()).get("id").asLong();
+            Perms reduced = new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set());
+
+            HttpResult patched = patchRoleLikeUi(token, tenant.company(), roleId, reduced);
+
+            assertAll(
+                    () -> assertTrue(patched.is2xx(), "PATCH /roles/{id}: " + patched),
+                    () -> assertEquals(reduced, permsInDb(roleId), "role permissions after the edit"));
+        }
+
         // ----- C11: no one changes their own role -----
 
         @Test
