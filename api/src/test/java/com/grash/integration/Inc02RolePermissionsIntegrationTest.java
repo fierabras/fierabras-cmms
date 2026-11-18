@@ -1025,6 +1025,25 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        @DisplayName("INC-02 C6 (T-14): importing a COMPLETE work order keeps the closing date of the file")
+        void importComplete_keepsCompletedOnFromFile() {
+            Tenant tenant = newTenant("T14-import-date");
+            User importer = createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T14 importer", creatorWithEditOther));
+            double excelDate = 45000.5; // 15/03/2023 12:00 UTC, as an Excel serial date
+            WorkOrderImportDTO complete = WorkOrderImportDTO.builder().title("T14 import complete").status("Complete")
+                    .completedByEmail(tenant.admin().getEmail()).completedOn(excelDate).build();
+
+            importService.importWorkOrders(List.of(complete), tenant.company(), importer);
+
+            Long id = jdbcTemplate.queryForObject("SELECT id FROM work_order WHERE company_id = ?", Long.class,
+                    tenant.company().getId());
+            Date expected = new Date(Math.round((excelDate - 25569) * 24 * 60 * 60 * 1000));
+            assertEquals(expected.getTime(), closingDataOf(id).completedOn().getTime(),
+                    "completedOn must be the date of the file");
+        }
+
+        @Test
         @DisplayName("INC-02 C6 (T-11): importing an update of a work order the importer cannot edit is rejected and the work order is unchanged")
         void importUpdate_notEditableByImporter_forbidden_unchanged() {
             Tenant tenant = newTenant("T11-import-update");
