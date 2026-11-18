@@ -1176,6 +1176,30 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertFalse(isEnabled(target), "user must be deleted"));
         }
 
+        @Test
+        @DisplayName("INC-02 R-08: PATCH /user-settings/{id} cannot change the settings of another user through the body id")
+        void patchUserSettings_otherIdInBody_otherUserUnchanged() throws Exception {
+            Scenario s = scenario("R08-settings");
+            User other = createUser(s.tenant().company(), s.lesserRole());
+            Long ownId = inTx(() -> userRepository.findById(s.manager().getId()).orElseThrow().getUserSettings().getId());
+            Long otherId = inTx(() -> userRepository.findById(other.getId()).orElseThrow().getUserSettings().getId());
+            ObjectNode body = objectMapper.createObjectNode().put("id", otherId).put("emailNotified", false);
+
+            HttpResult result = call(patch("/user-settings/" + ownId).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(s.manager()));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /user-settings/{ownId}: " + result),
+                    () -> assertTrue(emailNotified(otherId), "the settings of the other user must not change"),
+                    () -> assertFalse(emailNotified(ownId), "the own settings change"));
+        }
+
+        private boolean emailNotified(Long userSettingsId) {
+            Boolean result = jdbcTemplate.queryForObject("SELECT email_notified FROM user_settings WHERE id = ?",
+                    Boolean.class, userSettingsId);
+            return Boolean.TRUE.equals(result);
+        }
+
         private HttpResult changePassword(String token, User target) throws Exception {
             // Same body the web UI sends (People.tsx): the whole user plus the new password.
             ObjectNode body = objectMapper.createObjectNode().put("firstName", target.getFirstName())

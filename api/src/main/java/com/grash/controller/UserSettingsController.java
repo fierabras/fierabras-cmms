@@ -55,6 +55,8 @@ public class UserSettingsController {
         if (optionalUserSettings.isPresent()) {
             UserSettings savedUserSettings = optionalUserSettings.get();
             if (savedUserSettings.getId().equals(user.getUserSettings().getId())) {
+                // INC-02 (R-08): the settings saved are the ones checked, whatever id the body carries
+                userSettings.setId(id);
                 return userSettingsService.update(userSettings);
             } else {
                 throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
