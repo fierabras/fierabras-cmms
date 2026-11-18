@@ -19,6 +19,10 @@ public interface RequestRepository extends JpaRepository<Request, Long>, JpaSpec
             ".id=:companyId")
     Integer countPending(@Param("companyId") Long companyId);
 
+    @Query("SELECT COUNT(r) FROM Request r WHERE r.workOrder IS NULL AND r.cancelled = false and r.company" +
+            ".id=:companyId and r.createdBy=:userId")
+    Integer countPendingByCreatedBy(@Param("companyId") Long companyId, @Param("userId") Long userId);
+
     List<Request> findByCategory_IdAndCreatedAtBetween(Long id, Date start, Date end);
 
     void deleteByCompany_IdAndIsDemoTrue(Long companyId);

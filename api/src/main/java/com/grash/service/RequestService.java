@@ -12,6 +12,7 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.RequestMapper;
 import com.grash.model.*;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.Priority;
 import com.grash.model.enums.webhook.WebhookEvent;
@@ -242,8 +243,15 @@ public class RequestService {
         }
     }
 
-    public Integer countPending(Long companyId) {
-        return requestRepository.countPending(companyId);
+    /**
+     * INC-02 (R-06): the pending requests the user can open, with the rule of the request detail: every one with
+     * view on other requests, otherwise only their own.
+     */
+    public Integer countPending(User user) {
+        Long companyId = user.getCompany().getId();
+        return user.getRole().getViewOtherPermissions().contains(PermissionEntity.REQUESTS)
+                ? requestRepository.countPending(companyId)
+                : requestRepository.countPendingByCreatedBy(companyId, user.getId());
     }
 
     public List<Request> findByCategoryAndCreatedAtBetween(Long id, Date start, Date end) {

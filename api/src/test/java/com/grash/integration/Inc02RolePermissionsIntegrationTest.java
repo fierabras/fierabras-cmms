@@ -1182,6 +1182,26 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             }
         }
 
+        @Test
+        @DisplayName("INC-02 R-06: the pending request counter follows the detail view of requests")
+        void pendingCount_followsDetailView() throws Exception {
+            Tenant tenant = newTenant("R06-pending");
+            User creator = createUser(tenant.company(), createCustomRole(tenant.company(), "R06 creator",
+                    requestCreator));
+            createRequest(tenant.company(), tenant.admin(), null);
+            createRequest(tenant.company(), tenant.admin(), null);
+            createRequest(tenant.company(), creator, null);
+
+            HttpResult own = call(get("/requests/pending"), login(creator));
+            HttpResult all = call(get("/requests/pending"), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertEquals("1", objectMapper.readTree(own.body()).path("message").asText(),
+                            "without view on other requests, only the own pending request: " + own),
+                    () -> assertEquals("3", objectMapper.readTree(all.body()).path("message").asText(),
+                            "with view on other requests, every pending request: " + all));
+        }
+
         private ObjectNode forgedRequest(Tenant tenant, Request existing, String title) {
             WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
             ObjectNode body = objectMapper.createObjectNode()

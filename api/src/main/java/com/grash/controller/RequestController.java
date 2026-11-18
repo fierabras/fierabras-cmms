@@ -126,7 +126,7 @@ public class RequestController {
     public SuccessResponse getPending(HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT) && user.getRole().getViewPermissions().contains(PermissionEntity.REQUESTS)) {
-            return new SuccessResponse(true, requestService.countPending(user.getCompany().getId()).toString());
+            return new SuccessResponse(true, requestService.countPending(user).toString());
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
 
