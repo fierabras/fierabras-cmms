@@ -41,7 +41,7 @@ public class SubscriptionService {
     private final Scheduler scheduler;
     private final ScheduleRepository scheduleRepository;
 
-    @Value("${cloud.version}")
+    @Value("${cloud-version}")
     private boolean cloudVersion;
 
     public void upgrade(Collection<Long> usersIds, User user) {

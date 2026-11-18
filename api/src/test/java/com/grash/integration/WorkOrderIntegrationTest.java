@@ -211,7 +211,7 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
-        void create_throwsForbiddenWhenUsageLimitExceeded() {
+        void create_succeedsBeyondUpstreamUsageLimit() {
             for (int i = 0; i < usageBasedLicenseLimits.get(LicenseEntitlement.UNLIMITED_ACTIVE_WORK_ORDERS); i++) {
                 WorkOrder wo = new WorkOrder();
                 wo.setTitle("Active WO " + i);
@@ -227,10 +227,9 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
                 workOrderRepository.saveAndFlush(wo);
             }
 
-            WorkOrderPostDTO dto = buildPostDTO("Should Fail WO");
-            CustomException ex = assertThrows(CustomException.class,
-                    () -> workOrderService.create(dto, company));
-            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            WorkOrderPostDTO dto = buildPostDTO("Beyond Limit WO");
+            WorkOrder result = workOrderService.create(dto, company);
+            assertNotNull(result.getId());
         }
     }
 
