@@ -96,6 +96,14 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private SuperAccountRelationRepository superAccountRelationRepository;
     @Autowired
     private ImportService importService;
+    @Autowired
+    private LocationRepository locationRepository;
+    @Autowired
+    private AssetRepository assetRepository;
+    @Autowired
+    private PartRepository partRepository;
+    @Autowired
+    private PartQuantityRepository partQuantityRepository;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -914,6 +922,122 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     private record ClosingData(Status status, Long completedById, Date completedOn) {
+    }
+
+    // =====================================================================================================
+    // T-12: work order collections apply the view rule of the work order detail (Codex A-10)
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 work order reads")
+    class WorkOrderReadTests {
+
+        private final Perms withoutWorkOrderView = new Perms(
+                set(PermissionEntity.ASSETS, PermissionEntity.LOCATIONS, PermissionEntity.PARTS_AND_MULTIPARTS,
+                        PermissionEntity.REQUESTS), set(), set(PermissionEntity.REQUESTS), set(), set());
+        private final Perms ownWorkOrdersOnly = new Perms(
+                set(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS, PermissionEntity.LOCATIONS,
+                        PermissionEntity.PARTS_AND_MULTIPARTS), set(), set(), set(), set());
+
+        private record Linked(Location location, Asset asset, Part part) {
+        }
+
+        @Test
+        @DisplayName("INC-02 C4 (T-12): without view on work orders, search and the asset, location and part reads return none")
+        void withoutWorkOrderView_collectionsReturnNone() throws Exception {
+            Tenant tenant = newTenant("T12-none");
+            Linked linked = linkedEntities(tenant.company());
+            linkedWorkOrder(tenant.company(), tenant.admin(), linked, null);
+            String token = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T12 no view", withoutWorkOrderView)));
+
+            assertEquals(Set.of(), visibleIds(token, linked), "no work order must be visible");
+        }
+
+        @Test
+        @DisplayName("INC-02 C4 (T-12): with view on work orders but not on others, collections return only their own work orders")
+        void withoutViewOther_collectionsReturnOwnOnly() throws Exception {
+            Tenant tenant = newTenant("T12-own");
+            Linked linked = linkedEntities(tenant.company());
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "T12 own", ownWorkOrdersOnly));
+            linkedWorkOrder(tenant.company(), tenant.admin(), linked, null);
+            WorkOrder own = linkedWorkOrder(tenant.company(), user, linked, null);
+
+            assertEquals(Set.of(own.getId()), visibleIds(login(user), linked), "only the own work order");
+        }
+
+        @Test
+        @DisplayName("INC-02 C3 (T-12): without view on work orders, the work order of an own request stays visible, as in the detail")
+        void ownRequestWorkOrder_staysVisible() throws Exception {
+            Tenant tenant = newTenant("T12-request");
+            Linked linked = linkedEntities(tenant.company());
+            User requester = createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "T12 requester", withoutWorkOrderView));
+            linkedWorkOrder(tenant.company(), tenant.admin(), linked, null);
+            WorkOrder fromRequest = linkedWorkOrder(tenant.company(), tenant.admin(), linked,
+                    createRequest(tenant.company(), requester, null));
+
+            assertEquals(Set.of(fromRequest.getId()), visibleIds(login(requester), linked),
+                    "only the work order of the own request");
+        }
+
+        /**
+         * Ids returned by each collection read. The four reads must agree with the detail rule, so all of them
+         * must return the same ids.
+         */
+        private Set<Long> visibleIds(String token, Linked linked) throws Exception {
+            Map<String, Set<Long>> byRead = new LinkedHashMap<>();
+            byRead.put("asset", idsOfArray(call(get("/work-orders/asset/" + linked.asset().getId()), token)));
+            byRead.put("location", idsOfArray(call(get("/work-orders/location/" + linked.location().getId()), token)));
+            byRead.put("part", idsOfArray(call(get("/work-orders/part/" + linked.part().getId()), token)));
+            HttpResult search = call(post("/work-orders/search").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"filterFields\":[],\"pageNum\":0,\"pageSize\":50}"), token);
+            assertTrue(search.is2xx(), "POST /work-orders/search: " + search);
+            Set<Long> searched = new HashSet<>();
+            objectMapper.readTree(search.body()).path("content").forEach(node -> searched.add(node.get("id").asLong()));
+            byRead.put("search", searched);
+            Set<Long> first = byRead.values().iterator().next();
+            assertTrue(byRead.values().stream().allMatch(first::equals), "all reads must agree: " + byRead);
+            return first;
+        }
+
+        private Set<Long> idsOfArray(HttpResult result) throws Exception {
+            assertTrue(result.is2xx(), "collection read: " + result);
+            return idsIn(result.body());
+        }
+
+        private Linked linkedEntities(Company company) {
+            SecurityContextHolder.clearContext();
+            Location location = new Location();
+            location.setName("T12 location");
+            location.setCompany(company);
+            location = locationRepository.save(location);
+            Asset asset = new Asset();
+            asset.setName("T12 asset");
+            asset.setCompany(company);
+            asset.setLocation(location);
+            asset = assetRepository.save(asset);
+            Part part = new Part();
+            part.setName("T12 part");
+            part.setCompany(company);
+            return new Linked(location, asset, partRepository.save(part));
+        }
+
+        private WorkOrder linkedWorkOrder(Company company, User createdBy, Linked linked, Request parentRequest) {
+            SecurityContextHolder.clearContext();
+            WorkOrder workOrder = new WorkOrder();
+            workOrder.setTitle("T12 work order " + UUID.randomUUID());
+            workOrder.setCompany(company);
+            workOrder.setCreatedBy(createdBy.getId());
+            workOrder.setAsset(linked.asset());
+            workOrder.setLocation(linked.location());
+            workOrder.setParentRequest(parentRequest);
+            workOrder = workOrderRepository.save(workOrder);
+            PartQuantity quantity = new PartQuantity(linked.part(), workOrder, null, 1);
+            quantity.setCompany(company);
+            partQuantityRepository.save(quantity);
+            return workOrder;
+        }
     }
 
     // =====================================================================================================

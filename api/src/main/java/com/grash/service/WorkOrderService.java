@@ -612,7 +612,9 @@ public class WorkOrderService {
                                             )).build());
                 }
 
-            } else if (user.getRole().getCode().equals(RoleCode.REQUESTER)) {
+            } else {
+                // INC-02 (T-12): as in the work order detail (WorkOrder.isAccessibleBy), without view on work orders a
+                // user only sees the work orders of their own requests, whatever the role.
                 searchCriteria.getFilterFields().add(FilterField.builder()
                         .field("parentRequest.createdBy")
                         .value(user.getId())
