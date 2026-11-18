@@ -316,6 +316,34 @@ class RoleControllerTest extends AbstractControllerTest {
         }
 
         @Test
+        void patch_defaultCodeRoleOfCompany_returns403() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            companyRole.setCode(RoleCode.TECHNICIAN);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Updated\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
+        }
+
+        @Test
+        void delete_defaultCodeRoleOfCompany_returns403() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            companyRole.setCode(RoleCode.TECHNICIAN);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(delete("/roles/4"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).delete(anyLong());
+        }
+
+        @Test
         void create_permissionsNotHeldByRequester_returns403AndDoesNotCreate() throws Exception {
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);

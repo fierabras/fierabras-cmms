@@ -765,6 +765,45 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        @DisplayName("INC-02 C7 (T-07): editing a default-code role that belongs to the company is rejected (4xx) and unchanged")
+        void patchCompanyScopedDefaultRole_rejected_roleUnchanged() throws Exception {
+            Tenant tenant = newTenant("T07-patch");
+            Role defaultCoded = createCompanyRoleWithCode(tenant.company(), RoleCode.TECHNICIAN);
+            RoleSnapshot before = snapshot(defaultCoded.getId());
+
+            HttpResult result = patchRoleLikeUi(login(tenant.admin()), tenant.company(), defaultCoded.getId(),
+                    new Perms(all(), all(), all(), all(), all()));
+
+            assertAll(
+                    () -> assertTrue(result.is4xx(), "PATCH /roles/{id}: " + result),
+                    () -> assertEquals(before, snapshot(defaultCoded.getId()), "default-code role must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C7 (T-07): deleting a default-code role that belongs to the company is rejected (4xx)")
+        void deleteCompanyScopedDefaultRole_rejected_roleKept() throws Exception {
+            Tenant tenant = newTenant("T07-delete");
+            Role defaultCoded = createCompanyRoleWithCode(tenant.company(), RoleCode.TECHNICIAN);
+
+            HttpResult result = call(delete("/roles/" + defaultCoded.getId()), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertTrue(result.is4xx(), "DELETE /roles/{id}: " + result),
+                    () -> assertTrue(roleRepository.existsById(defaultCoded.getId()), "default-code role must exist"));
+        }
+
+        /**
+         * A role with a default code attached to the company: it passes the ownership check, so only the code check
+         * protects it (Codex A-11).
+         */
+        private Role createCompanyRoleWithCode(Company company, RoleCode code) {
+            Role role = createCustomRole(company, "T07 " + code, new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set()));
+            role.setCode(code);
+            return roleRepository.save(role);
+        }
+
+        @Test
         @DisplayName("INC-02 C8: deleting a role assigned to a user returns 409 and the user keeps the role")
         void deleteRoleWithUser_conflict_userKeepsRole() throws Exception {
             Tenant tenant = newTenant("C8-plain");

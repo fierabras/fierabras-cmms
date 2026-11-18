@@ -105,6 +105,7 @@ public class RoleController {
             if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
+            assertNotDefaultRole(savedRole);
             roleService.assertCanManage(user.getRole(), savedRole, role);
             return roleService.update(id, role);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
@@ -123,10 +124,20 @@ public class RoleController {
             if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
+            assertNotDefaultRole(savedRole);
             roleService.delete(id);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * Default roles are neither edited nor deleted (INC-02, D-2), even when attached to a company: the ownership check
+     * alone only protects the global ones.
+     */
+    private static void assertNotDefaultRole(Role role) {
+        if (role.getCode() != RoleCode.USER_CREATED)
+            throw new CustomException("Default roles cannot be edited or deleted", HttpStatus.FORBIDDEN);
     }
 
     private static Set<PermissionEntity> copyOf(Set<PermissionEntity> permissions) {
