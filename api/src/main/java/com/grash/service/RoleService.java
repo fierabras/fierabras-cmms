@@ -16,6 +16,7 @@ import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -37,11 +38,26 @@ public class RoleService {
         return roleRepository.save(role);
     }
 
+    /**
+     * Each permission set sent replaces the current one; a null or omitted set keeps it (INC-02, T-13). A stale
+     * version, or a concurrent save, is rejected with 409 instead of silently dropping the other change.
+     */
     public Role update(Long id, RolePatchDTO role) {
         if (roleRepository.existsById(id)) {
             Role savedRole = roleRepository.findById(id).get();
-            return roleRepository.save(roleMapper.updateRole(savedRole, role));
+            if (role.getVersion() != null && !role.getVersion().equals(savedRole.getVersion()))
+                throw roleChangedMeanwhile();
+            try {
+                return roleRepository.save(roleMapper.updateRole(savedRole, role));
+            } catch (ObjectOptimisticLockingFailureException e) {
+                throw roleChangedMeanwhile();
+            }
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    private static CustomException roleChangedMeanwhile() {
+        return new CustomException("This role was changed by someone else. Reload it and try again",
+                HttpStatus.CONFLICT);
     }
 
     /**

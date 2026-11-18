@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -126,6 +127,34 @@ class RoleServiceTest {
             assertEquals(updatedRole, result);
             verify(roleMapper).updateRole(adminRole, patch);
             verify(roleRepository).save(updatedRole);
+        }
+
+        @Test
+        void staleVersion_throwsConflictAndDoesNotSave() {
+            adminRole.setVersion(3L);
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(2L);
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            verify(roleRepository, never()).save(any(Role.class));
+        }
+
+        @Test
+        void concurrentTransaction_optimisticLockFailure_throwsConflict() {
+            RolePatchDTO patch = new RolePatchDTO();
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+            when(roleMapper.updateRole(adminRole, patch)).thenReturn(adminRole);
+            when(roleRepository.save(adminRole))
+                    .thenThrow(new ObjectOptimisticLockingFailureException(Role.class, 1L));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
         }
 
         @Test

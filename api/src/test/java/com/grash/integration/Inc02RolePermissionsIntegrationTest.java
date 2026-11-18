@@ -196,6 +196,87 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // T-13: PATCH /roles/{id} semantics (Codex A-12)
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 role PATCH semantics")
+    class RolePatchSemanticsTests {
+
+        private final Perms initial = new Perms(set(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS),
+                set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.REQUESTS), set(PermissionEntity.ASSETS),
+                set(PermissionEntity.LOCATIONS));
+
+        @Test
+        @DisplayName("INC-02 C2 (T-13): permission sets omitted from the PATCH keep their current value")
+        void omittedSets_keepCurrentValue() throws Exception {
+            Tenant tenant = newTenant("T13-omitted");
+            Role role = createCustomRole(tenant.company(), "T13 role", initial);
+            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 renamed");
+
+            HttpResult result = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /roles/{id}: " + result),
+                    () -> assertEquals("T13 renamed", snapshot(role.getId()).name()),
+                    () -> assertEquals(initial, permsInDb(role.getId()), "omitted sets must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C2 (T-13): a null permission set keeps its value, an empty one clears it, the others are replaced")
+        void nullKeeps_emptyClears_valuesReplace() throws Exception {
+            Tenant tenant = newTenant("T13-null");
+            Role role = createCustomRole(tenant.company(), "T13 role", initial);
+            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 role");
+            body.putNull("viewPermissions");
+            body.putArray("viewOtherPermissions");
+            body.putArray("createPermissions").add(PermissionEntity.WORK_ORDERS.name());
+            body.putNull("editOtherPermissions");
+            body.putArray("deleteOtherPermissions");
+
+            HttpResult result = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /roles/{id}: " + result),
+                    () -> assertEquals(new Perms(initial.view(), set(), set(PermissionEntity.WORK_ORDERS),
+                            initial.editOther(), set()), permsInDb(role.getId())));
+        }
+
+        @Test
+        @DisplayName("INC-02 C2 (T-13): two editors from the same snapshot: the second save must not silently drop the first change")
+        void concurrentEditors_secondSaveDoesNotDropFirstChange() throws Exception {
+            Tenant tenant = newTenant("T13-concurrent");
+            Role role = createCustomRole(tenant.company(), "T13 role", initial);
+            String tokenA = login(tenant.admin());
+            String tokenB = login(createUser(tenant.company(), roleService.findDefaultRoleWithCode(RoleCode.ADMIN)
+                    .orElseThrow()));
+            // Both editors open the edit dialog: the UI keeps the role as read by GET.
+            ObjectNode snapshotA = (ObjectNode) objectMapper.readTree(call(get("/roles/" + role.getId()), tokenA).body());
+            ObjectNode snapshotB = (ObjectNode) objectMapper.readTree(call(get("/roles/" + role.getId()), tokenB).body());
+            Perms withSettings = new Perms(set(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS,
+                    PermissionEntity.SETTINGS), initial.viewOther(), initial.create(), initial.editOther(),
+                    initial.deleteOther());
+            Perms withMeters = new Perms(set(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS,
+                    PermissionEntity.METERS), initial.viewOther(), initial.create(), initial.editOther(),
+                    initial.deleteOther());
+            putPerms(snapshotA, withSettings);
+            putPerms(snapshotB, withMeters);
+
+            HttpResult first = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(snapshotA)), tokenA);
+            HttpResult second = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(snapshotB)), tokenB);
+
+            assertAll(
+                    () -> assertTrue(first.is2xx(), "first PATCH: " + first),
+                    () -> assertEquals(409, second.status(), "stale PATCH must be rejected: " + second),
+                    () -> assertEquals(withSettings, permsInDb(role.getId()), "the first change must be kept"));
+        }
+    }
+
+    // =====================================================================================================
     // Authorization
     // =====================================================================================================
 
