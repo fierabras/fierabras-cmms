@@ -42,7 +42,9 @@ public class RoleController {
     public Collection<Role> getAll(HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT)) {
-            if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
+            // INC-02 (R-09): a people manager needs the roles of the company to assign them
+            if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
+                    || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
                 return roleService.findByCompany(user.getCompany().getId());
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else return roleService.getAll();

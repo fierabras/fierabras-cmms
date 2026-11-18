@@ -1177,6 +1177,32 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        @DisplayName("INC-02 R-09: a people manager without the settings permission lists the roles of their company only")
+        void listRoles_peopleManagerWithoutSettings_ownCompanyOnly() throws Exception {
+            Tenant tenant = newTenant("R09-roles");
+            Tenant other = newTenant("R09-roles-other");
+            Role otherRole = createCustomRole(other.company(), "R09 other company", lesser);
+            String manager = login(createUser(tenant.company(), createCustomRole(tenant.company(), "R09 manager",
+                    new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(),
+                            set(PermissionEntity.PEOPLE_AND_TEAMS), set()))));
+            String viewer = login(createUser(tenant.company(), createCustomRole(tenant.company(), "R09 viewer",
+                    lesser)));
+
+            HttpResult managerList = call(get("/roles"), manager);
+            HttpResult viewerList = call(get("/roles"), viewer);
+
+            assertTrue(managerList.is2xx(), "GET /roles by a people manager: " + managerList);
+            Set<String> names = new HashSet<>();
+            objectMapper.readTree(managerList.body()).forEach(role -> names.add(role.path("name").asText()));
+            assertAll(
+                    () -> assertTrue(names.containsAll(Set.of("R09 manager", "R09 viewer")), "own roles: " + names),
+                    () -> assertFalse(idsIn(managerList.body()).contains(otherRole.getId()),
+                            "roles of another company must not be listed"),
+                    () -> assertEquals(403, viewerList.status(), "GET /roles without settings nor people management: "
+                            + viewerList));
+        }
+
+        @Test
         @DisplayName("INC-02 R-08: PATCH /user-settings/{id} cannot change the settings of another user through the body id")
         void patchUserSettings_otherIdInBody_otherUserUnchanged() throws Exception {
             Scenario s = scenario("R08-settings");
