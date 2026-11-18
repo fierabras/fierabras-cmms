@@ -19,6 +19,7 @@ import com.grash.dto.imports.WorkOrderImportDTO;
 import com.grash.exception.CustomException;
 import com.grash.service.CompanyService;
 import com.grash.service.ImportService;
+import com.grash.service.RequestService;
 import com.grash.service.RoleService;
 import com.grash.utils.Consts;
 import org.junit.jupiter.api.AfterEach;
@@ -118,6 +119,10 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private AdditionalCostRepository additionalCostRepository;
     @Autowired
     private CommentRepository commentRepository;
+    @Autowired
+    private RequestPortalRepository requestPortalRepository;
+    @Autowired
+    private RequestService requestService;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -1117,6 +1122,84 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
 
         private boolean isEnabled(User user) {
             return inTx(() -> userRepository.findById(user.getId()).orElseThrow().isEnabled());
+        }
+    }
+
+    // =====================================================================================================
+    // R-02: a new request always starts pending; its review state belongs to the server
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 request creation (R-02)")
+    class RequestCreationTests {
+
+        private final Perms requestCreator = new Perms(
+                set(PermissionEntity.REQUESTS), set(), set(PermissionEntity.REQUESTS), set(), set());
+
+        @Test
+        @DisplayName("INC-02 R-02: POST /requests ignores the id and the review state sent and creates a pending request")
+        void create_withReviewState_startsPending() throws Exception {
+            Tenant tenant = newTenant("R02-create");
+            User creator = createUser(tenant.company(), createCustomRole(tenant.company(), "R02 creator",
+                    requestCreator));
+            Request existing = createRequest(tenant.company(), tenant.admin(), null);
+
+            HttpResult result = call(post("/requests").contentType(MediaType.APPLICATION_JSON)
+                    .content(json(forgedRequest(tenant, existing, "R02 forged"))), login(creator));
+
+            assertCreatedPending(result, existing);
+        }
+
+        @Test
+        @DisplayName("INC-02 R-02: the request portal ignores the id and the review state sent and creates a pending request")
+        void createFromPortal_withReviewState_startsPending() throws Exception {
+            Tenant tenant = newTenant("R02-portal");
+            Request existing = createRequest(tenant.company(), tenant.admin(), null);
+            SecurityContextHolder.clearContext();
+            RequestPortal portal = new RequestPortal();
+            portal.setTitle("R02 portal");
+            portal.setUuid(UUID.randomUUID().toString());
+            portal.setCompany(tenant.company());
+            portal = requestPortalRepository.save(portal);
+            try {
+                // The test profile requires a reCAPTCHA token on the portal endpoint, so the body the endpoint
+                // deserializes goes straight to the service, where the rule lives.
+                Request forged = objectMapper.treeToValue(forgedRequest(tenant, existing, "R02 portal forged"),
+                        Request.class);
+                RequestPortal savedPortal = portal;
+                Request created = inTx(() -> requestService.create(forged, tenant.company(), savedPortal));
+                SecurityContextHolder.clearContext();
+
+                assertCreatedPending(new HttpResult(200, json(Map.of("id", created.getId()))), existing);
+            } finally {
+                // request_portal.company_id has no ON DELETE CASCADE; request.request_portal_id is SET NULL.
+                jdbcTemplate.update("DELETE FROM request_portal WHERE id = ?", portal.getId());
+            }
+        }
+
+        private ObjectNode forgedRequest(Tenant tenant, Request existing, String title) {
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode()
+                    .put("title", title)
+                    .put("id", existing.getId())
+                    .put("cancelled", true)
+                    .put("cancellationReason", "R02 forged rejection");
+            body.putObject("workOrder").put("id", workOrder.getId());
+            return body;
+        }
+
+        private void assertCreatedPending(HttpResult result, Request existing) throws Exception {
+            assertTrue(result.is2xx(), "request creation: " + result);
+            long id = objectMapper.readTree(result.body()).get("id").asLong();
+            assertAll(
+                    () -> assertNotEquals(existing.getId(), id, "the id sent must be ignored"),
+                    () -> assertFalse(isCancelled(id), "new request must not be rejected"),
+                    () -> assertNull(inTx(() -> requestRepository.findById(id).orElseThrow().getCancellationReason()),
+                            "new request must have no rejection reason"),
+                    () -> assertNull(workOrderIdOf(id), "new request must not be approved"),
+                    () -> assertEquals(existing.getTitle(), inTx(() -> requestRepository.findById(existing.getId())
+                            .orElseThrow().getTitle()), "the existing request must not change"),
+                    () -> assertFalse(isCancelled(existing.getId()), "the existing request must stay pending"));
         }
     }
 

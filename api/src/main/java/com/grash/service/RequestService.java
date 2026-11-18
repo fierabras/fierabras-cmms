@@ -64,6 +64,7 @@ public class RequestService {
         }
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
+        startPending(request);
         Long nextSequence = customSequenceService.getNextRequestSequence(company);
         request.setCustomId("R" + String.format("%06d", nextSequence));
 
@@ -81,6 +82,7 @@ public class RequestService {
     public Request create(Request request, Company company, RequestPortal requestPortal) {
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
+        startPending(request);
         Long nextSequence = customSequenceService.getNextRequestSequence(company);
         request.setCustomId("R" + String.format("%06d", nextSequence));
         request.setRequestPortal(requestPortal);
@@ -102,6 +104,17 @@ public class RequestService {
         webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST, webhookPayload,
                 "newRequest", serializedRequest2, null, null, null, null, null);
         return savedRequest;
+    }
+
+    /**
+     * INC-02 (R-02): a new request always starts pending, whatever the client sends. Its id and its review state
+     * (rejection and approval) belong to the server; only approve and cancel change the review state afterwards.
+     */
+    private static void startPending(Request request) {
+        request.setId(null);
+        request.setCancelled(false);
+        request.setCancellationReason(null);
+        request.setWorkOrder(null);
     }
 
     @Transactional
