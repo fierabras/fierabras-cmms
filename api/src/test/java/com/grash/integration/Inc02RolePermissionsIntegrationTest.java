@@ -470,6 +470,95 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(adminRoleId, roleIdOfUser(tenant.admin().getId()), "own role must not change"));
         }
 
+        // ----- T-04: role assignment and invitation only with roles the requester could grant -----
+
+        private final Perms peopleManager = new Perms(
+                set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(PermissionEntity.PEOPLE_AND_TEAMS),
+                set(PermissionEntity.PEOPLE_AND_TEAMS), set());
+        private final Perms peopleViewer = new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(), set(), set());
+
+        @Test
+        @DisplayName("INC-02 C10 (T-04): assigning a role with permissions the requester lacks returns 403 and the role is unchanged")
+        void assignRoleWithUnheldPermissions_forbidden_roleUnchanged() throws Exception {
+            Tenant tenant = newTenant("T04-assign-403");
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 manager", peopleManager));
+            Role viewerRole = createCustomRole(tenant.company(), "T04 viewer", peopleViewer);
+            User target = createUser(tenant.company(), viewerRole);
+            Long adminRoleId = roleIdOfUser(tenant.admin().getId());
+
+            HttpResult result = call(patch("/users/" + target.getId() + "/role")
+                    .param("role", String.valueOf(adminRoleId)), login(manager));
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /users/{id}/role: " + result),
+                    () -> assertEquals(viewerRole.getId(), roleIdOfUser(target.getId()), "target role must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C10 (T-04): assigning a role within the requester's permissions succeeds")
+        void assignRoleWithinHeldPermissions_succeeds() throws Exception {
+            Tenant tenant = newTenant("T04-assign-ok");
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 manager", peopleManager));
+            Role viewerRole = createCustomRole(tenant.company(), "T04 viewer", peopleViewer);
+            User target = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 other", requestViewer));
+
+            HttpResult result = call(patch("/users/" + target.getId() + "/role")
+                    .param("role", String.valueOf(viewerRole.getId())), login(manager));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /users/{id}/role: " + result),
+                    () -> assertEquals(viewerRole.getId(), roleIdOfUser(target.getId()), "target role must change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C10 (T-04): inviting with a role whose permissions the requester lacks returns 403 and invites nobody")
+        void inviteWithUnheldPermissions_forbidden_nothingPersisted() throws Exception {
+            Tenant tenant = newTenant("T04-invite-403");
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 manager", peopleManager));
+            Long adminRoleId = roleIdOfUser(tenant.admin().getId());
+            String email = "inc02-invite-" + UUID.randomUUID() + "@example.com";
+            try {
+                HttpResult result = invite(login(manager), adminRoleId, email);
+
+                assertAll(
+                        () -> assertEquals(403, result.status(), "POST /users/invite: " + result),
+                        () -> assertEquals(0, invitationsOf(email), "no invitation must be persisted"));
+            } finally {
+                jdbcTemplate.update("DELETE FROM user_invitation WHERE email = ?", email);
+            }
+        }
+
+        @Test
+        @DisplayName("INC-02 C10 (T-04): inviting with a role within the requester's permissions succeeds")
+        void inviteWithinHeldPermissions_succeeds() throws Exception {
+            Tenant tenant = newTenant("T04-invite-ok");
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 manager", peopleManager));
+            Role viewerRole = createCustomRole(tenant.company(), "T04 viewer", peopleViewer);
+            String email = "inc02-invite-" + UUID.randomUUID() + "@example.com";
+            try {
+                HttpResult result = invite(login(manager), viewerRole.getId(), email);
+
+                assertAll(
+                        () -> assertTrue(result.is2xx(), "POST /users/invite: " + result),
+                        () -> assertEquals(1, invitationsOf(email), "the invitation must be persisted"));
+            } finally {
+                jdbcTemplate.update("DELETE FROM user_invitation WHERE email = ?", email);
+            }
+        }
+
+        private HttpResult invite(String token, Long roleId, String email) throws Exception {
+            ObjectNode body = objectMapper.createObjectNode().put("disableSendingEmail", true);
+            body.putObject("role").put("id", roleId);
+            body.putArray("emails").add(email);
+            return call(post("/users/invite").contentType(MediaType.APPLICATION_JSON).content(json(body)), token);
+        }
+
+        private long invitationsOf(String email) {
+            Long result = jdbcTemplate.queryForObject("SELECT count(*) FROM user_invitation WHERE email = ?",
+                    Long.class, email);
+            return result == null ? 0 : result;
+        }
+
         // ----- C12: multi-company isolation -----
 
         @Test
