@@ -21,6 +21,8 @@ import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from '../../../store';
 import { getRoles } from '../../../slices/role';
 import { Role, RoleCode } from '../../../models/owns/role';
+import useAuth from '../../../hooks/useAuth';
+import { isRoleWithin } from '../../../utils/roles';
 
 const AvatarWrapperSuccess = styled(Avatar)(
   ({ theme }) => `
@@ -38,6 +40,7 @@ function UserRoleCardList({ onChange }: Props) {
   const theme = useTheme();
   const dispatch = useDispatch();
   const { roles, loadingGet } = useSelector((state) => state.roles);
+  const { user } = useAuth();
   const [selectedItem, setSelectedItem] = useState<number>();
   const defaultRoles: Partial<
     Record<RoleCode, { name: string; description: string }>
@@ -85,7 +88,10 @@ function UserRoleCardList({ onChange }: Props) {
         return roles.find((role) => role.code === code);
       });
       const customRoles = roles.filter((role) => role.code === 'USER_CREATED');
-      return [...defaultRolesOnly, ...customRoles];
+      // INC-02 (T-04): only roles within the user's role can be used to invite
+      return [...defaultRolesOnly, ...customRoles].filter((role) =>
+        isRoleWithin(role, user?.role)
+      );
     } else return [];
   };
   return (

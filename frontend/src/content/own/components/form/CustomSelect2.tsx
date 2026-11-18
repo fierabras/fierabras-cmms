@@ -39,6 +39,7 @@ import useAuth from '../../../../hooks/useAuth';
 import { LocationMiniDTO } from '../../../../models/owns/location';
 import { AssetMiniDTO } from '../../../../models/owns/asset';
 import { PermissionEntity } from '../../../../models/owns/role';
+import { isRoleWithin } from '../../../../utils/roles';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 
 interface OptionType {
@@ -77,10 +78,8 @@ export const CustomSelect = ({
   const [openTask, setOpenTask] = useState(false);
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const {
-    hasCreatePermission,
-    user: { companySettingsId }
-  } = useAuth();
+  const { hasCreatePermission, user } = useAuth();
+  const { companySettingsId } = user;
   const location = useLocation();
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const { customersMini } = useSelector((state) => state.customers);
@@ -727,12 +726,15 @@ export const CustomSelect = ({
       );
     }
     case 'role':
-      options = roles.map((role) => {
-        return {
-          label: role.name,
-          value: role.id
-        };
-      });
+      // INC-02 (T-04): only roles within the user's role can be assigned
+      options = roles
+        .filter((role) => isRoleWithin(role, user?.role))
+        .map((role) => {
+          return {
+            label: role.name,
+            value: role.id
+          };
+        });
       onOpen = fetchRoles;
       break;
     case 'category':

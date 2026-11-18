@@ -5,7 +5,13 @@ function api<T>(url: string, options: Options): Promise<T> {
   return fetch(url, { headers: authHeader(false), ...options }).then(
     async (response) => {
       if (!response.ok) {
-        throw new Error(JSON.stringify(await response.json()));
+        // The HTTP status travels with the body so callers can tell errors apart (e.g. 403 vs 409)
+        throw new Error(
+          JSON.stringify({
+            ...(await response.json()),
+            status: response.status
+          })
+        );
       }
       if (options?.raw) return response as unknown as Promise<T>;
       return response.json() as Promise<T>;

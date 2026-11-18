@@ -41,4 +41,6 @@ export interface Role {
   viewOtherPermissions: PermissionEntity[];
   editOtherPermissions: PermissionEntity[];
   deleteOtherPermissions: PermissionEntity[];
+  // Optimistic locking: sent back on edit, a stale value is rejected with 409
+  version?: number;
 }

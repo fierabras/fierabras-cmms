@@ -869,6 +869,12 @@ const esJSON = {
   to_access: 'Accesso',
   role_delete_success: 'El rol ha sido eliminado',
   role_delete_failure: 'El rol no pudo ser eliminado',
+  role_delete_has_users:
+    'Este rol está asignado a usuarios. Asígnales otro rol antes de eliminarlo',
+  role_changed_by_other:
+    'El rol fue modificado por otro usuario. Recarga la página e inténtalo de nuevo',
+  role_superior_forbidden:
+    'No puedes gestionar un rol con permisos que no tienes',
   confirm_delete_role:
     '¿Está seguro de que desea eliminar permanentemente este rol?',
   users: 'Usuarios',

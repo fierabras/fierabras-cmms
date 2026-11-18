@@ -15,6 +15,7 @@ import {
   PermissionRoot,
   Role
 } from '../../../../models/owns/role';
+import { holdsPermission } from '../../../../utils/roles';
 
 const permissionRoots: PermissionRoot[] = [
   'viewPermissions',
@@ -28,12 +29,15 @@ interface PermissionsMatrixProps {
   values?: Record<string, any>;
   handleChange?: (e: any) => void;
   role?: Role;
+  // Role of the current user: permissions it does not hold cannot be granted (INC-02, D-6)
+  grantor?: Role;
 }
 
 function PermissionsMatrix({
   values,
   handleChange,
-  role
+  role,
+  grantor
 }: PermissionsMatrixProps) {
   const { t }: { t: any } = useTranslation();
 
@@ -108,6 +112,11 @@ function PermissionsMatrix({
                       name={isEditable ? `${root}_${entity}` : undefined}
                       onChange={isEditable ? handleChange : undefined}
                       checked={isChecked(root, entity)}
+                      disabled={
+                        isEditable &&
+                        !!grantor &&
+                        !holdsPermission(grantor, root, entity)
+                      }
                     />
                   </TableCell>
                 ))}

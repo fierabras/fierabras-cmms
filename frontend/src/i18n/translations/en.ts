@@ -828,6 +828,12 @@ const locale = {
   to_access: 'Access',
   role_delete_success: 'The Role has been deleted successfully',
   role_delete_failure: "The Role couldn't be deleted",
+  role_delete_has_users:
+    'This role is assigned to users. Assign them another role before deleting it',
+  role_changed_by_other:
+    'The role was modified by another user. Reload the page and try again',
+  role_superior_forbidden:
+    'You cannot manage a role with permissions you do not have',
   confirm_delete_role: 'Are you sure you want to permanently delete this role',
   users: 'Users',
   paid: 'Paid',

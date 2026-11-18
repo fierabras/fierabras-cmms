@@ -20,7 +20,8 @@ import { useContext } from 'react';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import { useDispatch } from '../../../../store';
 
-import { getErrorMessage } from '../../../../utils/api';
+import { roleErrorMessage } from '../../../../utils/roles';
+import useAuth from '../../../../hooks/useAuth';
 
 interface EditRoleProps {
   role: Role;
@@ -30,6 +31,7 @@ interface EditRoleProps {
 }
 function EditRole({ role, open, onClose, formatValues }: EditRoleProps) {
   const { t }: { t: any } = useTranslation();
+  const { user } = useAuth();
   const dispatch = useDispatch();
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const onEditSuccess = () => {
@@ -37,7 +39,10 @@ function EditRole({ role, open, onClose, formatValues }: EditRoleProps) {
     showSnackBar(t('changes_saved_success'), 'success');
   };
   const onEditFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('role_edit_failure')), 'error');
+    showSnackBar(
+      roleErrorMessage(err, t, t('role_edit_failure'), 'edit'),
+      'error'
+    );
 
   const permissionRoots: PermissionRoot[] = [
     'viewPermissions',
@@ -153,7 +158,11 @@ function EditRole({ role, open, onClose, formatValues }: EditRoleProps) {
                     <Typography variant="h4" sx={{ pb: 2 }}>
                       {t('permissions')}
                     </Typography>
-                    <PermissionsMatrix values={values} handleChange={handleChange} />
+                    <PermissionsMatrix
+                      values={values}
+                      handleChange={handleChange}
+                      grantor={user?.role}
+                    />
                 </Grid>
               </Grid>
             </DialogContent>
