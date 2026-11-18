@@ -441,6 +441,44 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                             .orElseThrow().getCancellationReason()), "the first reason must be kept"));
         }
 
+        // ----- T-10: the generic PATCH never changes the review state of a request -----
+
+        @Test
+        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reject a pending request")
+        void patchRequest_cancelledTrue_requestStaysPending() throws Exception {
+            Tenant tenant = newTenant("T10-reject");
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T10 edited").put("cancelled", true);
+
+            HttpResult result = call(patch("/requests/" + request.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /requests/{id}: " + result),
+                    () -> assertFalse(isCancelled(request.getId()), "request must stay pending"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reopen a rejected request")
+        void patchRequest_onRejectedRequest_staysRejected() throws Exception {
+            Tenant tenant = newTenant("T10-reopen");
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+            HttpResult rejected = reject(token, request.getId());
+            assertTrue(rejected.is2xx(), "precondition, reject: " + rejected);
+            // Same body a client editing the title sends: the primitive cancelled flag defaults to false.
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T10 edited");
+
+            HttpResult result = call(patch("/requests/" + request.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), token);
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /requests/{id}: " + result),
+                    () -> assertTrue(isCancelled(request.getId()), "request must stay rejected"),
+                    () -> assertEquals("INC-02 rejection", inTx(() -> requestRepository.findById(request.getId())
+                            .orElseThrow().getCancellationReason()), "the rejection reason must be kept"));
+        }
+
         @Test
         @DisplayName("INC-02 C6: a user whose role grants edit-other on work orders completes a work order (2xx)")
         void completeWorkOrder_granted_succeeds() throws Exception {
