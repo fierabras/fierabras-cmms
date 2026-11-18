@@ -106,8 +106,9 @@ class RoleControllerTest extends AbstractControllerTest {
                 .roleType(RoleType.ROLE_CLIENT)
                 .name("Restricted Client")
                 .viewPermissions(new HashSet<>())
-                // As a role read from the database: empty sets, never null (GET /roles reads it, INC-02 R-09)
+                // As a role read from the database: empty sets, never null (GET /roles reads it, INC-02 R-09, D-24)
                 .editOtherPermissions(new HashSet<>())
+                .createPermissions(new HashSet<>())
                 .build();
 
         clientUserWithoutPermission = new User();

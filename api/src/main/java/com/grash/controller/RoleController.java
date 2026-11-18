@@ -42,9 +42,10 @@ public class RoleController {
     public Collection<Role> getAll(HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT)) {
-            // INC-02 (R-09): a people manager needs the roles of the company to assign them
+            // INC-02 (R-09, D-24): whoever manages or invites people needs the roles of the company to assign them
             if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
-                    || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                    || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)
+                    || user.getRole().getCreatePermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
                 return roleService.findByCompany(user.getCompany().getId());
             } else throw settingsRequired();
         } else return roleService.getAll();

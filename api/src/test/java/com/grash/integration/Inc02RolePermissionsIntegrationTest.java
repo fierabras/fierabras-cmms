@@ -1235,6 +1235,26 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        @DisplayName("INC-02 D-24: a user who invites people without the settings permission lists the roles of their company only")
+        void listRoles_inviterWithoutSettings_ownCompanyOnly() throws Exception {
+            Tenant tenant = newTenant("D24-roles");
+            Tenant other = newTenant("D24-roles-other");
+            Role otherRole = createCustomRole(other.company(), "D24 other company", lesser);
+            Role ownRole = createCustomRole(tenant.company(), "D24 own", lesser);
+            String inviter = login(createUser(tenant.company(), createCustomRole(tenant.company(), "D24 inviter",
+                    new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(PermissionEntity.PEOPLE_AND_TEAMS),
+                            set(), set()))));
+
+            HttpResult result = call(get("/roles"), inviter);
+
+            assertTrue(result.is2xx(), "GET /roles by a user who invites people: " + result);
+            Set<Long> ids = idsIn(result.body());
+            assertAll(
+                    () -> assertTrue(ids.contains(ownRole.getId()), "own roles must be listed"),
+                    () -> assertFalse(ids.contains(otherRole.getId()), "roles of another company must not be listed"));
+        }
+
+        @Test
         @DisplayName("INC-02 R-08: PATCH /user-settings/{id} cannot change the settings of another user through the body id")
         void patchUserSettings_otherIdInBody_otherUserUnchanged() throws Exception {
             Scenario s = scenario("R08-settings");
