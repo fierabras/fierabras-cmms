@@ -113,7 +113,9 @@ class RoleServiceTest {
 
         @Test
         void existingRole_updatesAndSaves() {
+            adminRole.setVersion(0L);
             RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(0L);
             patch.setName("Updated");
             patch.setDescription("desc");
             Role updatedRole = Role.builder().id(1L).name("Updated").build();
@@ -144,8 +146,23 @@ class RoleServiceTest {
         }
 
         @Test
-        void concurrentTransaction_optimisticLockFailure_throwsConflict() {
+        void missingVersion_throwsBadRequestAndDoesNotSave() {
+            // INC-02 (D-14): the client must send the version it read.
             RolePatchDTO patch = new RolePatchDTO();
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.BAD_REQUEST, ex.getHttpStatus());
+            verify(roleRepository, never()).save(any(Role.class));
+        }
+
+        @Test
+        void concurrentTransaction_optimisticLockFailure_throwsConflict() {
+            adminRole.setVersion(0L);
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(0L);
             when(roleRepository.existsById(1L)).thenReturn(true);
             when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
             when(roleMapper.updateRole(adminRole, patch)).thenReturn(adminRole);

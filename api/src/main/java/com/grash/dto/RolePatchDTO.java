@@ -13,8 +13,8 @@ import java.util.List;
         "or omitted set keeps the current one, and an empty set removes every permission of that set.")
 public class RolePatchDTO {
 
-    @Schema(description = "Version of the role as read by the client. When sent and stale, the PATCH is rejected " +
-            "with 409")
+    @Schema(description = "Version of the role as read by the client. Required (400 when missing); a stale version " +
+            "is rejected with 409", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long version;
 
     @Schema(description = "Name")

@@ -212,7 +212,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         void omittedSets_keepCurrentValue() throws Exception {
             Tenant tenant = newTenant("T13-omitted");
             Role role = createCustomRole(tenant.company(), "T13 role", initial);
-            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 renamed");
+            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 renamed")
+                    .put("version", role.getVersion());
 
             HttpResult result = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
                     .content(json(body)), login(tenant.admin()));
@@ -228,7 +229,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         void nullKeeps_emptyClears_valuesReplace() throws Exception {
             Tenant tenant = newTenant("T13-null");
             Role role = createCustomRole(tenant.company(), "T13 role", initial);
-            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 role");
+            ObjectNode body = objectMapper.createObjectNode().put("name", "T13 role").put("version", role.getVersion());
             body.putNull("viewPermissions");
             body.putArray("viewOtherPermissions");
             body.putArray("createPermissions").add(PermissionEntity.WORK_ORDERS.name());
@@ -242,6 +243,23 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertTrue(result.is2xx(), "PATCH /roles/{id}: " + result),
                     () -> assertEquals(new Perms(initial.view(), set(), set(PermissionEntity.WORK_ORDERS),
                             initial.editOther(), set()), permsInDb(role.getId())));
+        }
+
+        @Test
+        @DisplayName("INC-02 C2 (D-14): a PATCH without the role version gets 400 and the role is unchanged")
+        void missingVersion_badRequest_roleUnchanged() throws Exception {
+            Tenant tenant = newTenant("D14-no-version");
+            Role role = createCustomRole(tenant.company(), "D14 role", initial);
+            ObjectNode body = objectMapper.createObjectNode().put("name", "D14 renamed");
+            putPerms(body, new Perms(set(), set(), set(), set(), set()));
+
+            HttpResult result = call(patch("/roles/" + role.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertEquals(400, result.status(), "PATCH /roles/{id} without version: " + result),
+                    () -> assertEquals("D14 role", snapshot(role.getId()).name(), "name must not change"),
+                    () -> assertEquals(initial, permsInDb(role.getId()), "permissions must not change"));
         }
 
         @Test

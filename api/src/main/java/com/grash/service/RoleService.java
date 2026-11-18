@@ -39,13 +39,16 @@ public class RoleService {
     }
 
     /**
-     * Each permission set sent replaces the current one; a null or omitted set keeps it (INC-02, T-13). A stale
-     * version, or a concurrent save, is rejected with 409 instead of silently dropping the other change.
+     * Each permission set sent replaces the current one; a null or omitted set keeps it (INC-02, T-13). The client
+     * must send the version it read (D-14): a missing one is rejected with 400, and a stale version, or a concurrent
+     * save, with 409 instead of silently dropping the other change.
      */
     public Role update(Long id, RolePatchDTO role) {
         if (roleRepository.existsById(id)) {
             Role savedRole = roleRepository.findById(id).get();
-            if (role.getVersion() != null && !role.getVersion().equals(savedRole.getVersion()))
+            if (role.getVersion() == null)
+                throw new CustomException("The role version is required", HttpStatus.BAD_REQUEST);
+            if (!role.getVersion().equals(savedRole.getVersion()))
                 throw roleChangedMeanwhile();
             try {
                 return roleRepository.save(roleMapper.updateRole(savedRole, role));
