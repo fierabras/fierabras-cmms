@@ -8,6 +8,7 @@ import com.grash.model.*;
 import com.grash.model.abstracts.WorkOrderBase;
 import com.grash.model.enums.DateFormat;
 import com.grash.model.enums.FileType;
+import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.TimeStatus;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PlanFeatures;
@@ -1638,6 +1639,75 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(tenant.admin().getId(), closing.completedById(), "closing user must not change"),
                     () -> assertEquals(closedOn.getTime(), closing.completedOn().getTime(),
                             "closing date must not change"));
+        }
+
+        // ----- R-04: a work order already COMPLETE keeps its closing evidence and gets no closing effects again -----
+
+        @Test
+        @DisplayName("INC-02 R-04: COMPLETE again keeps the signature, the closing user and the closing date")
+        void changeStatus_alreadyComplete_keepsClosingEvidence() throws Exception {
+            Tenant tenant = newTenant("R04-evidence");
+            User editor = importer(tenant);
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(workOrder.getId()).orElseThrow();
+                saved.setRequiredSignature(true);
+                return workOrderRepository.save(saved);
+            });
+            ObjectNode signed = objectMapper.createObjectNode().put("status", Status.COMPLETE.name())
+                    .put("signature", "R04 signature");
+            HttpResult first = call(patch("/work-orders/" + workOrder.getId() + "/change-status")
+                    .contentType(MediaType.APPLICATION_JSON).content(json(signed)), login(editor));
+            assertTrue(first.is2xx(), "precondition, first completion: " + first);
+            ClosingData before = closingDataOf(workOrder.getId());
+
+            // Same state again, by another user and without the required signature.
+            HttpResult second = complete(login(tenant.admin()), workOrder.getId());
+
+            ClosingData after = closingDataOf(workOrder.getId());
+            assertAll(
+                    () -> assertTrue(second.is2xx(), "change-status to COMPLETE again: " + second),
+                    () -> assertEquals(before, after, "closing user and date must not change"),
+                    () -> assertEquals(editor.getId(), after.completedById()),
+                    () -> assertEquals("R04 signature", inTx(() -> workOrderRepository.findById(workOrder.getId())
+                            .orElseThrow().getSignature()), "the signature must be kept"));
+        }
+
+        @Test
+        @DisplayName("INC-02 R-04: COMPLETE again does not run the closing side effects again")
+        void changeStatus_alreadyComplete_noClosingEffectsAgain() throws Exception {
+            Tenant tenant = newTenant("R04-effects");
+            // Closing a work order puts its asset back in operation and notifies the users of the asset.
+            SecurityContextHolder.clearContext();
+            Location location = new Location();
+            location.setName("R04 location");
+            location.setCompany(tenant.company());
+            Asset asset = new Asset();
+            asset.setName("R04 asset");
+            asset.setCompany(tenant.company());
+            asset.setLocation(locationRepository.save(location));
+            asset.setPrimaryUser(tenant.admin());
+            Asset savedAsset = assetRepository.save(asset);
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(workOrder.getId()).orElseThrow();
+                saved.setAsset(savedAsset);
+                return workOrderRepository.save(saved);
+            });
+            String assetNotifications = "SELECT count(*) FROM notification WHERE notification_type = "
+                    + NotificationType.ASSET.ordinal() + " AND resource_id = ?";
+            String token = login(tenant.admin());
+            HttpResult first = complete(token, workOrder.getId());
+            assertTrue(first.is2xx(), "precondition, first completion: " + first);
+            long notifications = count(assetNotifications, savedAsset.getId());
+            assertTrue(notifications > 0, "precondition, the users of the asset are notified it is operational");
+
+            HttpResult second = complete(token, workOrder.getId());
+
+            assertAll(
+                    () -> assertTrue(second.is2xx(), "change-status to COMPLETE again: " + second),
+                    () -> assertEquals(notifications, count(assetNotifications, savedAsset.getId()),
+                            "the closing side effects must not run again"));
         }
 
         private void requireOnCompletion(Company company, String fieldName) {

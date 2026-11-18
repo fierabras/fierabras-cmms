@@ -824,22 +824,21 @@ public class WorkOrderService {
         if (dto.getSignature() != null && !licenseService.hasEntitlement(LicenseEntitlement.SIGNATURE_CAPTURE))
             throw new CustomException("You need a license to add signature to work order",
                     HttpStatus.FORBIDDEN);
-        mutableWO.setSignature(dto.getSignature());
-        mutableWO.setStatus(dto.getStatus());
         mutableWO.setFeedback(dto.getFeedback());
 
         if (dto.getStatus() != Status.COMPLETE) {
+            mutableWO.setStatus(dto.getStatus());
+            mutableWO.setSignature(dto.getSignature());
             mutableWO.setCompletedOn(null);
             mutableWO.setCompletedBy(null);
         }
         if (mutableWO.canBeEditedBy(user) && (dto.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))) {
-            if (dto.getStatus() == Status.COMPLETE && savedWorkOrderStatusBefore != Status.COMPLETE)
-                assertClosingRequirements(mutableWO, true, dto.getSignature(), user);
+            // INC-02 (D-22): only the effective transition into COMPLETE records the closing data and runs its effects
+            boolean closes = dto.getStatus() == Status.COMPLETE
+                    && complete(mutableWO, savedWorkOrderStatusBefore, dto.getSignature(), user, null);
             if (!dto.getStatus().equals(Status.IN_PROGRESS)) {
-                if (dto.getStatus().equals(Status.COMPLETE)) {
-                    mutableWO.setCompletedBy(user);
-                    mutableWO.setCompletedOn(new Date());
+                if (closes) {
                     if (mutableWO.getAsset() != null) {
                         Asset asset = mutableWO.getAsset();
                         Collection<WorkOrder> workOrdersOfSameAsset = findByAsset(asset.getId());
@@ -857,7 +856,7 @@ public class WorkOrderService {
             WorkOrder patchedWorkOrder = saveAndFlushWithWebhook(mutableWO, user.getCompany(),
                     originalWorkOrder);
 
-            if (patchedWorkOrder.getStatus().equals(Status.COMPLETE) && !savedWorkOrderStatusBefore.equals(Status.COMPLETE)) {
+            if (closes) {
                 List<User> admins =
                         userService.findWorkersByCompany(user.getCompany().getId()).stream().filter(ownUser -> ownUser.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) && ownUser.isEnabled() && ownUser.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
                 notificationService.createMultiple(admins.stream().map(admin -> new Notification(messageSource.getMessage("complete_work_order_content", new String[]{patchedWorkOrder.getTitle(), user.getFullName()}, Helper.getLocale(admin)), admin,
@@ -1120,11 +1119,13 @@ public class WorkOrderService {
                 && (workOrderReq.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))))
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-        // INC-02 (T-11): as in changeStatus, closing data comes from the server, never from the client.
-        boolean complete = Status.COMPLETE.equals(workOrderReq.getStatus());
-        if (complete) assertClosingRequirements(workOrderReq, false, workOrderReq.getSignature(), user);
-        workOrderReq.setCompletedBy(complete ? user : null);
-        workOrderReq.setCompletedOn(complete ? new Date() : null);
+        // INC-02 (T-11, D-22): as in changeStatus, closing data comes from the server, never from the client.
+        if (Status.COMPLETE.equals(workOrderReq.getStatus())) {
+            complete(workOrderReq, null, workOrderReq.getSignature(), user, null);
+        } else {
+            workOrderReq.setCompletedBy(null);
+            workOrderReq.setCompletedOn(null);
+        }
         if (user.getCompany().getCompanySettings().getGeneralPreferences().isAutoAssignWorkOrders()) {
             User primaryUser = workOrderReq.getPrimaryUser();
             workOrderReq.setPrimaryUser(primaryUser == null ? user : primaryUser);
