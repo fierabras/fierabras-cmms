@@ -46,7 +46,7 @@ public class RoleController {
             if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
                     || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
                 return roleService.findByCompany(user.getCompany().getId());
-            } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+            } else throw settingsRequired();
         } else return roleService.getAll();
     }
 
@@ -57,9 +57,10 @@ public class RoleController {
         Optional<Role> optionalRole = roleService.findById(id);
         if (optionalRole.isPresent()) {
             Role savedRole = optionalRole.get();
-            if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) && savedRole.belongsToCompany(user.getCompany())) {
+            if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) throw settingsRequired();
+            if (savedRole.belongsToCompany(user.getCompany())) {
                 return savedRole;
-            } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            } else throw roleNotInCompany();
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
@@ -68,8 +69,8 @@ public class RoleController {
     Role create(@Parameter(description = "Role data to create") @Valid @RequestBody Role roleReq,
                 HttpServletRequest req) {
         User user = userService.whoami(req);
-        if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
-                && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.ROLE)) {
+        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) throw settingsRequired();
+        if (user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.ROLE)) {
             // INC-02 (T-06): always a new role. The client id is ignored, otherwise JPA would merge the request
             // into an existing role (a default one or one of another company). Company and type come from the server.
             Role role = Role.builder()
@@ -97,17 +98,13 @@ public class RoleController {
                       @PathVariable("id") Long id,
                       HttpServletRequest req) {
         User user = userService.whoami(req);
-        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) throw settingsRequired();
         Optional<Role> optionalRole = roleService.findById(id);
 
         if (optionalRole.isPresent()) {
             Role savedRole = optionalRole.get();
-            if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
-                throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            }
             assertNotDefaultRole(savedRole);
+            if (!savedRole.belongsOnlyToCompany(user.getCompany())) throw roleNotInCompany();
             roleService.assertCanManage(user.getRole(), savedRole, role);
             return roleService.update(id, role);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);
@@ -117,16 +114,12 @@ public class RoleController {
     @PreAuthorize("hasRole('ROLE_CLIENT')")
     public ResponseEntity delete(@PathVariable("id") Long id, HttpServletRequest req) {
         User user = userService.whoami(req);
-        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) throw settingsRequired();
         Optional<Role> optionalRole = roleService.findById(id);
         if (optionalRole.isPresent()) {
             Role savedRole = optionalRole.get();
-            if (!savedRole.belongsOnlyToCompany(user.getCompany())) {
-                throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            }
             assertNotDefaultRole(savedRole);
+            if (!savedRole.belongsOnlyToCompany(user.getCompany())) throw roleNotInCompany();
             // INC-02 (D-11): nobody deletes a role superior to their own.
             roleService.assertCanGrant(user.getRole(), savedRole);
             roleService.delete(id);
@@ -137,11 +130,20 @@ public class RoleController {
 
     /**
      * Default roles are neither edited nor deleted (INC-02, D-2), even when attached to a company: the ownership check
-     * alone only protects the global ones.
+     * alone only protects the global ones. Checked before the ownership so the error tells why (R-10).
      */
     private static void assertNotDefaultRole(Role role) {
         if (role.getCode() != RoleCode.USER_CREATED)
-            throw new CustomException("Default roles cannot be edited or deleted", HttpStatus.FORBIDDEN);
+            throw new CustomException("Default roles cannot be edited or deleted", HttpStatus.FORBIDDEN,
+                    RoleService.ROLE_DEFAULT);
+    }
+
+    private static CustomException settingsRequired() {
+        return new CustomException("Forbidden", HttpStatus.FORBIDDEN, RoleService.SETTINGS_REQUIRED);
+    }
+
+    private static CustomException roleNotInCompany() {
+        return new CustomException("Access denied", HttpStatus.FORBIDDEN, RoleService.ROLE_NOT_IN_COMPANY);
     }
 
     private static Set<PermissionEntity> copyOf(Set<PermissionEntity> permissions) {

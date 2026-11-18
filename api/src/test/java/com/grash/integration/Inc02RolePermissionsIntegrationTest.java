@@ -1254,6 +1254,60 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // R-10: role errors carry a stable code so the UI tells them apart
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 role error codes (R-10)")
+    class RoleErrorCodeTests {
+
+        @Test
+        @DisplayName("INC-02 R-10: each rejected role operation answers with the code of its rule")
+        void roleErrors_haveDistinctCodes() throws Exception {
+            Tenant tenant = newTenant("R10-codes");
+            Tenant other = newTenant("R10-codes-other");
+            String manager = login(createUser(tenant.company(), createCustomRole(tenant.company(), "R10 manager",
+                    new Perms(set(PermissionEntity.SETTINGS, PermissionEntity.WORK_ORDERS), set(), set(), set(),
+                            set()))));
+            String withoutSettings = login(createUser(tenant.company(), createCustomRole(tenant.company(),
+                    "R10 no settings", new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set()))));
+            Perms lesser = new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(), set(), set());
+            Role superior = createCustomRole(tenant.company(), "R10 superior",
+                    new Perms(set(PermissionEntity.WORK_ORDERS), set(), set(), set(PermissionEntity.WORK_ORDERS), set()));
+            Role assigned = createCustomRole(tenant.company(), "R10 assigned", lesser);
+            createUser(tenant.company(), assigned);
+            Role otherCompanyRole = createCustomRole(other.company(), "R10 other company", lesser);
+            Role edited = createCustomRole(tenant.company(), "R10 edited", lesser);
+            Long defaultRoleId = roleIdOfUser(tenant.admin().getId());
+
+            HttpResult noSettings = call(delete("/roles/" + superior.getId()), withoutSettings);
+            HttpResult defaultRole = call(delete("/roles/" + defaultRoleId), manager);
+            HttpResult otherCompany = call(delete("/roles/" + otherCompanyRole.getId()), manager);
+            HttpResult superiorRole = call(delete("/roles/" + superior.getId()), manager);
+            HttpResult inUse = call(delete("/roles/" + assigned.getId()), manager);
+            ObjectNode staleRead = (ObjectNode) objectMapper.readTree(call(get("/roles/" + edited.getId()), manager)
+                    .body());
+            assertTrue(patchRoleLikeUi(manager, tenant.company(), edited.getId(), lesser).is2xx(),
+                    "precondition, the role changes after it was read");
+            HttpResult stale = call(patch("/roles/" + edited.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(staleRead)), manager);
+
+            assertAll(
+                    () -> assertError(noSettings, 403, "SETTINGS_REQUIRED"),
+                    () -> assertError(defaultRole, 403, "ROLE_DEFAULT"),
+                    () -> assertError(otherCompany, 403, "ROLE_NOT_IN_COMPANY"),
+                    () -> assertError(superiorRole, 403, "ROLE_SUPERIOR"),
+                    () -> assertError(inUse, 409, "ROLE_IN_USE"),
+                    () -> assertError(stale, 409, "ROLE_VERSION_STALE"));
+        }
+
+        private void assertError(HttpResult result, int status, String code) throws Exception {
+            assertEquals(status, result.status(), code + ": " + result);
+            assertEquals(code, objectMapper.readTree(result.body()).path("code").asText(), code + ": " + result);
+        }
+    }
+
+    // =====================================================================================================
     // R-02: a new request always starts pending; its review state belongs to the server
     // =====================================================================================================
 

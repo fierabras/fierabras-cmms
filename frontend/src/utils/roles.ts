@@ -33,28 +33,34 @@ export const canManageUser = (
   (target.id === manager.id ||
     (!target.ownsCompany && isRoleWithin(target.role, manager.role)));
 
+// Stable codes of the role errors sent by the API (INC-02, R-10) and the message of each one
+const roleErrorKeys: Record<string, string> = {
+  ROLE_SUPERIOR: 'role_superior_forbidden',
+  SETTINGS_REQUIRED: 'role_settings_required',
+  ROLE_NOT_IN_COMPANY: 'role_not_in_company',
+  ROLE_DEFAULT: 'role_default_forbidden',
+  ROLE_IN_USE: 'role_delete_has_users',
+  ROLE_VERSION_STALE: 'role_changed_by_other'
+};
+
 /**
- * Translated message for a failed role operation (INC-02): 409 means the role has users when deleting and a stale
- * version when editing; 403 means a role superior to the user's.
+ * Translated message for a failed role operation (INC-02, R-10): the code sent by the API tells which rule
+ * rejected it; without a known code, the message of the server, or the fallback.
  */
 export const roleErrorMessage = (
   error: any,
   t: (key: string) => string,
-  fallback: string,
-  action: 'create' | 'edit' | 'delete'
+  fallback: string
 ): string => {
-  let status: number;
+  let code: string;
   try {
-    status = JSON.parse(error.message)?.status;
+    code = JSON.parse(error.message)?.code;
   } catch {
-    status = undefined;
+    code = undefined;
   }
-  if (status === 409)
-    return t(
-      action === 'delete' ? 'role_delete_has_users' : 'role_changed_by_other'
-    );
-  if (status === 403) return t('role_superior_forbidden');
-  return getErrorMessage(error, fallback);
+  return roleErrorKeys[code]
+    ? t(roleErrorKeys[code])
+    : getErrorMessage(error, fallback);
 };
 
 export const holdsPermission = (

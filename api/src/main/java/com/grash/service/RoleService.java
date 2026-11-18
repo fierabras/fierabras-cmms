@@ -26,6 +26,14 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RoleService {
+    // INC-02 (R-10): stable codes of the role errors, so that clients tell them apart
+    public static final String SETTINGS_REQUIRED = "SETTINGS_REQUIRED";
+    public static final String ROLE_NOT_IN_COMPANY = "ROLE_NOT_IN_COMPANY";
+    public static final String ROLE_DEFAULT = "ROLE_DEFAULT";
+    public static final String ROLE_SUPERIOR = "ROLE_SUPERIOR";
+    public static final String ROLE_IN_USE = "ROLE_IN_USE";
+    public static final String ROLE_VERSION_STALE = "ROLE_VERSION_STALE";
+
     private final RoleRepository roleRepository;
     private final RoleMapper roleMapper;
     private final CompanySettingsService companySettingsService;
@@ -60,7 +68,7 @@ public class RoleService {
 
     private static CustomException roleChangedMeanwhile() {
         return new CustomException("This role was changed by someone else. Reload it and try again",
-                HttpStatus.CONFLICT);
+                HttpStatus.CONFLICT, ROLE_VERSION_STALE);
     }
 
     /**
@@ -101,7 +109,8 @@ public class RoleService {
                                 Collection<PermissionEntity> viewOther, Collection<PermissionEntity> editOther,
                                 Collection<PermissionEntity> deleteOther) {
         if (!isWithin(grantor, create, view, viewOther, editOther, deleteOther))
-            throw new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN);
+            throw new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN,
+                    ROLE_SUPERIOR);
     }
 
     private static boolean isWithin(Role holder, Collection<PermissionEntity> create,
@@ -124,20 +133,22 @@ public class RoleService {
 
     /**
      * A role assigned to at least one user is never deleted (INC-02, C8). The foreign key own_user.role_id
-     * (ON DELETE RESTRICT) rejects a user assigned between the check and the deletion.
+     * (ON DELETE RESTRICT) rejects a user assigned between the check and the deletion. Any other integrity violation
+     * is not reported as a role with users (R-10).
      */
     public void delete(Long id) {
         if (userRepository.existsByRole_Id(id)) throw roleInUse();
         try {
             roleRepository.deleteById(id);
         } catch (DataIntegrityViolationException e) {
-            throw roleInUse();
+            if (userRepository.existsByRole_Id(id)) throw roleInUse();
+            throw e;
         }
     }
 
     private static CustomException roleInUse() {
         return new CustomException("This role is assigned to at least one user. Assign another role to those users " +
-                "before deleting it", HttpStatus.CONFLICT);
+                "before deleting it", HttpStatus.CONFLICT, ROLE_IN_USE);
     }
 
     public Optional<Role> findById(Long id) {

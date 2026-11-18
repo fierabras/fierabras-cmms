@@ -55,7 +55,7 @@ function PageHeader({ rolesNumber, formatValues }: PageHeaderProps) {
   };
   const onCreationFailure = (err) =>
     showSnackBar(
-      roleErrorMessage(err, t, t('role_create_failure'), 'create'),
+      roleErrorMessage(err, t, t('role_create_failure')),
       'error'
     );
 

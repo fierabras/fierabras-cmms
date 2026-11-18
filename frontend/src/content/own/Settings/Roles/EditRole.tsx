@@ -40,7 +40,7 @@ function EditRole({ role, open, onClose, formatValues }: EditRoleProps) {
   };
   const onEditFailure = (err) =>
     showSnackBar(
-      roleErrorMessage(err, t, t('role_edit_failure'), 'edit'),
+      roleErrorMessage(err, t, t('role_edit_failure')),
       'error'
     );
 

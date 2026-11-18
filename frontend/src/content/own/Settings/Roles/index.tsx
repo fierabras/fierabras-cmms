@@ -167,7 +167,7 @@ function Roles() {
   };
   const onDeleteFailure = (err) =>
     showSnackBar(
-      roleErrorMessage(err, t, t('role_delete_failure'), 'delete'),
+      roleErrorMessage(err, t, t('role_delete_failure')),
       'error'
     );
 

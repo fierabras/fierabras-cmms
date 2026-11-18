@@ -349,12 +349,27 @@ class RoleServiceTest {
 
         @Test
         void userAssignedConcurrently_constraintViolation_throwsConflict() {
+            // No user before the deletion, one assigned meanwhile: the foreign key of users rejects it.
+            when(userRepository.existsByRole_Id(1L)).thenReturn(false, true);
             doThrow(new DataIntegrityViolationException("fkrlvsrdrcmmbtbgeqr8y4j69p4"))
                     .when(roleRepository).deleteById(1L);
 
             CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
 
             assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            assertEquals("ROLE_IN_USE", ex.getCode());
+        }
+
+        @Test
+        void otherConstraintViolation_withoutUsers_isNotReportedAsRoleInUse() {
+            // INC-02 (R-10): the 409 of "role with users" comes only from the foreign key of users
+            DataIntegrityViolationException other = new DataIntegrityViolationException("another constraint");
+            doThrow(other).when(roleRepository).deleteById(1L);
+
+            DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class,
+                    () -> roleService.delete(1L));
+
+            assertSame(other, ex);
         }
     }
 
