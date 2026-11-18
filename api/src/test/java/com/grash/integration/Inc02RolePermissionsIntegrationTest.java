@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.grash.model.*;
 import com.grash.model.abstracts.WorkOrderBase;
 import com.grash.model.enums.DateFormat;
+import com.grash.model.enums.FileType;
+import com.grash.model.enums.TimeStatus;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PlanFeatures;
 import com.grash.model.enums.RoleCode;
@@ -104,6 +106,18 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private PartRepository partRepository;
     @Autowired
     private PartQuantityRepository partQuantityRepository;
+    @Autowired
+    private FileRepository fileRepository;
+    @Autowired
+    private TaskRepository taskRepository;
+    @Autowired
+    private TaskBaseRepository taskBaseRepository;
+    @Autowired
+    private LaborRepository laborRepository;
+    @Autowired
+    private AdditionalCostRepository additionalCostRepository;
+    @Autowired
+    private CommentRepository commentRepository;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -1074,6 +1088,257 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     private record ClosingData(Status status, Long completedById, Date completedOn) {
+    }
+
+    // =====================================================================================================
+    // T-15: closing requirements of the web UI (WorkOrderDetails.tsx canComplete and signature) on the server
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 work order closing requirements")
+    class WorkOrderClosingRequirementsTests {
+
+        private static final String FILES = "Files are required on Work Order Completion";
+        private static final String TASKS = "Tasks must be completed";
+        private static final String TIME = "You must log time";
+        private static final String PARTS = "No Part has been used in this Work Order";
+        private static final String COST = "No Cost information provided in this Work Order";
+        private static final String SIGNATURE = "Signature is required";
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires files when completeFiles is REQUIRED")
+        void changeStatus_requiredFiles() throws Exception {
+            Tenant tenant = newTenant("T15-files");
+            requireOnCompletion(tenant.company(), "completeFiles");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, FILES);
+            attachFile(tenant.company(), tenant.admin(), workOrder);
+            assertCompleted(complete(token, workOrder.getId()), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires every task done when completeTasks is REQUIRED")
+        void changeStatus_requiredTasks() throws Exception {
+            Tenant tenant = newTenant("T15-tasks");
+            requireOnCompletion(tenant.company(), "completeTasks");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            Task task = addTask(tenant.company(), workOrder);
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, TASKS);
+            inTx(() -> {
+                Task saved = taskRepository.findById(task.getId()).orElseThrow();
+                saved.setValue("COMPLETE");
+                return taskRepository.save(saved);
+            });
+            assertCompleted(complete(token, workOrder.getId()), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires logged time when completeTime is REQUIRED")
+        void changeStatus_requiredTime() throws Exception {
+            Tenant tenant = newTenant("T15-time");
+            requireOnCompletion(tenant.company(), "completeTime");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, TIME);
+            Labor labor = new Labor(tenant.admin(), 0, new Date(), workOrder, false, TimeStatus.STOPPED);
+            labor.setDuration(600);
+            labor.setCompany(tenant.company());
+            laborRepository.save(labor);
+            assertCompleted(complete(token, workOrder.getId()), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires a used part when completeParts is REQUIRED")
+        void changeStatus_requiredParts() throws Exception {
+            Tenant tenant = newTenant("T15-parts");
+            requireOnCompletion(tenant.company(), "completeParts");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, PARTS);
+            Part part = new Part();
+            part.setName("T15 part");
+            part.setCompany(tenant.company());
+            PartQuantity quantity = new PartQuantity(partRepository.save(part), workOrder, null, 1);
+            quantity.setCompany(tenant.company());
+            partQuantityRepository.save(quantity);
+            assertCompleted(complete(token, workOrder.getId()), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires a cost when completeCost is REQUIRED")
+        void changeStatus_requiredCost() throws Exception {
+            Tenant tenant = newTenant("T15-cost");
+            requireOnCompletion(tenant.company(), "completeCost");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, COST);
+            AdditionalCost cost = new AdditionalCost();
+            cost.setDescription("T15 cost");
+            cost.setCost(10);
+            cost.setWorkOrder(workOrder);
+            additionalCostRepository.save(cost);
+            assertCompleted(complete(token, workOrder.getId()), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): change-status to COMPLETE requires a signature when the work order requires one")
+        void changeStatus_requiredSignature() throws Exception {
+            Tenant tenant = newTenant("T15-signature");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(workOrder.getId()).orElseThrow();
+                saved.setRequiredSignature(true);
+                return workOrderRepository.save(saved);
+            });
+            String token = login(tenant.admin());
+
+            assertRejected(complete(token, workOrder.getId()), workOrder, SIGNATURE);
+            ObjectNode signed = objectMapper.createObjectNode().put("status", Status.COMPLETE.name())
+                    .put("signature", "data:image/png;base64,iVBORw0KGgo=");
+            assertCompleted(call(patch("/work-orders/" + workOrder.getId() + "/change-status")
+                    .contentType(MediaType.APPLICATION_JSON).content(json(signed)), token), workOrder);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): POST /work-orders as COMPLETE is rejected for each closing requirement it cannot meet")
+        void createComplete_requirementsChecked() throws Exception {
+            Tenant tenant = newTenant("T15-post");
+            Map<String, String> requirements = new LinkedHashMap<>();
+            requirements.put("completeFiles", FILES);
+            requirements.put("completeTime", TIME);
+            requirements.put("completeParts", PARTS);
+            requirements.put("completeCost", COST);
+            List<org.junit.jupiter.api.function.Executable> checks = new ArrayList<>();
+            for (Map.Entry<String, String> requirement : requirements.entrySet()) {
+                requireOnCompletion(tenant.company(), requirement.getKey());
+                HttpResult result = postWorkOrder(login(tenant.admin()), "T15 " + requirement.getKey(), Status.COMPLETE,
+                        false, null);
+                checks.add(() -> assertEquals(406, result.status(), requirement.getKey() + ": " + result));
+                checks.add(() -> assertTrue(result.body().contains(requirement.getValue()),
+                        requirement.getKey() + " message: " + result.body()));
+                setOnCompletion(tenant.company(), requirement.getKey(), 0);
+            }
+            String token = login(tenant.admin());
+            HttpResult unsigned = postWorkOrder(token, "T15 unsigned", Status.COMPLETE, true, null);
+            checks.add(() -> assertEquals(406, unsigned.status(), "requiredSignature without signature: " + unsigned));
+            checks.add(() -> assertTrue(unsigned.body().contains(SIGNATURE), "signature message: " + unsigned.body()));
+            HttpResult signed = postWorkOrder(token, "T15 signed", Status.COMPLETE, true,
+                    "data:image/png;base64,iVBORw0KGgo=");
+            checks.add(() -> assertTrue(signed.is2xx(), "requiredSignature with signature: " + signed));
+            checks.add(() -> assertEquals(0, count("SELECT count(*) FROM work_order WHERE company_id = ? AND title <> " +
+                    "'T15 signed'", tenant.company().getId()), "no rejected work order may be persisted"));
+            assertAll(checks);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): POST /work-orders as COMPLETE with completeTasks REQUIRED and no task succeeds, as in the UI")
+        void createComplete_requiredTasksWithoutTasks_succeeds() throws Exception {
+            Tenant tenant = newTenant("T15-post-tasks");
+            requireOnCompletion(tenant.company(), "completeTasks");
+
+            HttpResult result = postWorkOrder(login(tenant.admin()), "T15 no tasks", Status.COMPLETE, false, null);
+
+            assertTrue(result.is2xx(), "a work order without tasks has no pending task: " + result);
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): the generic PATCH cannot move a work order to COMPLETE")
+        void patch_cannotComplete() throws Exception {
+            Tenant tenant = newTenant("T15-patch");
+            requireOnCompletion(tenant.company(), "completeFiles");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode().put("title", "T15 edited").put("status", "COMPLETE");
+
+            HttpResult result = call(patch("/work-orders/" + workOrder.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), login(tenant.admin()));
+
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "PATCH /work-orders/{id}: " + result),
+                    () -> assertEquals(Status.OPEN, statusOf(workOrder.getId()), "status must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-15): approved exception, a historical COMPLETE import does not check closing requirements")
+        void importComplete_historicalException() {
+            Tenant tenant = newTenant("T15-import");
+            for (String field : List.of("completeFiles", "completeTasks", "completeTime", "completeParts", "completeCost"))
+                requireOnCompletion(tenant.company(), field);
+            User importer = createUser(tenant.company(), createCustomRole(tenant.company(), "T15 importer", new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS),
+                    set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS), set())));
+            WorkOrderImportDTO historical = WorkOrderImportDTO.builder().title("T15 historical").status("Complete")
+                    .requiredSignature("Yes").completedByEmail(tenant.admin().getEmail()).build();
+
+            importService.importWorkOrders(List.of(historical), tenant.company(), importer);
+
+            Long id = jdbcTemplate.queryForObject("SELECT id FROM work_order WHERE company_id = ?", Long.class,
+                    tenant.company().getId());
+            assertEquals(Status.COMPLETE, statusOf(id), "historical import keeps COMPLETE");
+        }
+
+        private void requireOnCompletion(Company company, String fieldName) {
+            setOnCompletion(company, fieldName, 1); // FieldType.REQUIRED
+        }
+
+        private void setOnCompletion(Company company, String fieldName, int fieldType) {
+            int updated = jdbcTemplate.update("UPDATE field_configuration SET field_type = ? WHERE field_name = ? AND " +
+                            "work_order_configuration_id = (SELECT work_order_configuration_id FROM company_settings " +
+                            "WHERE id = ?)", fieldType, fieldName, company.getCompanySettings().getId());
+            assertEquals(1, updated, "field configuration " + fieldName);
+        }
+
+        private HttpResult postWorkOrder(String token, String title, Status status, boolean requiredSignature,
+                                         String signature) throws Exception {
+            ObjectNode body = objectMapper.createObjectNode().put("title", title).put("status", status.name())
+                    .put("requiredSignature", requiredSignature);
+            if (signature != null) body.put("signature", signature);
+            return call(post("/work-orders").contentType(MediaType.APPLICATION_JSON).content(json(body)), token);
+        }
+
+        private void assertRejected(HttpResult result, WorkOrder workOrder, String message) {
+            assertAll(
+                    () -> assertEquals(406, result.status(), "change-status to COMPLETE: " + result),
+                    () -> assertTrue(result.body().contains(message), "message: " + result.body()),
+                    () -> assertEquals(Status.OPEN, statusOf(workOrder.getId()), "work order must stay OPEN"));
+        }
+
+        private void assertCompleted(HttpResult result, WorkOrder workOrder) {
+            assertAll(
+                    () -> assertTrue(result.is2xx(), "change-status to COMPLETE once the requirement is met: " + result),
+                    () -> assertEquals(Status.COMPLETE, statusOf(workOrder.getId()), "work order must be COMPLETE"));
+        }
+
+        /**
+         * The UI counts the files of the work order and of its comments. A comment with a file is used here: a file on
+         * the work order itself cannot be serialized in this test environment (no storage bucket for signed URLs).
+         */
+        private void attachFile(Company company, User user, WorkOrder workOrder) {
+            File file = new File("t15.txt", "t15/t15.txt", FileType.OTHER, null, false);
+            file.setCompany(company);
+            Comment comment = new Comment();
+            comment.setWorkOrder(workOrder);
+            comment.setUser(user);
+            comment.setContent("T15 evidence");
+            comment.setCompany(company);
+            comment.setFiles(new ArrayList<>(List.of(fileRepository.save(file))));
+            commentRepository.save(comment);
+        }
+
+        private Task addTask(Company company, WorkOrder workOrder) {
+            TaskBase base = new TaskBase();
+            base.setLabel("T15 task");
+            base.setCompany(company);
+            Task task = new Task(taskBaseRepository.save(base), workOrder, null, null);
+            task.setCompany(company);
+            return taskRepository.save(task);
+        }
     }
 
     // =====================================================================================================

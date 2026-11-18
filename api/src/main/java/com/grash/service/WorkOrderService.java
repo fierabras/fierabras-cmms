@@ -62,6 +62,7 @@ import jakarta.persistence.criteria.JoinType;
 import java.io.ByteArrayOutputStream;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static com.grash.utils.Consts.usageBasedLicenseLimits;
@@ -529,6 +530,8 @@ public class WorkOrderService {
         // INC-02 (T-14): a historical import keeps the closing date of the file (Excel serial date, as dueDate).
         workOrder.setCompletedOn(Helper.getDateFromExcelDate(dto.getCompletedOn()));
         workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
+        // INC-02 (T-15), approved exception: an imported historical work order cannot carry files, tasks, labor, parts,
+        // costs nor a signature, so a COMPLETE row does not go through the closing requirements of changeStatus.
         workOrder.setStatus(Status.getStatusFromString(dto.getStatus()));
         workOrder.setFeedback(dto.getFeedback());
         List<Customer> customers = new ArrayList<>();
@@ -819,6 +822,8 @@ public class WorkOrderService {
         }
         if (mutableWO.canBeEditedBy(user) && (dto.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))) {
+            if (dto.getStatus() == Status.COMPLETE && savedWorkOrderStatusBefore != Status.COMPLETE)
+                assertClosingRequirements(mutableWO, true, dto.getSignature(), user);
             if (!dto.getStatus().equals(Status.IN_PROGRESS)) {
                 if (dto.getStatus().equals(Status.COMPLETE)) {
                     mutableWO.setCompletedBy(user);
@@ -891,6 +896,44 @@ public class WorkOrderService {
             }
             return patchedWorkOrder;
         } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * INC-02 (T-15): the closing requirements the web UI checks before completing a work order
+     * (WorkOrderDetails.tsx, canComplete and the signature of the completion dialog), enforced on the server. A
+     * requirement applies when the company configures its field as REQUIRED; the signature, when the work order
+     * requires one. A work order not yet persisted (creation) has no comments, tasks, labor, parts nor costs. The
+     * import of historical work orders is an approved exception and does not call this method.
+     */
+    private void assertClosingRequirements(WorkOrder workOrder, boolean persisted, String signature, User user) {
+        // Read from the database, not from the cached user, so a configuration change applies at once
+        Company company = companyService.findById(user.getCompany().getId()).orElse(user.getCompany());
+        Collection<FieldConfiguration> fields =
+                company.getCompanySettings().getWorkOrderConfiguration().getWorkOrderFieldConfigurations();
+        Predicate<String> required = name -> fields.stream().anyMatch(field -> name.equals(field.getFieldName())
+                && field.getFieldType() == FieldType.REQUIRED);
+        Long id = persisted ? workOrder.getId() : null;
+        boolean hasFiles = (workOrder.getFiles() != null && !workOrder.getFiles().isEmpty())
+                || (id != null && commentService.countWithFilesByWorkOrder(id) > 0);
+        if (required.test("completeFiles") && !hasFiles)
+            throw closingRequirementNotMet("required_files_on_completion", user);
+        if (required.test("completeTasks") && id != null && taskService.findByWorkOrder(id).stream()
+                .anyMatch(task -> task.getValue() == null || task.getValue().isEmpty()))
+            throw closingRequirementNotMet("required_tasks_on_completion", user);
+        if (required.test("completeTime") && (id == null || laborService.findByWorkOrder(id).stream()
+                .noneMatch(labor -> labor.getDuration() > 0)))
+            throw closingRequirementNotMet("required_labor_on_completion", user);
+        if (required.test("completeParts") && (id == null || partQuantityService.findByWorkOrder(id).isEmpty()))
+            throw closingRequirementNotMet("required_part_on_completion", user);
+        if (required.test("completeCost") && (id == null || additionalCostService.findByWorkOrder(id).isEmpty()))
+            throw closingRequirementNotMet("required_cost_on_completion", user);
+        if (workOrder.isRequiredSignature() && (signature == null || signature.isBlank()))
+            throw closingRequirementNotMet("required_signature", user);
+    }
+
+    private CustomException closingRequirementNotMet(String messageKey, User user) {
+        return new CustomException(messageSource.getMessage(messageKey, null, Helper.getLocale(user)),
+                HttpStatus.NOT_ACCEPTABLE);
     }
 
     public byte[] generatePdfBytes(WorkOrder savedWorkOrder, User user, ReportConfig config) {
@@ -1046,6 +1089,7 @@ public class WorkOrderService {
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
         // INC-02 (T-11): as in changeStatus, closing data comes from the server, never from the client.
         boolean complete = Status.COMPLETE.equals(workOrderReq.getStatus());
+        if (complete) assertClosingRequirements(workOrderReq, false, workOrderReq.getSignature(), user);
         workOrderReq.setCompletedBy(complete ? user : null);
         workOrderReq.setCompletedOn(complete ? new Date() : null);
         if (user.getCompany().getCompanySettings().getGeneralPreferences().isAutoAssignWorkOrders()) {
