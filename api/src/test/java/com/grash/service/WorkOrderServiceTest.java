@@ -3034,7 +3034,7 @@ class WorkOrderServiceTest {
             when(customerService.findByNameIgnoreCaseAndCompany("Client Inc", company.getId()))
                     .thenReturn(Optional.of(customer));
 
-            workOrderService.importWorkOrder(workOrder, dto, company);
+            workOrderService.importWorkOrder(workOrder, dto, company, null);
 
             assertEquals("Imported WO", workOrder.getTitle());
             assertEquals("Desc", workOrder.getDescription());
@@ -3094,7 +3094,7 @@ class WorkOrderServiceTest {
                     .thenReturn(Optional.empty());
             lenient().when(assetService.findByNameIgnoreCaseAndCompany(any(), any())).thenReturn(new ArrayList<>());
 
-            workOrderService.importWorkOrder(workOrder, dto, company);
+            workOrderService.importWorkOrder(workOrder, dto, company, null);
 
             assertNull(workOrder.getCompletedBy());
             assertNull(workOrder.getCompletedOn());
@@ -3133,7 +3133,7 @@ class WorkOrderServiceTest {
             lenient().when(customerService.findByNameIgnoreCaseAndCompany("Mystery Corp", company.getId()))
                     .thenReturn(Optional.empty());
 
-            workOrderService.importWorkOrder(workOrder, dto, company);
+            workOrderService.importWorkOrder(workOrder, dto, company, null);
 
             assertTrue(workOrder.getCustomers().isEmpty());
         }
@@ -3157,7 +3157,7 @@ class WorkOrderServiceTest {
             when(workOrderRepository.hasMoreActiveThan(eq(company.getId()), anyLong())).thenReturn(true);
 
             CustomException ex = assertThrows(CustomException.class,
-                    () -> workOrderService.importWorkOrder(workOrder, dto, company));
+                    () -> workOrderService.importWorkOrder(workOrder, dto, company, null));
             assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
         }
     }

@@ -515,7 +515,11 @@ public class WorkOrderService {
         return workOrderRepository.findByDueDateBetweenAndCompany_Id(date1, date2, id);
     }
 
-    public void importWorkOrder(WorkOrder workOrder, WorkOrderImportDTO dto, Company company) {
+    /**
+     * @param importer the user importing, null for the demo data shipped with the server (only new rows)
+     */
+    public void importWorkOrder(WorkOrder workOrder, WorkOrderImportDTO dto, Company company, User importer) {
+        Status previous = workOrder.getId() == null ? null : workOrder.getStatus();
         checkUsageBasedLimit(company);
         Helper.populateWorkOrderBaseFromImportDTO(workOrder, dto, company, locationService, teamService, userService,
                 assetService, workOrderCategoryService);
@@ -524,15 +528,23 @@ public class WorkOrderService {
         workOrder.setCustomId(getWorkOrderNumber(company));
         workOrder.setRequiredSignature(Helper.getBooleanFromString(dto.getRequiredSignature()));
 
-        Optional<User> optionalCompletedBy = userService.findByEmailAndCompany(dto.getCompletedByEmail(),
-                company.getId());
-        optionalCompletedBy.ifPresent(workOrder::setCompletedBy);
-        // INC-02 (T-14): a historical import keeps the closing date of the file (Excel serial date, as dueDate).
-        workOrder.setCompletedOn(Helper.getDateFromExcelDate(dto.getCompletedOn()));
         workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
-        // INC-02 (T-15), approved exception: an imported historical work order cannot carry files, tasks, labor, parts,
-        // costs nor a signature, so a COMPLETE row does not go through the closing requirements of changeStatus.
-        workOrder.setStatus(Status.getStatusFromString(dto.getStatus()));
+        Status status = Status.getStatusFromString(dto.getStatus());
+        // INC-02 (T-14, D-15): the import keeps the closing date of the file (Excel serial date, as dueDate).
+        Date closedOn = Helper.getDateFromExcelDate(dto.getCompletedOn());
+        if (previous != null && status == Status.COMPLETE) {
+            // INC-02 (D-20): a row updating an existing work order to COMPLETE follows the closing rule (D-19)
+            if (importer == null)
+                throw new IllegalStateException("Only a user import can update a work order to COMPLETE");
+            complete(workOrder, previous, workOrder.getSignature(), importer, closedOn);
+        } else {
+            // INC-02 (T-15, D-20), approved exception for historical data, new rows only: an imported work order
+            // cannot carry files, tasks, labor, parts, costs nor a signature, and keeps the closing user of the file.
+            userService.findByEmailAndCompany(dto.getCompletedByEmail(), company.getId())
+                    .ifPresent(workOrder::setCompletedBy);
+            workOrder.setCompletedOn(closedOn);
+            workOrder.setStatus(status);
+        }
         workOrder.setFeedback(dto.getFeedback());
         List<Customer> customers = new ArrayList<>();
         dto.getCustomersNames().forEach(name -> {
@@ -899,11 +911,31 @@ public class WorkOrderService {
     }
 
     /**
+     * INC-02 (D-19, D-20, D-22): the single rule for a work order that ends in COMPLETE. Only the effective transition
+     * into COMPLETE checks the closing requirements and records the signature, who closed it (the user, never the
+     * client) and when; a work order that already was COMPLETE keeps its signature, closing user and closing date.
+     * The caller runs the closing side effects only when this returns true.
+     *
+     * @param previous the status before the change, null for a work order not yet persisted
+     * @param closedOn the closing date, null for now; an import keeps the date of its file (D-15)
+     * @return whether this call is the effective transition into COMPLETE
+     */
+    private boolean complete(WorkOrder workOrder, Status previous, String signature, User user, Date closedOn) {
+        workOrder.setStatus(Status.COMPLETE);
+        if (previous == Status.COMPLETE) return false;
+        assertClosingRequirements(workOrder, previous != null, signature, user);
+        workOrder.setSignature(signature);
+        workOrder.setCompletedBy(user);
+        workOrder.setCompletedOn(closedOn == null ? new Date() : closedOn);
+        return true;
+    }
+
+    /**
      * INC-02 (T-15): the closing requirements the web UI checks before completing a work order
      * (WorkOrderDetails.tsx, canComplete and the signature of the completion dialog), enforced on the server. A
      * requirement applies when the company configures its field as REQUIRED; the signature, when the work order
-     * requires one. A work order not yet persisted (creation) has no comments, tasks, labor, parts nor costs. The
-     * import of historical work orders is an approved exception and does not call this method.
+     * requires one. A work order not yet persisted (creation) has no comments, tasks, labor, parts nor costs. New
+     * historical rows of an import are an approved exception (D-20) and do not call this method.
      */
     private void assertClosingRequirements(WorkOrder workOrder, boolean persisted, String signature, User user) {
         // Read from the database, not from the cached user, so a configuration change applies at once

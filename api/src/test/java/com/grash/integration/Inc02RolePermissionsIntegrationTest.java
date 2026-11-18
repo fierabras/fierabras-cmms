@@ -1358,14 +1358,15 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                             "work order must not change"));
         }
 
-        private ClosingData closingDataOf(Long workOrderId) {
-            return inTx(() -> {
-                WorkOrder workOrder = workOrderRepository.findById(workOrderId).orElseThrow();
-                return new ClosingData(workOrder.getStatus(),
-                        workOrder.getCompletedBy() == null ? null : workOrder.getCompletedBy().getId(),
-                        workOrder.getCompletedOn());
-            });
-        }
+    }
+
+    private ClosingData closingDataOf(Long workOrderId) {
+        return inTx(() -> {
+            WorkOrder workOrder = workOrderRepository.findById(workOrderId).orElseThrow();
+            return new ClosingData(workOrder.getStatus(),
+                    workOrder.getCompletedBy() == null ? null : workOrder.getCompletedBy().getId(),
+                    workOrder.getCompletedOn());
+        });
     }
 
     private record ClosingData(Status status, Long completedById, Date completedOn) {
@@ -1562,6 +1563,81 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             Long id = jdbcTemplate.queryForObject("SELECT id FROM work_order WHERE company_id = ?", Long.class,
                     tenant.company().getId());
             assertEquals(Status.COMPLETE, statusOf(id), "historical import keeps COMPLETE");
+        }
+
+        // ----- R-03 (D-20): updating an existing work order to COMPLETE through the import follows D-19 -----
+
+        private User importer(Tenant tenant) {
+            return createUser(tenant.company(), createCustomRole(tenant.company(), "R03 importer", new Perms(
+                    set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS),
+                    set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS), set())));
+        }
+
+        @Test
+        @DisplayName("INC-02 R-03 (D-20): an import row updating an open work order to COMPLETE without its requirements is rejected")
+        void importUpdateToComplete_requirementMissing_rejected() {
+            Tenant tenant = newTenant("R03-import-missing");
+            requireOnCompletion(tenant.company(), "completeFiles");
+            User importer = importer(tenant);
+            WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("R03 update")
+                    .status("Complete").completedByEmail(tenant.admin().getEmail()).build();
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> importService.importWorkOrders(List.of(row), tenant.company(), importer));
+
+            assertAll(
+                    () -> assertEquals(HttpStatus.NOT_ACCEPTABLE, ex.getHttpStatus()),
+                    () -> assertEquals(FILES, ex.getMessage()),
+                    () -> assertEquals(Status.OPEN, statusOf(existing.getId()), "work order must stay OPEN"));
+        }
+
+        @Test
+        @DisplayName("INC-02 R-03 (D-20): an import row updating an open work order to COMPLETE records the importer and keeps the date of the file")
+        void importUpdateToComplete_requirementsMet_importerAndFileDate() {
+            Tenant tenant = newTenant("R03-import-ok");
+            User importer = importer(tenant);
+            WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
+            double excelDate = 45000.5;
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("R03 update")
+                    .status("Complete").completedByEmail(tenant.admin().getEmail()).completedOn(excelDate).build();
+
+            importService.importWorkOrders(List.of(row), tenant.company(), importer);
+
+            ClosingData closing = closingDataOf(existing.getId());
+            Date expected = new Date(Math.round((excelDate - 25569) * 24 * 60 * 60 * 1000));
+            assertAll(
+                    () -> assertEquals(Status.COMPLETE, closing.status()),
+                    () -> assertEquals(importer.getId(), closing.completedById(), "the server records who closed it"),
+                    () -> assertEquals(expected.getTime(), closing.completedOn().getTime(),
+                            "the closing date of the file is kept (D-15)"));
+        }
+
+        @Test
+        @DisplayName("INC-02 R-03: an import row on a work order already COMPLETE keeps its closing data")
+        void importUpdate_alreadyComplete_keepsClosingData() {
+            Tenant tenant = newTenant("R03-import-complete");
+            User importer = importer(tenant);
+            WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
+            Date closedOn = new Date(1_700_000_000_000L);
+            inTx(() -> {
+                WorkOrder workOrder = workOrderRepository.findById(existing.getId()).orElseThrow();
+                workOrder.setStatus(Status.COMPLETE);
+                workOrder.setCompletedBy(tenant.admin());
+                workOrder.setCompletedOn(closedOn);
+                return workOrderRepository.save(workOrder);
+            });
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("R03 update")
+                    .status("Complete").completedByEmail(importer.getEmail()).completedOn(45000.5).build();
+
+            importService.importWorkOrders(List.of(row), tenant.company(), importer);
+
+            ClosingData closing = closingDataOf(existing.getId());
+            assertAll(
+                    () -> assertEquals(Status.COMPLETE, closing.status()),
+                    () -> assertEquals(tenant.admin().getId(), closing.completedById(), "closing user must not change"),
+                    () -> assertEquals(closedOn.getTime(), closing.completedOn().getTime(),
+                            "closing date must not change"));
         }
 
         private void requireOnCompletion(Company company, String fieldName) {

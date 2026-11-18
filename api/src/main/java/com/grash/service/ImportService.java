@@ -25,10 +25,11 @@ public class ImportService {
     private final PreventiveMaintenanceService preventiveMaintenanceService;
 
     /**
-     * Work order import requested by a user. INC-02 (T-11), approved exception for historical data: a COMPLETE row
-     * keeps its closing user from the file, but it takes the permission to close work orders of others (edit-other on
-     * work orders), and updating an existing work order takes the same right as editing it. Nothing is imported if a
-     * row is rejected.
+     * Work order import requested by a user. INC-02 (T-11, D-20), approved exception for historical data: a new
+     * COMPLETE row keeps its closing user from the file, but it takes the permission to close work orders of others
+     * (edit-other on work orders), and updating an existing work order takes the same right as editing it; a row that
+     * updates an existing work order to COMPLETE follows the closing rule (D-19). Nothing is imported if a row is
+     * rejected.
      */
     @Transactional
     public ImportResponse importWorkOrders(List<WorkOrderImportDTO> toImport, Company company, User importer) {
@@ -43,14 +44,18 @@ public class ImportService {
         }
         if (existing.stream().anyMatch(workOrder -> !workOrder.canBeEditedBy(importer)))
             throw new CustomException("You are not allowed to update some of these work orders", HttpStatus.FORBIDDEN);
-        return importWorkOrders(toImport, company);
+        return saveWorkOrders(toImport, company, importer);
     }
 
     /**
-     * Also used to load the demo data shipped with the server, which is trusted and has no requesting user.
+     * Loads the demo data shipped with the server, which is trusted and has no requesting user.
      */
     @Transactional
     public ImportResponse importWorkOrders(List<WorkOrderImportDTO> toImport, Company company) {
+        return saveWorkOrders(toImport, company, null);
+    }
+
+    private ImportResponse saveWorkOrders(List<WorkOrderImportDTO> toImport, Company company, User importer) {
         List<Long> idsToCheck = toImport.stream()
                 .map(WorkOrderImportDTO::getId)
                 .filter(Objects::nonNull)
@@ -81,7 +86,7 @@ public class ImportService {
                 created++;
             }
 
-            workOrderService.importWorkOrder(workOrder, dto, company);
+            workOrderService.importWorkOrder(workOrder, dto, company, importer);
             workOrdersToSave.add(workOrder);
         }
 
