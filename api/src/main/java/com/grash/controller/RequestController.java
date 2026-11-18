@@ -232,14 +232,10 @@ public class RequestController {
                                     HttpServletRequest req) {
         User user = userService.whoami(req);
         Optional<Request> optionalRequest = requestService.findById(id);
-        if (!(user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || user.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        assertCanReview(user);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
-            }
+            assertPending(savedRequest);
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.REQUEST_APPROVED,
                             user.getCompany().getId());
@@ -301,14 +297,10 @@ public class RequestController {
                                  HttpServletRequest req) {
         User user = userService.whoami(req);
         Optional<Request> optionalRequest = requestService.findById(id);
-        if (!(user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || user.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        assertCanReview(user);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
-            }
+            assertPending(savedRequest);
             if (reason == null || reason.trim().isEmpty())
                 throw new CustomException("Please give a reason", HttpStatus.NOT_ACCEPTABLE);
             savedRequest.setCancellationReason(reason);
@@ -376,6 +368,31 @@ public class RequestController {
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * INC-02 (T-09): approving or rejecting takes exactly what the web UI requires to show those actions
+     * (frontend/src/content/own/Requests/RequestDetails.tsx:194-198 and hasCreatePermission in
+     * frontend/src/contexts/JWTAuthContext.tsx:868-872): view on settings or the LIMITED_ADMIN role, and create on
+     * work orders without being a super account user.
+     */
+    private static void assertCanReview(User user) {
+        Role role = user.getRole();
+        boolean reviewer = role.getViewPermissions().contains(PermissionEntity.SETTINGS)
+                || RoleCode.LIMITED_ADMIN.equals(role.getCode());
+        boolean createsWorkOrders = role.getCreatePermissions().contains(PermissionEntity.WORK_ORDERS)
+                && user.getSuperAccountRelations().isEmpty();
+        if (!(reviewer && createsWorkOrders)) throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * Only a pending request (neither approved nor rejected) can be approved or rejected.
+     */
+    private static void assertPending(Request request) {
+        if (request.getWorkOrder() != null)
+            throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
+        if (request.isCancelled())
+            throw new CustomException("Request is already rejected", HttpStatus.NOT_ACCEPTABLE);
     }
 
 }

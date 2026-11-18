@@ -88,6 +88,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private RequestRepository requestRepository;
     @Autowired
     private WorkOrderRepository workOrderRepository;
+    @Autowired
+    private SuperAccountRelationRepository superAccountRelationRepository;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -191,7 +193,11 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                 set(PermissionEntity.REQUESTS), set(), set(PermissionEntity.REQUESTS), set(), set());
         private final Perms requestViewer = new Perms(
                 set(PermissionEntity.REQUESTS), set(), set(), set(), set());
+        // P-1 resolved by T-09: reviewing requests takes the rule in force plus create on work orders, as in the UI.
         private final Perms requestReviewer = new Perms(
+                set(PermissionEntity.REQUESTS, PermissionEntity.SETTINGS), set(),
+                set(PermissionEntity.WORK_ORDERS), set(), set());
+        private final Perms settingsWithoutWorkOrders = new Perms(
                 set(PermissionEntity.REQUESTS, PermissionEntity.SETTINGS), set(), set(), set(), set());
         private final Perms workOrderEditor = new Perms(
                 set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS), set(),
@@ -344,6 +350,95 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             assertAll(
                     () -> assertEquals(403, after.status(), "reject after revocation and new login: " + after),
                     () -> assertFalse(isCancelled(second.getId()), "request must stay pending"));
+        }
+
+        // ----- T-09: the backend requires exactly what the UI requires (RequestDetails.tsx) -----
+
+        @Test
+        @DisplayName("INC-02 C6 (T-09): view on settings without create on work orders gets 403 approving and the request stays pending")
+        void approveRequest_withoutCreateWorkOrders_forbidden() throws Exception {
+            Tenant tenant = newTenant("T09-approve-no-wo");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 role", settingsWithoutWorkOrders));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+
+            HttpResult result = approve(login(user), request.getId());
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /requests/{id}/approve: " + result),
+                    () -> assertNull(workOrderIdOf(request.getId()), "request must stay unapproved"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-09): view on settings without create on work orders gets 403 rejecting and the request stays pending")
+        void rejectRequest_withoutCreateWorkOrders_forbidden() throws Exception {
+            Tenant tenant = newTenant("T09-reject-no-wo");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 role", settingsWithoutWorkOrders));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+
+            HttpResult result = reject(login(user), request.getId());
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /requests/{id}/cancel: " + result),
+                    () -> assertFalse(isCancelled(request.getId()), "request must stay pending"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-09): a super account user gets 403 reviewing a request, as the UI hides the actions")
+        void reviewRequest_superAccountUser_forbidden() throws Exception {
+            Tenant tenant = newTenant("T09-super");
+            User reviewer = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 reviewer", requestReviewer));
+            User child = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 child", requestViewer));
+            SuperAccountRelation relation = superAccountRelationRepository.save(new SuperAccountRelation(null, reviewer, child));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            try {
+                String token = login(reviewer);
+                HttpResult approved = approve(token, request.getId());
+                HttpResult rejected = reject(token, request.getId());
+
+                assertAll(
+                        () -> assertEquals(403, approved.status(), "PATCH /requests/{id}/approve: " + approved),
+                        () -> assertEquals(403, rejected.status(), "PATCH /requests/{id}/cancel: " + rejected),
+                        () -> assertNull(workOrderIdOf(request.getId()), "request must stay unapproved"),
+                        () -> assertFalse(isCancelled(request.getId()), "request must stay pending"));
+            } finally {
+                superAccountRelationRepository.deleteById(relation.getId());
+            }
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-09): a rejected request cannot be approved (4xx) and gets no work order")
+        void approveRequest_alreadyRejected_rejected() throws Exception {
+            Tenant tenant = newTenant("T09-approve-cancelled");
+            User reviewer = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 reviewer", requestReviewer));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            String token = login(reviewer);
+            HttpResult rejected = reject(token, request.getId());
+            assertTrue(rejected.is2xx(), "precondition, reject: " + rejected);
+
+            HttpResult result = approve(token, request.getId());
+
+            assertAll(
+                    () -> assertTrue(result.is4xx(), "PATCH /requests/{id}/approve on a rejected request: " + result),
+                    () -> assertNull(workOrderIdOf(request.getId()), "rejected request must get no work order"));
+        }
+
+        @Test
+        @DisplayName("INC-02 C6 (T-09): a rejected request cannot be rejected again (4xx) and keeps its reason")
+        void rejectRequest_alreadyRejected_rejected() throws Exception {
+            Tenant tenant = newTenant("T09-reject-cancelled");
+            User reviewer = createUser(tenant.company(), createCustomRole(tenant.company(), "T09 reviewer", requestReviewer));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            String token = login(reviewer);
+            HttpResult rejected = reject(token, request.getId());
+            assertTrue(rejected.is2xx(), "precondition, reject: " + rejected);
+
+            HttpResult result = call(patch("/requests/" + request.getId() + "/cancel").param("reason", "second reason"),
+                    token);
+
+            assertAll(
+                    () -> assertTrue(result.is4xx(), "PATCH /requests/{id}/cancel on a rejected request: " + result),
+                    () -> assertEquals("INC-02 rejection", inTx(() -> requestRepository.findById(request.getId())
+                            .orElseThrow().getCancellationReason()), "the first reason must be kept"));
         }
 
         @Test
