@@ -814,7 +814,10 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             Tenant tenant = newTenant("T04-assign-ok");
             User manager = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 manager", peopleManager));
             Role viewerRole = createCustomRole(tenant.company(), "T04 viewer", peopleViewer);
-            User target = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 other", requestViewer));
+            // D-21: the current role of the target is within the manager's too.
+            User target = createUser(tenant.company(), createCustomRole(tenant.company(), "T04 other",
+                    new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(PermissionEntity.PEOPLE_AND_TEAMS),
+                            set(), set())));
 
             HttpResult result = call(patch("/users/" + target.getId() + "/role")
                     .param("role", String.valueOf(viewerRole.getId())), login(manager));
@@ -919,6 +922,201 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             assertAll(
                     () -> assertTrue(result.is4xx(), "DELETE /roles/{idB}: " + result),
                     () -> assertTrue(roleRepository.existsById(roleB.getId()), "role B must still exist"));
+        }
+    }
+
+    // =====================================================================================================
+    // R-01 (D-21): nobody manages a user whose current role is superior to their own, nor the company owner
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 user management (D-21)")
+    class UserManagementTests {
+
+        private final Perms peopleManager = new Perms(
+                set(PermissionEntity.PEOPLE_AND_TEAMS, PermissionEntity.SETTINGS), set(),
+                set(PermissionEntity.PEOPLE_AND_TEAMS), set(PermissionEntity.PEOPLE_AND_TEAMS), set());
+        private final Perms lesser = new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(), set(), set());
+        // Superior to peopleManager only in its delete set.
+        private final Perms superior = new Perms(set(PermissionEntity.PEOPLE_AND_TEAMS), set(), set(), set(),
+                set(PermissionEntity.WORK_ORDERS));
+
+        private record Scenario(Tenant tenant, User manager, Role lesserRole) {
+        }
+
+        private Scenario scenario(String label) {
+            Tenant tenant = newTenant(label);
+            User manager = createUser(tenant.company(), createCustomRole(tenant.company(), label + " manager",
+                    peopleManager));
+            return new Scenario(tenant, manager, createCustomRole(tenant.company(), label + " lesser", lesser));
+        }
+
+        private User owner(Scenario scenario) {
+            User owner = createUser(scenario.tenant().company(), scenario.lesserRole());
+            owner.setOwnsCompany(true);
+            return userRepository.save(owner);
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: changing the role of a user whose current role is superior returns 403 and keeps it")
+        void patchRole_currentRoleSuperior_forbidden() throws Exception {
+            Scenario s = scenario("D21-role-superior");
+            Role superiorRole = createCustomRole(s.tenant().company(), "D21 superior", superior);
+            User target = createUser(s.tenant().company(), superiorRole);
+
+            // The resulting role is within the manager's: only the current one is superior.
+            HttpResult result = call(patch("/users/" + target.getId() + "/role")
+                    .param("role", String.valueOf(s.lesserRole().getId())), login(s.manager()));
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /users/{id}/role: " + result),
+                    () -> assertEquals(superiorRole.getId(), roleIdOfUser(target.getId()), "role must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: changing the role of the company owner returns 403 and keeps it")
+        void patchRole_owner_forbidden() throws Exception {
+            Scenario s = scenario("D21-role-owner");
+            User owner = owner(s);
+            Role other = createCustomRole(s.tenant().company(), "D21 other", lesser);
+
+            HttpResult result = call(patch("/users/" + owner.getId() + "/role")
+                    .param("role", String.valueOf(other.getId())), login(s.manager()));
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /users/{ownerId}/role: " + result),
+                    () -> assertEquals(s.lesserRole().getId(), roleIdOfUser(owner.getId()), "role must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: changing the password of a superior user returns 403 and keeps it")
+        void patchPassword_superiorUser_forbidden() throws Exception {
+            Scenario s = scenario("D21-password-superior");
+            User target = createUser(s.tenant().company(), createCustomRole(s.tenant().company(), "D21 superior",
+                    superior));
+
+            HttpResult result = changePassword(login(s.manager()), target);
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /users/{id}: " + result),
+                    () -> assertTrue(passwordUnchanged(target), "password must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: changing the password of the company owner returns 403 and keeps it")
+        void patchPassword_owner_forbidden() throws Exception {
+            Scenario s = scenario("D21-password-owner");
+            User owner = owner(s);
+
+            HttpResult result = changePassword(login(s.manager()), owner);
+
+            assertAll(
+                    () -> assertEquals(403, result.status(), "PATCH /users/{ownerId}: " + result),
+                    () -> assertTrue(passwordUnchanged(owner), "password must not change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: changing the password of a lesser user succeeds")
+        void patchPassword_lesserUser_succeeds() throws Exception {
+            Scenario s = scenario("D21-password-ok");
+            User target = createUser(s.tenant().company(), s.lesserRole());
+
+            HttpResult result = changePassword(login(s.manager()), target);
+
+            assertAll(
+                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}: " + result),
+                    () -> assertFalse(passwordUnchanged(target), "password must change"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: disabling a superior user or the company owner returns 403 and keeps them enabled")
+        void disable_superiorOrOwner_forbidden() throws Exception {
+            Scenario s = scenario("D21-disable");
+            User target = createUser(s.tenant().company(), createCustomRole(s.tenant().company(), "D21 superior",
+                    superior));
+            User owner = owner(s);
+            String token = login(s.manager());
+
+            HttpResult superiorResult = call(patch("/users/" + target.getId() + "/disable"), token);
+            HttpResult ownerResult = call(patch("/users/" + owner.getId() + "/disable"), token);
+
+            assertAll(
+                    () -> assertEquals(403, superiorResult.status(), "PATCH /users/{id}/disable: " + superiorResult),
+                    () -> assertEquals(403, ownerResult.status(), "PATCH /users/{ownerId}/disable: " + ownerResult),
+                    () -> assertTrue(isEnabled(target), "superior user must stay enabled"),
+                    () -> assertTrue(isEnabled(owner), "owner must stay enabled"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: disabling a lesser user succeeds")
+        void disable_lesserUser_succeeds() throws Exception {
+            Scenario s = scenario("D21-disable-ok");
+            User target = createUser(s.tenant().company(), s.lesserRole());
+
+            HttpResult result = call(patch("/users/" + target.getId() + "/disable"), login(s.manager()));
+
+            assertAll(
+                    // The response may fail to serialize in the test profile (see notForbidden): the database decides.
+                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}/disable: " + result),
+                    () -> assertFalse(isEnabled(target), "user must be disabled"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: deleting a superior user or the company owner returns 403 and keeps them")
+        void softDelete_superiorOrOwner_forbidden() throws Exception {
+            Scenario s = scenario("D21-delete");
+            User target = createUser(s.tenant().company(), createCustomRole(s.tenant().company(), "D21 superior",
+                    superior));
+            User owner = owner(s);
+            String token = login(s.manager());
+
+            HttpResult superiorResult = call(patch("/users/soft-delete/" + target.getId()), token);
+            HttpResult ownerResult = call(patch("/users/soft-delete/" + owner.getId()), token);
+
+            assertAll(
+                    () -> assertEquals(403, superiorResult.status(), "PATCH /users/soft-delete/{id}: " + superiorResult),
+                    () -> assertEquals(403, ownerResult.status(), "PATCH /users/soft-delete/{ownerId}: " + ownerResult),
+                    () -> assertTrue(isEnabled(target), "superior user must be kept"),
+                    () -> assertTrue(isEnabled(owner), "owner must be kept"));
+        }
+
+        @Test
+        @DisplayName("INC-02 D-21: deleting a lesser user succeeds")
+        void softDelete_lesserUser_succeeds() throws Exception {
+            Scenario s = scenario("D21-delete-ok");
+            User target = createUser(s.tenant().company(), s.lesserRole());
+
+            HttpResult result = call(patch("/users/soft-delete/" + target.getId()), login(s.manager()));
+
+            assertAll(
+                    () -> assertTrue(notForbidden(result), "PATCH /users/soft-delete/{id}: " + result),
+                    () -> assertFalse(isEnabled(target), "user must be deleted"));
+        }
+
+        private HttpResult changePassword(String token, User target) throws Exception {
+            // Same body the web UI sends (People.tsx): the whole user plus the new password.
+            ObjectNode body = objectMapper.createObjectNode().put("firstName", target.getFirstName())
+                    .put("lastName", target.getLastName()).put("newPassword", "D21-New-Passw0rd!");
+            return call(patch("/users/" + target.getId()).contentType(MediaType.APPLICATION_JSON).content(json(body)),
+                    token);
+        }
+
+        /**
+         * disable and soft-delete answer with the user and its lazy role. The test profile does not load the
+         * spring.jackson.serialization.fail-on-empty-beans=false of the main application.yml (the test one shadows
+         * it), so that serialization fails there with 500 after the change is committed; production answers 200.
+         */
+        private boolean notForbidden(HttpResult result) {
+            return result.is2xx() || result.status() == 500;
+        }
+
+        private boolean passwordUnchanged(User user) {
+            return passwordEncoder.matches(PASSWORD, inTx(() -> userRepository.findById(user.getId()).orElseThrow()
+                    .getPassword()));
+        }
+
+        private boolean isEnabled(User user) {
+            return inTx(() -> userRepository.findById(user.getId()).orElseThrow().isEnabled());
         }
     }
 

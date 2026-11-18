@@ -101,6 +101,8 @@ public class UserController {
             User savedUser = optionalUser.get();
             if (requester.getId().equals(savedUser.getId()) ||
                     requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                // INC-02 (D-21): changing the password of another user is managing that user
+                if (userReq.getNewPassword() != null) userService.assertCanManage(requester, savedUser);
                 return userMapper.toResponseDto(userService.update(id, userReq));
             } else {
                 throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);

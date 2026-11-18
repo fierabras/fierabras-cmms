@@ -529,6 +529,8 @@ public class UserService {
         if (optionalUserToPatch.isPresent() && optionalRole.isPresent() && optionalRole.get().belongsToCompany(requester.getCompany())) {
             User userToPatch = optionalUserToPatch.get();
             if (requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                // INC-02 (D-6, D-21): both the current role of the user and the resulting one
+                assertCanManage(requester, userToPatch);
                 roleService.assertCanGrant(requester.getRole(), optionalRole.get());
                 int usersCount =
                         (int) findByCompany(requester.getCompany().getId()).stream().filter(User::isEnabledInSubscriptionAndPaid).count();
@@ -546,12 +548,26 @@ public class UserService {
         }
     }
 
+    /**
+     * INC-02 (D-21, D-22): the single rule to manage another user, that is to change their role or password, disable
+     * or delete them. Nobody manages the company owner but the owner, nor a user whose current role is superior to
+     * their own (D-6). Changing one's own role is forbidden apart (D-7).
+     */
+    public void assertCanManage(User manager, User target) {
+        if (manager.getId().equals(target.getId())) return;
+        if (target.isOwnsCompany())
+            throw new CustomException("Only the company owner can manage their own user", HttpStatus.FORBIDDEN);
+        if (!roleService.isWithin(manager.getRole(), target.getRole()))
+            throw new CustomException("You cannot manage a user whose role is superior to yours", HttpStatus.FORBIDDEN);
+    }
+
     public User disableUser(Long id, User requester) {
         Optional<User> optionalUserToDisable = findByIdAndCompany(id, requester.getCompany().getId());
 
         if (optionalUserToDisable.isPresent()) {
             User userToDisable = optionalUserToDisable.get();
             if (requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                assertCanManage(requester, userToDisable);
                 userToDisable.setEnabled(false);
                 userToDisable.setEnabledInSubscription(false);
                 return save(userToDisable);
@@ -569,6 +585,7 @@ public class UserService {
         if (optionalUserToSoftDelete.isPresent()) {
             User userToSoftDelete = optionalUserToSoftDelete.get();
             if (requester.getId().equals(id) || requester.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
+                assertCanManage(requester, userToSoftDelete);
                 userToSoftDelete.setEnabled(false);
                 userToSoftDelete.setEnabledInSubscription(false);
                 userToSoftDelete.setEmail(userToSoftDelete.getEmail().concat("_".concat(id.toString())));

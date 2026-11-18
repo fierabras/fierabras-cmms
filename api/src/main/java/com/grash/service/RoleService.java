@@ -73,6 +73,14 @@ public class RoleService {
                 requested.getDeleteOtherPermissions());
     }
 
+    /**
+     * Whether each of the five permission sets of the role is within the same set of the holder's role (D-6).
+     */
+    public boolean isWithin(Role holder, Role role) {
+        return isWithin(holder, role.getCreatePermissions(), role.getViewPermissions(),
+                role.getViewOtherPermissions(), role.getEditOtherPermissions(), role.getDeleteOtherPermissions());
+    }
+
     public void assertCanGrant(Role grantor, RolePatchDTO requested) {
         assertCanGrant(grantor, requested.getCreatePermissions(), requested.getViewPermissions(),
                 requested.getViewOtherPermissions(), requested.getEditOtherPermissions(),
@@ -92,12 +100,18 @@ public class RoleService {
     private void assertCanGrant(Role grantor, Collection<PermissionEntity> create, Collection<PermissionEntity> view,
                                 Collection<PermissionEntity> viewOther, Collection<PermissionEntity> editOther,
                                 Collection<PermissionEntity> deleteOther) {
-        if (!holds(grantor.getCreatePermissions(), create)
-                || !holds(grantor.getViewPermissions(), view)
-                || !holds(grantor.getViewOtherPermissions(), viewOther)
-                || !holds(grantor.getEditOtherPermissions(), editOther)
-                || !holds(grantor.getDeleteOtherPermissions(), deleteOther))
+        if (!isWithin(grantor, create, view, viewOther, editOther, deleteOther))
             throw new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN);
+    }
+
+    private static boolean isWithin(Role holder, Collection<PermissionEntity> create,
+                                    Collection<PermissionEntity> view, Collection<PermissionEntity> viewOther,
+                                    Collection<PermissionEntity> editOther, Collection<PermissionEntity> deleteOther) {
+        return holds(holder.getCreatePermissions(), create)
+                && holds(holder.getViewPermissions(), view)
+                && holds(holder.getViewOtherPermissions(), viewOther)
+                && holds(holder.getEditOtherPermissions(), editOther)
+                && holds(holder.getDeleteOtherPermissions(), deleteOther);
     }
 
     private static boolean holds(Collection<PermissionEntity> held, Collection<PermissionEntity> requested) {

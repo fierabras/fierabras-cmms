@@ -21,6 +21,19 @@ export const isRoleWithin = (role: Role, owner: Role): boolean =>
   );
 
 /**
+ * Same rule as the backend (INC-02, D-21): a user manages another user (role, password, disabling) only if the
+ * other user is not the company owner and their current role is within the manager's.
+ */
+export const canManageUser = (
+  target: { id: number; ownsCompany: boolean; role: Role },
+  manager: { id: number; role: Role }
+): boolean =>
+  !!target &&
+  !!manager &&
+  (target.id === manager.id ||
+    (!target.ownsCompany && isRoleWithin(target.role, manager.role)));
+
+/**
  * Translated message for a failed role operation (INC-02): 409 means the role has users when deleting and a stale
  * version when editing; 403 means a role superior to the user's.
  */

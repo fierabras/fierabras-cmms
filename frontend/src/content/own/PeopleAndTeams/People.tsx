@@ -43,6 +43,7 @@ import Form from '../components/form';
 import * as Yup from 'yup';
 import { IField } from '../type';
 import { formatSelect } from '../../../utils/formatters';
+import { canManageUser } from '../../../utils/roles';
 import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext';
 import { SearchCriteria, SortDirection } from '../../../models/owns/page';
 import { onSearchQueryChange } from '../../../utils/overall';
@@ -146,6 +147,9 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
   const onEditFailure = (err) =>
     showSnackBar(t("The User couldn't be edited"), 'error');
 
+  // INC-02 (D-21): the row actions follow the backend rule for the logged-in user
+  const canManage = (target: UserResponseDTO) => canManageUser(target, user);
+
   const handleOpenDrawer = (user: UserResponseDTO) => {
     setCurrentUser(user);
     window.history.replaceState(
@@ -218,7 +222,8 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
   ];
   const getFields = () => {
     let fields = [...defautfields];
-    if (currentUser?.ownsCompany || currentUser?.id === user?.id) {
+    // INC-02 (D-21): neither oneself, the owner nor a user with a superior role
+    if (currentUser?.id === user?.id || !canManageUser(currentUser, user)) {
       fields = fields.filter(
         (field) => !['role', 'password'].includes(field.name)
       );
@@ -438,7 +443,7 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
                 setShiftModalOpen(true);
               }}
             />
-            {user.enabled && !user.ownsCompany && (
+            {user.enabled && canManage(user) && (
               <CancelIcon
                 fontSize="small"
                 color="error"
