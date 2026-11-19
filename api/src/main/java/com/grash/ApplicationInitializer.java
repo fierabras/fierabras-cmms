@@ -31,6 +31,13 @@ public class ApplicationInitializer implements SmartInitializingSingleton {
     private final SubscriptionPlanService subscriptionPlanService;
     private final SubscriptionService subscriptionService;
 
+    @Value("${super-admin.enabled:false}")
+    private boolean superAdminEnabled;
+    @Value("${super-admin.email:}")
+    private String superAdminEmail;
+    @Value("${super-admin.password:}")
+    private String superAdminPassword;
+
     @Override
     public void afterSingletonsInstantiated() {
         log.info("Starting application initialization...");
@@ -62,7 +69,7 @@ public class ApplicationInitializer implements SmartInitializingSingleton {
         }
     }
 
-    private void initializeSuperAdmin() {
+    void initializeSuperAdmin() {
         // Find or create the super admin role
         Role savedSuperAdminRole = roleService.findByCodeAndRoleType(RoleCode.ADMIN, RoleType.ROLE_SUPER_ADMIN)
                 .stream().findFirst().orElseGet(() -> {
@@ -76,14 +83,43 @@ public class ApplicationInitializer implements SmartInitializingSingleton {
                             .build());
                 });
 
-        if (userService.findByCompany(savedSuperAdminRole.getCompanySettings().getCompany().getId()).isEmpty()) {
+        List<User> superAdmins = userService.findByCompany(savedSuperAdminRole.getCompanySettings().getCompany().getId())
+                .stream()
+                .filter(user -> user.getRole() != null && user.getRole().getRoleType() == RoleType.ROLE_SUPER_ADMIN)
+                .toList();
+        if (!superAdmins.isEmpty()) {
+            // Email and password are only used on creation: an existing super admin is only enabled or disabled.
+            superAdmins.forEach(this::applySuperAdminEnabled);
+        } else if (!superAdminEnabled) {
+            log.info("Super admin user is disabled (SUPER_ADMIN_ENABLED=false); not created");
+        } else if (isBlank(superAdminEmail) || isBlank(superAdminPassword)) {
+            log.warn("SUPER_ADMIN_ENABLED=true but SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD is empty; super admin " +
+                    "user not created");
+        } else {
             log.info("Creating super admin user...");
-            UserSignupRequest signupRequest = getSuperAdminSignupRequest(savedSuperAdminRole);
+            UserSignupRequest signupRequest = getSuperAdminSignupRequest(savedSuperAdminRole, superAdminEmail.trim(),
+                    superAdminPassword);
             userInvitationService.create(new UserInvitation(signupRequest.getEmail(), savedSuperAdminRole));
             userService.signup(signupRequest);
-        } else {
-            log.info("Super admin user already exists");
         }
+    }
+
+    private void applySuperAdminEnabled(User superAdmin) {
+        if (superAdmin.isEnabled() != superAdminEnabled) {
+            log.info("{} super admin user {}", superAdminEnabled ? "Enabling" : "Disabling", superAdmin.getId());
+            superAdmin.setEnabled(superAdminEnabled);
+            userService.save(superAdmin);
+        } else {
+            log.info("Super admin user {} already {}", superAdmin.getId(), superAdminEnabled ? "enabled" : "disabled");
+        }
+        if (!isBlank(superAdminEmail) && !superAdminEmail.trim().equalsIgnoreCase(superAdmin.getEmail())) {
+            log.warn("SUPER_ADMIN_EMAIL differs from the email of the existing super admin user {}; the email is " +
+                    "only used on creation and is not changed", superAdmin.getId());
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private void initializeSubscriptionPlans() {
@@ -163,11 +199,12 @@ public class ApplicationInitializer implements SmartInitializingSingleton {
     }
 
     @NotNull
-    private static UserSignupRequest getSuperAdminSignupRequest(Role savedSuperAdminRole) {
+    private static UserSignupRequest getSuperAdminSignupRequest(Role savedSuperAdminRole, String email,
+                                                                String password) {
         UserSignupRequest signupRequest = new UserSignupRequest();
         signupRequest.setRole(savedSuperAdminRole);
-        signupRequest.setEmail("superadmin@test.com");
-        signupRequest.setPassword("pls_change_me");
+        signupRequest.setEmail(email);
+        signupRequest.setPassword(password);
         signupRequest.setFirstName("Super");
         signupRequest.setLastName("Admin");
         signupRequest.setPhone("");

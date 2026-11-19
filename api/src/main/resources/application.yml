@@ -127,6 +127,11 @@ storage:
     json-path: ${GCP_JSON_PATH:}
 
 allowed-organization-admins: ${ALLOWED_ORGANIZATION_ADMINS:}
+# Platform super admin: disabled by default. Email and password are only used to create it.
+super-admin:
+  enabled: ${SUPER_ADMIN_ENABLED:false}
+  email: ${SUPER_ADMIN_EMAIL:}
+  password: ${SUPER_ADMIN_PASSWORD:}
 cloud-version: ${CLOUD_VERSION:false}
 enable-sso: ${ENABLE_SSO:false}
 oauth2:
