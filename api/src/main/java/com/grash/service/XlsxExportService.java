@@ -3,6 +3,7 @@ package com.grash.service;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.model.*;
 import com.grash.model.enums.DateFormat;
+import com.grash.model.enums.FieldType;
 import com.grash.utils.ExportColumn;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -24,6 +26,7 @@ public class XlsxExportService {
 
     private final TabularExportService tabularExportService;
     private final WorkOrderService workOrderService;
+    private final RequestService requestService;
     private final MessageSource messageSource;
 
     @Transactional(readOnly = true)
@@ -74,5 +77,45 @@ public class XlsxExportService {
                         dateFormat, timeZone)));
         return tabularExportService.generate("Work Orders", columns, locale, ids,
                 workOrderService::findAllForExport, WorkOrder::getId);
+    }
+
+    /**
+     * RF-10: the columns of the request list (D-04); the due date only when the request configuration of the
+     * company does not hide it (RF-01).
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportRequests(User user, SearchCriteria scopedCriteria) throws IOException {
+        Locale locale = Helper.getLocale(user);
+        CompanySettings companySettings = user.getCompany().getCompanySettings();
+        DateFormat dateFormat = companySettings.getGeneralPreferences().getDateFormat();
+        String timeZone = companySettings.getGeneralPreferences().getTimeZone();
+        boolean dueDateHidden = companySettings.getWorkOrderRequestConfiguration().getFieldConfigurations().stream()
+                .anyMatch(field -> field.getFieldName().equals("dueDate") && field.getFieldType() == FieldType.HIDDEN);
+        List<Long> ids = tabularExportService.findOrderedIds(Request.class,
+                requestService.getSpecification(scopedCriteria), scopedCriteria.sortWithIdTiebreak());
+        List<ExportColumn<Request>> columns = new ArrayList<>(List.of(
+                new ExportColumn<>("Folio", Request::getCustomId),
+                new ExportColumn<>("Title", Request::getTitle),
+                new ExportColumn<>("Description", Request::getDescription),
+                new ExportColumn<>("Priority", request -> request.getPriority() == null ? null :
+                        messageSource.getMessage(request.getPriority().toString(), null, locale)),
+                // same rule as the status column of the request list
+                new ExportColumn<>("Status", request -> messageSource.getMessage(request.isCancelled() ?
+                        "Request_Rejected" : request.getWorkOrder() != null ? "Request_Approved" :
+                        "Request_Pending", null, locale))));
+        if (!dueDateHidden) {
+            columns.add(new ExportColumn<>("Due_Date", request -> Helper.getFormattedDate(request.getDueDate(),
+                    dateFormat, timeZone)));
+        }
+        // P-02: the real location of the request
+        columns.addAll(List.of(
+                new ExportColumn<>("Asset", request -> request.getAsset() == null ? null :
+                        request.getAsset().getName()),
+                new ExportColumn<>("Location", request -> request.getLocation() == null ? null :
+                        request.getLocation().getName()),
+                new ExportColumn<>("Created_At", request -> Helper.getFormattedDate(request.getCreatedAt(),
+                        dateFormat, timeZone))));
+        return tabularExportService.generate("Requests", columns, locale, ids, requestService::findAllForExport,
+                Request::getId);
     }
 }

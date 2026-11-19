@@ -7,7 +7,9 @@ import com.grash.model.User;
 import com.grash.model.UserSettings;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleType;
+import com.grash.exception.CustomException;
 import com.grash.service.AsyncExportService;
+import com.grash.service.RequestService;
 import com.grash.service.UserService;
 import com.grash.service.WorkOrderService;
 import org.junit.jupiter.api.Test;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -48,6 +51,8 @@ class ExportControllerTest extends AbstractControllerTest {
     private AsyncExportService asyncExportService;
     @MockBean
     private WorkOrderService workOrderService;
+    @MockBean
+    private RequestService requestService;
 
     private User user(Set<PermissionEntity> view, Set<PermissionEntity> viewOther) {
         Role role = Role.builder().id(1L).roleType(RoleType.ROLE_CLIENT).name("Role")
@@ -104,6 +109,38 @@ class ExportControllerTest extends AbstractControllerTest {
                 .andExpect(status().is4xxClientError());
 
         verifyNoInteractions(asyncExportService);
+    }
+
+    // RF-10 CA-01: the scope is the one of the request list, which refuses users without view
+    @Test
+    void requests_withoutViewPermission_isForbidden() throws Exception {
+        User user = user(Set.of(), Set.of());
+        when(requestService.getSearchCriteria(eq(user), any(SearchCriteria.class)))
+                .thenThrow(new CustomException("Access Denied", HttpStatus.FORBIDDEN));
+
+        mockMvc.perform(post("/export/requests").param("uuid", "u2")
+                        .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(asyncExportService);
+    }
+
+    // RF-10
+    @Test
+    void requests_withViewPermission_exportsTheScopeOfTheList() throws Exception {
+        User user = user(Set.of(PermissionEntity.REQUESTS), Set.of());
+        SearchCriteria scoped = new SearchCriteria();
+        when(requestService.getSearchCriteria(eq(user), any(SearchCriteria.class))).thenReturn(scoped);
+
+        mockMvc.perform(post("/export/requests").param("uuid", "u2")
+                        .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("u2"));
+
+        verify(requestService).getSearchCriteria(eq(user), argThat(criteria ->
+                "title".equals(criteria.getSortField())));
+        verify(asyncExportService).exportRequests(user, scoped, "u2");
     }
 
     // §4.2: costs-times keeps WorkOrder.canViewAll

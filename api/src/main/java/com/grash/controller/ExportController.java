@@ -32,6 +32,7 @@ public class ExportController {
     private final UserService userService;
     private final AsyncExportService asyncExportService;
     private final WorkOrderService workOrderService;
+    private final RequestService requestService;
 
     @PostMapping("/work-orders")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
@@ -48,6 +49,20 @@ public class ExportController {
             return ResponseEntity.ok()
                     .body(new SuccessResponse(true, uuid));
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
+    }
+
+    @PostMapping("/requests")
+    @PreAuthorize("hasRole('ROLE_CLIENT')")
+    public ResponseEntity<SuccessResponse> exportRequests(HttpServletRequest req, @Parameter(description = "Unique " +
+            "identifier for tracking the export job") @RequestParam String uuid,
+                                                          @Parameter(description = "Criteria of the request list; " +
+                                                                  "pageNum and pageSize are ignored")
+                                                          @RequestBody SearchCriteria searchCriteria) {
+        User user = userService.whoami(req);
+        // RF-10 (D-03): the scope of the request list, which refuses users without view of requests
+        asyncExportService.exportRequests(user, requestService.getSearchCriteria(user, searchCriteria), uuid);
+        return ResponseEntity.ok()
+                .body(new SuccessResponse(true, uuid));
     }
 
     @GetMapping("/assets")

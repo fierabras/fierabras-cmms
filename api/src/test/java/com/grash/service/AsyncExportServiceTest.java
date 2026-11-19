@@ -91,4 +91,33 @@ class AsyncExportServiceTest {
         verifyNoMoreInteractions(messagingTemplate);
         verifyNoInteractions(storageServiceFactory);
     }
+
+    // RF-10
+    @Test
+    void requests_publishesTheSignedUrlOfTheXlsxFile() throws IOException {
+        byte[] bytes = {4, 5};
+        when(xlsxExportService.exportRequests(user, criteria)).thenReturn(bytes);
+        when(storageServiceFactory.getStorageService()).thenReturn(storageService);
+        when(storageService.uploadAndSign(any(), eq("5/exports/u2/requests"))).thenReturn("https://signed-r");
+
+        asyncExportService.exportRequests(user, criteria, "u2");
+
+        ArgumentCaptor<MultipartFile> file = ArgumentCaptor.forClass(MultipartFile.class);
+        verify(storageService).uploadAndSign(file.capture(), eq("5/exports/u2/requests"));
+        assertEquals("Requests.xlsx", file.getValue().getOriginalFilename());
+        assertArrayEquals(bytes, file.getValue().getBytes());
+        verify(messagingTemplate).convertAndSend("/exports/u2", "https://signed-r");
+    }
+
+    // T-10
+    @Test
+    void requests_writeFailure_publishesAnErrorAndNoUrl() throws IOException {
+        when(xlsxExportService.exportRequests(user, criteria)).thenThrow(new IOException("disk full"));
+
+        asyncExportService.exportRequests(user, criteria, "u2");
+
+        verify(messagingTemplate).convertAndSend(eq("/exports/u2"), startsWith("error:"));
+        verifyNoMoreInteractions(messagingTemplate);
+        verifyNoInteractions(storageServiceFactory);
+    }
 }

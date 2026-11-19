@@ -2,9 +2,12 @@ package com.grash.integration;
 
 import com.grash.advancedsearch.FilterField;
 import com.grash.advancedsearch.SearchCriteria;
+import com.grash.dto.RequestShowDTO;
+import com.grash.exception.CustomException;
 import com.grash.model.*;
 import com.grash.model.enums.*;
 import com.grash.repository.*;
+import com.grash.service.RequestService;
 import com.grash.service.WorkOrderService;
 import com.grash.service.XlsxExportService;
 import com.grash.utils.Helper;
@@ -19,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.MessageSource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
@@ -30,6 +34,7 @@ import java.util.*;
 import java.util.function.IntPredicate;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static com.grash.utils.Helper.setCurrentUser;
 import static org.junit.jupiter.api.Assertions.*;
@@ -74,6 +79,10 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
     private WorkOrderCategoryRepository workOrderCategoryRepository;
     @Autowired
     private WorkOrderService workOrderService;
+    @Autowired
+    private RequestRepository requestRepository;
+    @Autowired
+    private RequestService requestService;
     @Autowired
     private XlsxExportService xlsxExportService;
     @Autowired
@@ -490,6 +499,252 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
             assertEquals(Arrays.asList(message("No", company), null, null, null, null, null, null, null, null,
                     message("No", company), null, null), second.subList(7, 19));
             assertEquals(Helper.getFormattedDate(bareCreatedAt, dateFormat, timeZone), second.get(19));
+        }
+    }
+
+    // ---------------------------------------------------------------- requests (RF-10)
+
+    private List<String> listedRequestFolios(User user, Supplier<SearchCriteria> criteria) {
+        User current = reload(user);
+        List<String> folios = new ArrayList<>();
+        int page = 0;
+        Page<RequestShowDTO> result;
+        do {
+            SearchCriteria pageCriteria = criteria.get();
+            pageCriteria.setPageNum(page++);
+            pageCriteria.setPageSize(LIST_PAGE_SIZE);
+            result = requestService.findBySearchCriteria(requestService.getSearchCriteria(current, pageCriteria));
+            result.forEach(request -> folios.add(request.getCustomId()));
+        } while (result.hasNext());
+        return new ArrayList<>(new LinkedHashSet<>(folios));
+    }
+
+    private byte[] exportRequests(User user, SearchCriteria criteria) {
+        User current = reload(user);
+        try {
+            return xlsxExportService.exportRequests(current, requestService.getSearchCriteria(current, criteria));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private List<String> exportedFolios(byte[] bytes) {
+        List<List<String>> rows = XlsxTestUtils.readText(bytes, 1);
+        return rows.subList(1, rows.size()).stream().map(row -> row.get(0)).toList();
+    }
+
+    @Nested
+    class RequestExport {
+
+        private static final int REQUESTS = 250;
+
+        private Company company;
+        private User admin;
+        private User requester;
+        private final List<String> foliosByIndex = new ArrayList<>();
+
+        private String folio(int i) {
+            return String.format("R%06d", i);
+        }
+
+        @BeforeEach
+        void setUp() {
+            company = newCompany("RequestCo");
+            admin = newUser(company, newRole(company, Set.of(PermissionEntity.REQUESTS),
+                    Set.of(PermissionEntity.REQUESTS)), "Zoe", "req-admin@export.test");
+            requester = newUser(company, newRole(company, Set.of(PermissionEntity.REQUESTS), Set.of()), "Rita",
+                    "requester@export.test");
+            Asset asset = new Asset();
+            asset.setName("Compresor Ñ");
+            asset.setCompany(company);
+            asset.setStatus(AssetStatus.OPERATIONAL);
+            asset.setFiles(new ArrayList<>());
+            asset.setCustomers(new ArrayList<>());
+            asset.setTeams(new ArrayList<>());
+            asset.setParts(new ArrayList<>());
+            asset.setCustomFieldValues(new ArrayList<>());
+            setCurrentUser(admin);
+            asset = assetRepository.save(asset);
+            Location location = new Location();
+            location.setName("Almacén");
+            location.setCompany(company);
+            location = locationRepository.save(location);
+            Date base = Date.from(Instant.parse("2026-03-01T12:00:00Z"));
+            for (int i = 0; i < REQUESTS; i++) {
+                // the company of a new record is the one of the current user; the auditor does not resolve the
+                // creator in these tests, so it is set here
+                User creator = i % 5 == 0 ? requester : admin;
+                setCurrentUser(creator);
+                Request request = new Request();
+                request.setCreatedBy(creator.getId());
+                request.setCustomId(folio(i));
+                request.setTitle(String.format("Solicitud %03d %s", i, i % 4 == 0 ? "fuga" : "ruido"));
+                request.setDescription("Descripción " + i);
+                request.setPriority(Priority.values()[(i / 2) % 4]);
+                request.setDueDate(Date.from(base.toInstant().plus(i, ChronoUnit.DAYS)));
+                request.setCompany(company);
+                if (i % 2 == 0) request.setAsset(asset);
+                if (i % 3 == 0) request.setLocation(location);
+                if (i % 3 == 0) request.setCancelled(true);
+                else if (i % 3 == 1) request.setWorkOrder(workOrderRepository.save(newWorkOrder(company,
+                        "WO of " + folio(i))));
+                requestRepository.save(request);
+                foliosByIndex.add(folio(i));
+            }
+            Company other = newCompany("OtherRequestCo");
+            setCurrentUser(newUser(other, newRole(other, Set.of(PermissionEntity.REQUESTS),
+                    Set.of(PermissionEntity.REQUESTS)), "Otto", "other-req@export.test"));
+            for (int i = 0; i < 5; i++) {
+                Request request = new Request();
+                request.setCustomId("X" + i);
+                request.setTitle("Other request " + i);
+                request.setCompany(other);
+                requestRepository.save(request);
+            }
+            setCurrentUser(admin);
+            em.flush();
+            em.clear();
+        }
+
+        private List<String> foliosWhere(IntPredicate predicate) {
+            return IntStream.range(0, REQUESTS).filter(predicate).mapToObj(foliosByIndex::get).sorted().toList();
+        }
+
+        private Supplier<SearchCriteria> withFilters(Supplier<List<FilterField>> filters) {
+            return () -> {
+                SearchCriteria searchCriteria = new SearchCriteria();
+                searchCriteria.getFilterFields().addAll(filters.get());
+                return searchCriteria;
+            };
+        }
+
+        private FilterField status(String... values) {
+            return FilterField.builder().field("status").operation("in").value("").values(List.of(values))
+                    .enumName(EnumName.STATUS).build();
+        }
+
+        private FilterField priority(String... values) {
+            return FilterField.builder().field("priority").operation("in").value("").values(List.of(values))
+                    .enumName(EnumName.PRIORITY).build();
+        }
+
+        private void assertSameAsList(User user, Supplier<SearchCriteria> criteria, List<String> expectedSet) {
+            List<String> listed = listedRequestFolios(user, criteria);
+            List<String> exported = exportedFolios(exportRequests(user, criteria.get()));
+
+            assertEquals(listed, exported, "file sequence = list sequence");
+            assertEquals(exported.size(), new HashSet<>(exported).size(), "no repeated rows");
+            assertEquals(expectedSet, exported.stream().sorted().toList(), "only the records of the filter");
+        }
+
+        // T-01 (RF-10 CA-02), with the default filters of the list
+        @Test
+        void defaultFilters_exportEveryRequestOfTheList() {
+            assertSameAsList(admin, withFilters(() -> List.of(priority(), status("APPROVED", "CANCELLED",
+                    "PENDING"))), foliosWhere(i -> true));
+        }
+
+        // T-06
+        @Test
+        void statusAndPriorityFilters_exportTheSameRecordsAsTheList() {
+            assertSameAsList(admin, withFilters(() -> List.of(status("PENDING"))), foliosWhere(i -> i % 3 == 2));
+            assertSameAsList(admin, withFilters(() -> List.of(status("APPROVED"))), foliosWhere(i -> i % 3 == 1));
+            assertSameAsList(admin, withFilters(() -> List.of(status("CANCELLED"))), foliosWhere(i -> i % 3 == 0));
+            assertSameAsList(admin, withFilters(() -> List.of(priority("HIGH"))),
+                    foliosWhere(i -> (i / 2) % 4 == 3));
+            assertSameAsList(admin, withFilters(() -> List.of(priority("HIGH", "LOW"), status("PENDING",
+                    "CANCELLED"), FilterField.builder().field("title").operation("cn").value("fuga")
+                    .values(new ArrayList<>()).build())),
+                    foliosWhere(i -> ((i / 2) % 4 == 3 || (i / 2) % 4 == 1) && i % 3 != 1 && i % 4 == 0));
+        }
+
+        // T-03 for requests
+        @Test
+        void eachOrder_exportsInTheSequenceOfTheList() {
+            for (String field : List.of("customId", "title", "priority", "createdAt", "dueDate")) {
+                for (Sort.Direction direction : Sort.Direction.values()) {
+                    Supplier<SearchCriteria> criteria = () -> {
+                        SearchCriteria searchCriteria = new SearchCriteria();
+                        searchCriteria.setSortField(field);
+                        searchCriteria.setDirection(direction);
+                        return searchCriteria;
+                    };
+                    List<String> exported = exportedFolios(exportRequests(admin, criteria.get()));
+                    assertEquals(REQUESTS, exported.size(), field + " " + direction);
+                    assertEquals(listedRequestFolios(admin, criteria), exported, field + " " + direction);
+                }
+            }
+        }
+
+        // T-05 (RF-10 CA-01)
+        @Test
+        void userWithoutViewOther_exportsOnlyTheirRequests() {
+            assertSameAsList(requester, SearchCriteria::new, foliosWhere(i -> i % 5 == 0));
+        }
+
+        // T-05
+        @Test
+        void userWithoutViewPermission_isForbidden() {
+            User blind = newUser(company, newRole(company, Set.of(PermissionEntity.WORK_ORDERS), Set.of()), "Ciro",
+                    "blind@export.test");
+
+            CustomException exception = assertThrows(CustomException.class,
+                    () -> requestService.getSearchCriteria(reload(blind), new SearchCriteria()));
+            assertEquals(HttpStatus.FORBIDDEN, exception.getHttpStatus());
+        }
+
+        // T-05 (INV-10)
+        @Test
+        void otherCompanyRequests_areNeverExported() {
+            List<String> exported = exportedFolios(exportRequests(admin, new SearchCriteria()));
+
+            assertEquals(foliosWhere(i -> true), exported.stream().sorted().toList());
+            assertTrue(exported.stream().noneMatch(folio -> folio.startsWith("X")));
+        }
+
+        // RF-10 columns (§5.2) and T-07 (RF-10 CA-04)
+        @Test
+        void columns_followTheList_andDueDateFollowsTheRequestConfiguration() {
+            SearchCriteria criteria = new SearchCriteria();
+            criteria.getFilterFields().add(FilterField.builder().field("customId").operation("in").value("")
+                    .values(List.of(folio(0), folio(1), folio(5))).build());
+            Date cancelledCreatedAt = em.createQuery("SELECT r.createdAt FROM Request r WHERE r.customId = :folio"
+                    + " AND r.company.id = :company", Date.class).setParameter("folio", folio(0))
+                    .setParameter("company", company.getId()).getSingleResult();
+            String createdAt = Helper.getFormattedDate(cancelledCreatedAt, DateFormat.DDMMYY, "America/Mexico_City");
+
+            byte[] visible = exportRequests(admin, criteria);
+
+            List<List<String>> rows = XlsxTestUtils.readText(visible, 9);
+            assertEquals(9, XlsxTestUtils.headerCount(visible));
+            assertEquals(Stream.of("Folio", "Title", "Description", "Priority", "Status", "Due_Date", "Asset",
+                    "Location", "Created_At").map(key -> message(key, company)).toList(), rows.get(0));
+            assertEquals(Arrays.asList(folio(0), "Solicitud 000 fuga", "Descripción 0", message("NONE", company),
+                    message("Request_Rejected", company), "01/03/26", "Compresor Ñ", "Almacén", createdAt),
+                    rows.get(1));
+            assertEquals(Arrays.asList(folio(1), message("Request_Approved", company)),
+                    List.of(rows.get(2).get(0), rows.get(2).get(4)));
+            assertEquals(Arrays.asList(folio(5), message("Request_Pending", company), null, null),
+                    Arrays.asList(rows.get(3).get(0), rows.get(3).get(4), rows.get(3).get(6), rows.get(3).get(7)));
+
+            hideRequestField("dueDate");
+            byte[] hidden = exportRequests(admin, criteria);
+
+            assertEquals(8, XlsxTestUtils.headerCount(hidden));
+            List<List<String>> hiddenRows = XlsxTestUtils.readText(hidden, 8);
+            assertFalse(hiddenRows.get(0).contains(message("Due_Date", company)));
+            assertEquals(Arrays.asList(folio(0), "Solicitud 000 fuga", "Descripción 0", message("NONE", company),
+                    message("Request_Rejected", company), "Compresor Ñ", "Almacén", createdAt), hiddenRows.get(1));
+        }
+
+        private void hideRequestField(String fieldName) {
+            CompanySettings settings = companySettingsRepository.findById(company.getCompanySettings().getId())
+                    .get();
+            settings.getWorkOrderRequestConfiguration().getFieldConfigurations().stream()
+                    .filter(fieldConfiguration -> fieldConfiguration.getFieldName().equals(fieldName))
+                    .forEach(fieldConfiguration -> fieldConfiguration.setFieldType(FieldType.HIDDEN));
+            em.flush();
+            em.clear();
         }
     }
 }

@@ -51,6 +51,14 @@ public class AsyncExportService {
     }
 
     /**
+     * RF-10: the requests of the list, with its filters, order and scope ({@code scopedCriteria}).
+     */
+    @Async
+    public void exportRequests(User user, SearchCriteria scopedCriteria, String uuid) {
+        deliver(user, uuid, "requests", "Requests.xlsx", () -> xlsxExportService.exportRequests(user, scopedCriteria));
+    }
+
+    /**
      * Uploads the generated file and publishes its signed URL, or publishes an error without any URL (I-4, I-5).
      */
     private void deliver(User user, String uuid, String entity, String fileName, Callable<byte[]> generator) {

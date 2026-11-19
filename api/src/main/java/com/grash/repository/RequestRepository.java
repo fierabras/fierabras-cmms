@@ -32,5 +32,8 @@ public interface RequestRepository extends JpaRepository<Request, Long>, JpaSpec
 
     List<Request> findByCategory_IdAndCreatedAtBetween(Long id, Date start, Date end);
 
+    @Query("SELECT r FROM Request r LEFT JOIN FETCH r.asset LEFT JOIN FETCH r.location WHERE r.id IN :ids")
+    List<Request> findAllForExportByIdIn(@Param("ids") List<Long> ids);
+
     void deleteByCompany_IdAndIsDemoTrue(Long companyId);
 }
