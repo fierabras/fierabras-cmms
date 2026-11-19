@@ -16,13 +16,18 @@ import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.model.enums.Status;
 import com.grash.repository.*;
+import com.grash.dto.ReportConfig;
 import com.grash.dto.imports.WorkOrderImportDTO;
 import com.grash.exception.CustomException;
 import com.grash.service.CompanyService;
 import com.grash.service.ImportService;
 import com.grash.service.RequestService;
 import com.grash.service.RoleService;
+import com.grash.service.WorkOrderService;
 import com.grash.utils.Consts;
+import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfReader;
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,6 +46,9 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Supplier;
@@ -129,6 +137,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     private PreventiveMaintenanceRepository preventiveMaintenanceRepository;
     @Autowired
     private RelationRepository relationRepository;
+    @Autowired
+    private WorkOrderService workOrderService;
 
     private final List<Long> createdCompanyIds = new ArrayList<>();
     private final List<Long> createdPlanIds = new ArrayList<>();
@@ -2329,6 +2339,52 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     // Past the access check the report needs a storage service the test profile lacks.
                     () -> assertNotEquals(403, allowed.status(), "report of the own request work order: " + allowed),
                     () -> assertEquals(403, denied.status(), "report of a work order not visible: " + denied));
+        }
+
+        @Test
+        @DisplayName("INC-02 E-03 (F-03): the PDF report lists only the relations whose two work orders are visible, as GET /relations")
+        void reportPdf_hidesRelationsToNotVisibleWorkOrders() throws Exception {
+            Tenant tenant = newTenant("E03-report");
+            User user = createUser(tenant.company(), createCustomRole(tenant.company(), "E03 own", ownWorkOrdersOnly));
+            WorkOrder fromRequest = dueWorkOrder(createWorkOrder(tenant.company(), tenant.admin(), null), null,
+                    createRequest(tenant.company(), user, null));
+            WorkOrder own = createWorkOrder(tenant.company(), user, null);
+            WorkOrder hidden = createWorkOrder(tenant.company(), tenant.admin(), null);
+            String ownTitle = "E03-visible-" + UUID.randomUUID().toString().substring(0, 8);
+            String hiddenTitle = "E03-restricted-" + UUID.randomUUID().toString().substring(0, 8);
+            inTx(() -> {
+                workOrderRepository.findById(own.getId()).orElseThrow().setTitle(ownTitle);
+                workOrderRepository.findById(hidden.getId()).orElseThrow().setTitle(hiddenTitle);
+                return null;
+            });
+            relation(tenant.company(), fromRequest, own);
+            relation(tenant.company(), hidden, fromRequest);
+
+            // The download (POST /work-orders/report/{id}) and the mail (POST /work-orders/{id}/send-report) both
+            // render this PDF; the download then needs a storage service the test profile lacks.
+            String text = inTx(() -> {
+                User viewer = userRepository.findById(user.getId()).orElseThrow();
+                WorkOrder workOrder = workOrderRepository.findById(fromRequest.getId()).orElseThrow();
+                assertTrue(workOrder.isAccessibleBy(viewer), "precondition, the work order of an own request");
+                ReportConfig config = new ReportConfig();
+                config.setWorkOrderHistory(false); // the history reads the locale of the authenticated user
+                return pdfText(workOrderService.generatePdfBytes(workOrder, viewer, config));
+            });
+
+            assertAll(
+                    () -> assertTrue(text.contains(ownTitle), "the relation between visible work orders is listed"),
+                    () -> assertFalse(text.contains(hiddenTitle), "a work order not visible must not appear"));
+        }
+
+        private String pdfText(byte[] pdf) {
+            try (PdfDocument document = new PdfDocument(new PdfReader(new ByteArrayInputStream(pdf)))) {
+                StringBuilder text = new StringBuilder();
+                for (int page = 1; page <= document.getNumberOfPages(); page++)
+                    text.append(PdfTextExtractor.getTextFromPage(document.getPage(page))).append('\n');
+                return text.toString().replaceAll("\\s", ""); // the layout may wrap a title
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
 
         private WorkOrder pmWorkOrder(Company company, User createdBy, PreventiveMaintenance pm) {

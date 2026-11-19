@@ -50,10 +50,7 @@ public class RelationController {
             if (!optionalWorkOrder.get().isAccessibleBy(user)) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
-            // INC-02 (R-05): both ends of a relation are shown, so both must be visible
-            return relationService.findByWorkOrder(id).stream()
-                    .filter(relation -> relation.getParent().isAccessibleBy(user)
-                            && relation.getChild().isAccessibleBy(user))
+            return relationService.findVisibleByWorkOrder(id, user).stream()
                     .map(relationMapper::toShowDto)
                     .collect(Collectors.toList());
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);

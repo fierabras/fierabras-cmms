@@ -1022,7 +1022,7 @@ public class WorkOrderService {
         Collection<Labor> labors = config.isCost() ? laborService.findByWorkOrder(savedWorkOrder.getId()) :
                 Collections.emptyList();
         Collection<Relation> relations = config.isRelations() ?
-                relationService.findByWorkOrder(savedWorkOrder.getId()) :
+                relationService.findVisibleByWorkOrder(savedWorkOrder.getId(), user) :
                 Collections.emptyList();
         Collection<AdditionalCost> additionalCosts = config.isCost() ?
                 additionalCostService.findByWorkOrder(savedWorkOrder.getId()) : Collections.emptyList();
