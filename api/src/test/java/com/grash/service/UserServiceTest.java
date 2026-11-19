@@ -1345,9 +1345,13 @@ class UserServiceTest {
             lenient().when(brandingService.getBrandConfig()).thenReturn(bc);
         }
 
+        /**
+         * TD-INC06-03: the super admin is identified by its role, whatever its configured email.
+         */
         @Test
-        void superAdminEmail_skipsSending() {
-            User superAdmin = buildUser(2L, "superadmin@test.com");
+        void superAdminRole_skipsSending() {
+            User superAdmin = buildUser(2L, "configured-root@example.com");
+            superAdmin.setRole(Role.builder().id(9L).code(RoleCode.ADMIN).roleType(RoleType.ROLE_SUPER_ADMIN).build());
             superAdmin.setCompany(company);
             UserSignupRequest req = new UserSignupRequest();
 
