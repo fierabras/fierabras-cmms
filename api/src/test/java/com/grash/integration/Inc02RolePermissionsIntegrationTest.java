@@ -1117,7 +1117,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             HttpResult result = changePassword(login(s.manager()), target);
 
             assertAll(
-                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}: " + result),
+                    () -> assertUserResponse(result, target, "PATCH /users/{id}"),
                     () -> assertFalse(passwordUnchanged(target), "password must change"));
         }
 
@@ -1149,8 +1149,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             HttpResult result = call(patch("/users/" + target.getId() + "/disable"), login(s.manager()));
 
             assertAll(
-                    // The response may fail to serialize in the test profile (see notForbidden): the database decides.
-                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}/disable: " + result),
+                    () -> assertUserResponse(result, target, "PATCH /users/{id}/disable"),
                     () -> assertFalse(isEnabled(target), "user must be disabled"));
         }
 
@@ -1182,7 +1181,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             HttpResult result = call(patch("/users/soft-delete/" + target.getId()), login(s.manager()));
 
             assertAll(
-                    () -> assertTrue(notForbidden(result), "PATCH /users/soft-delete/{id}: " + result),
+                    () -> assertUserResponse(result, target, "PATCH /users/soft-delete/{id}"),
                     () -> assertFalse(isEnabled(target), "user must be deleted"));
         }
 
@@ -1214,7 +1213,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             HttpResult result = call(patch("/users/" + target.getId() + "/enable"), login(s.manager()));
 
             assertAll(
-                    () -> assertTrue(notForbidden(result), "PATCH /users/{id}/enable: " + result),
+                    () -> assertUserResponse(result, target, "PATCH /users/{id}/enable"),
                     () -> assertTrue(isEnabled(target), "user must be enabled"));
         }
 
@@ -1297,12 +1296,15 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         /**
-         * disable and soft-delete answer with the user and its lazy role. The test profile does not load the
-         * spring.jackson.serialization.fail-on-empty-beans=false of the main application.yml (the test one shadows
-         * it), so that serialization fails there with 500 after the change is committed; production answers 200.
+         * INC-02 (E-06, F-09): an authorized change answers 200 with the user, including its lazy role, as in
+         * production.
          */
-        private boolean notForbidden(HttpResult result) {
-            return result.is2xx() || result.status() == 500;
+        private void assertUserResponse(HttpResult result, User target, String endpoint) throws Exception {
+            assertEquals(200, result.status(), endpoint + ": " + result);
+            JsonNode user = objectMapper.readTree(result.body());
+            assertEquals(target.getId().longValue(), user.path("id").asLong(), endpoint + " returns the user");
+            assertEquals(roleIdOfUser(target.getId()).longValue(), user.path("role").path("id").asLong(),
+                    endpoint + " returns the role of the user");
         }
 
         private boolean passwordUnchanged(User user) {
