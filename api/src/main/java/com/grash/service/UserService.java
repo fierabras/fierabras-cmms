@@ -192,7 +192,7 @@ public class UserService {
             }
             List<UserInvitation> userInvitations =
                     userInvitationService.findByRoleAndEmail(role.getId(), user.getEmail());
-            if (enableInvitationViaEmail && userInvitations.isEmpty()) {
+            if (userInvitations.isEmpty()) {
                 throw new CustomException("You are not invited to this organization for this role",
                         HttpStatus.NOT_ACCEPTABLE);
             }
