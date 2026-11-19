@@ -2061,6 +2061,32 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                             "the closing side effects must not run again"));
         }
 
+        @Test
+        @DisplayName("INC-02 E-02 (F-02): COMPLETE again keeps the duration and the cost of the stopped timers")
+        void changeStatus_alreadyComplete_keepsLaborDurationAndCost() throws Exception {
+            Tenant tenant = newTenant("E02-labor");
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            // A timer running for an hour, at 3600 per hour
+            Labor timer = new Labor(tenant.admin(), 3600, new Date(System.currentTimeMillis() - 3_600_000L), workOrder,
+                    true, TimeStatus.RUNNING);
+            timer.setCompany(tenant.company());
+            Long timerId = laborRepository.save(timer).getId();
+            String token = login(tenant.admin());
+            HttpResult first = complete(token, workOrder.getId());
+            assertTrue(first.is2xx(), "precondition, first completion: " + first);
+            Labor stopped = laborRepository.findById(timerId).orElseThrow();
+            assertEquals(TimeStatus.STOPPED, stopped.getStatus(), "precondition, closing stops the running timer");
+            assertTrue(stopped.getDuration() >= 3600, "precondition, the hour is logged: " + stopped.getDuration());
+
+            HttpResult second = complete(token, workOrder.getId());
+
+            Labor after = laborRepository.findById(timerId).orElseThrow();
+            assertAll(
+                    () -> assertTrue(second.is2xx(), "change-status to COMPLETE again: " + second),
+                    () -> assertEquals(stopped.getDuration(), after.getDuration(), "the duration must not change"),
+                    () -> assertEquals(stopped.getCost(), after.getCost(), "the cost must not change"));
+        }
+
         private void requireOnCompletion(Company company, String fieldName) {
             setOnCompletion(company, fieldName, 1); // FieldType.REQUIRED
         }

@@ -86,6 +86,8 @@ public class LaborService {
     }
 
     public Labor stop(Labor labor) {
+        // INC-02 (E-02): the time of a stopped timer is already in its duration
+        if (labor.getStatus() == TimeStatus.STOPPED) return labor;
         labor.setStatus(TimeStatus.STOPPED);
         labor.setDuration(labor.getDuration() + Helper.getDateDiff(labor.getStartedAt(), new Date(), TimeUnit.SECONDS));
         return save(labor);

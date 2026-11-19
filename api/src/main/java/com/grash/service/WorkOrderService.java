@@ -874,9 +874,8 @@ public class WorkOrderService {
                     if (mutableWO.getParentPreventiveMaintenance() != null)
                         scheduleService.scheduleNextWorkOrderJobAfterCompletion(mutableWO.getParentPreventiveMaintenance().getSchedule().getId(), mutableWO.getCompletedOn());
                 }
-                Collection<Labor> labors = laborService.findByWorkOrder(id);
-                Collection<Labor> primaryTimes = labors.stream().filter(Labor::isLogged).collect(Collectors.toList());
-                primaryTimes.forEach(laborService::stop);
+                // INC-02 (E-02): closing stops the timers in complete(), only on the effective transition
+                if (dto.getStatus() != Status.COMPLETE) stopRunningTimers(id);
             }
             WorkOrder patchedWorkOrder = saveAndFlushWithWebhook(mutableWO, user.getCompany(),
                     originalWorkOrder);
@@ -951,7 +950,17 @@ public class WorkOrderService {
         workOrder.setSignature(signature);
         workOrder.setCompletedBy(user);
         workOrder.setCompletedOn(closedOn == null ? new Date() : closedOn);
+        if (previous != null) stopRunningTimers(workOrder.getId());
         return true;
+    }
+
+    /**
+     * INC-02 (E-02): stops the running timers of a work order. A stopped timer keeps its duration and its cost.
+     */
+    private void stopRunningTimers(Long workOrderId) {
+        laborService.findByWorkOrder(workOrderId).stream()
+                .filter(labor -> labor.isLogged() && labor.getStatus() == TimeStatus.RUNNING)
+                .forEach(laborService::stop);
     }
 
     /**
