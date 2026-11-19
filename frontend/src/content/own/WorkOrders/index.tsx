@@ -1017,7 +1017,7 @@ function WorkOrders() {
                   item.key === 'work-orders' ? criteria : undefined
                 );
               } catch (error) {
-                showSnackBar(t('Export failed'), 'error');
+                showSnackBar(t('export_failed'), 'error');
               }
               handleCloseMenu();
             }}

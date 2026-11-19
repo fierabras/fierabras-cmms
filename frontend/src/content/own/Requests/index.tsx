@@ -590,7 +590,7 @@ function Requests() {
           try {
             await exportEntity('requests', criteria);
           } catch (error) {
-            showSnackBar(t('Export failed'), 'error');
+            showSnackBar(t('export_failed'), 'error');
           }
           handleCloseMenu();
         }}

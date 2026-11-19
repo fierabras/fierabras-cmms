@@ -1896,6 +1896,7 @@ const locale = {
   export_cost_and_time: 'Export cost and time',
   export_work_orders: 'Export work orders',
   export_requests: 'Export requests',
+  export_failed: 'Export failed',
   copy_wo: 'Copy Work Order',
   copy_pm: 'Copy Preventive Maintenance',
   copy_pm_description:
