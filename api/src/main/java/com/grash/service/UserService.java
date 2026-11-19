@@ -17,6 +17,7 @@ import com.grash.mapper.UserMapper;
 import com.grash.model.*;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
+import com.grash.model.enums.RoleType;
 import com.grash.repository.UserRepository;
 import com.grash.repository.VerificationTokenRepository;
 import com.grash.security.CustomUserDetail;
@@ -431,7 +432,7 @@ public class UserService {
 
     @Async
     void sendRegistrationMailToSuperAdmins(User user, UserSignupRequest userSignupRequest) {
-        if (user.getEmail().equals("superadmin@test.com")) return;
+        if (user.getRole() != null && user.getRole().getRoleType() == RoleType.ROLE_SUPER_ADMIN) return;
         if (user.getCompany() != null && user.getCompany().isDemo()) return;
         if (recipients == null || recipients.length == 0) {
             return;
