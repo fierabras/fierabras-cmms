@@ -2021,6 +2021,7 @@ const esJSON = {
   hours_left: 'restante',
   export_cost_and_time: 'Exportar costo y tiempo',
    export_work_orders: 'Exportar órdenes de trabajo',
+   export_requests: 'Exportar solicitudes',
    copy_wo: 'Copiar orden de trabajo',
    copy_pm: 'Copiar mantenimiento preventivo',
    copy_pm_description:
