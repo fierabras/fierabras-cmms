@@ -536,7 +536,6 @@ public class WorkOrderService {
         workOrder.setCompany(company);
         workOrder.setDueDate(Helper.getDateFromExcelDate(dto.getDueDate()));
         workOrder.setCustomId(getWorkOrderNumber(company));
-        workOrder.setRequiredSignature(Helper.getBooleanFromString(dto.getRequiredSignature()));
 
         workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
         Status status = Status.getStatusFromString(dto.getStatus());
@@ -555,6 +554,10 @@ public class WorkOrderService {
             workOrder.setCompletedOn(closedOn);
             workOrder.setStatus(status);
         }
+        // INC-02 (E-01): applied after the closing check, which uses the persisted requirement; an omitted column
+        // keeps it
+        if (dto.getRequiredSignature() != null)
+            workOrder.setRequiredSignature(Helper.getBooleanFromString(dto.getRequiredSignature()));
         workOrder.setFeedback(dto.getFeedback());
         List<Customer> customers = new ArrayList<>();
         dto.getCustomersNames().forEach(name -> {

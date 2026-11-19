@@ -1901,6 +1901,71 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                             "closing date must not change"));
         }
 
+        // ----- E-01 (F-01): the import closes against the persisted signature requirement -----
+
+        private WorkOrder workOrderRequiringSignature(Tenant tenant) {
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            return inTx(() -> {
+                WorkOrder saved = workOrderRepository.findById(workOrder.getId()).orElseThrow();
+                saved.setRequiredSignature(true);
+                return workOrderRepository.save(saved);
+            });
+        }
+
+        private boolean requiresSignature(Long workOrderId) {
+            return inTx(() -> workOrderRepository.findById(workOrderId).orElseThrow().isRequiredSignature());
+        }
+
+        @Test
+        @DisplayName("INC-02 E-01 (F-01): an import row closing a work order that requires a signature, without the column, is rejected")
+        void importUpdateToComplete_signatureRequired_columnOmitted_rejected() {
+            Tenant tenant = newTenant("E01-omitted");
+            User importer = importer(tenant);
+            WorkOrder existing = workOrderRequiringSignature(tenant);
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("E01 update")
+                    .status("Complete").completedOn(45000.5).build();
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> importService.importWorkOrders(List.of(row), tenant.company(), importer));
+
+            assertAll(
+                    () -> assertEquals(HttpStatus.NOT_ACCEPTABLE, ex.getHttpStatus()),
+                    () -> assertEquals(SIGNATURE, ex.getMessage()),
+                    () -> assertEquals(Status.OPEN, statusOf(existing.getId()), "work order must stay OPEN"),
+                    () -> assertTrue(requiresSignature(existing.getId()), "the requirement must be kept"));
+        }
+
+        @Test
+        @DisplayName("INC-02 E-01 (F-01): an import row cannot lift the signature requirement of the work order it closes")
+        void importUpdateToComplete_signatureRequired_columnNo_rejected() {
+            Tenant tenant = newTenant("E01-no");
+            User importer = importer(tenant);
+            WorkOrder existing = workOrderRequiringSignature(tenant);
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("E01 update")
+                    .status("Complete").requiredSignature("No").completedOn(45000.5).build();
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> importService.importWorkOrders(List.of(row), tenant.company(), importer));
+
+            assertAll(
+                    () -> assertEquals(SIGNATURE, ex.getMessage()),
+                    () -> assertEquals(Status.OPEN, statusOf(existing.getId()), "work order must stay OPEN"));
+        }
+
+        @Test
+        @DisplayName("INC-02 E-01 (F-01): an import row without the column keeps the signature requirement")
+        void importUpdate_columnOmitted_keepsSignatureRequirement() {
+            Tenant tenant = newTenant("E01-keep");
+            User importer = importer(tenant);
+            WorkOrder existing = workOrderRequiringSignature(tenant);
+            WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("E01 update")
+                    .status("Open").build();
+
+            importService.importWorkOrders(List.of(row), tenant.company(), importer);
+
+            assertTrue(requiresSignature(existing.getId()), "an omitted column must not change the requirement");
+        }
+
         // ----- R-04: a work order already COMPLETE keeps its closing evidence and gets no closing effects again -----
 
         @Test
