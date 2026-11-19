@@ -28,6 +28,10 @@ spring:
     protocol: smtp
   cache:
     type: simple
+  # INC-02 (E-06): as in the main application.yml, which src/test/resources/application.yml shadows
+  jackson:
+    serialization:
+      fail-on-empty-beans: false
   sql:
     init:
       mode: never

@@ -101,6 +101,8 @@ public class UserController {
             User savedUser = optionalUser.get();
             if (requester.getId().equals(savedUser.getId()) ||
                     requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                // INC-02 (D-21): changing the password of another user is managing that user
+                if (userReq.getNewPassword() != null) userService.assertCanManage(requester, savedUser);
                 return userMapper.toResponseDto(userService.update(id, userReq));
             } else {
                 throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
@@ -144,8 +146,10 @@ public class UserController {
                                   @Parameter(hidden = true) @CurrentUser User requester) {
         if (!requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS))
             throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
-        return userMapper.toResponseDto(userService.enableUser(userService.findByIdAndCompany(id,
-                requester.getCompany().getId()).get()));
+        User userToEnable = userService.findByIdAndCompany(id, requester.getCompany().getId()).get();
+        // INC-02 (D-23): enabling a user is managing that user
+        userService.assertCanManage(requester, userToEnable);
+        return userMapper.toResponseDto(userService.enableUser(userToEnable));
     }
 
     @PatchMapping("/soft-delete/{id}")

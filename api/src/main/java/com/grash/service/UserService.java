@@ -490,6 +490,7 @@ public class UserService {
                     (int) findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.isEnabled() && user1.isEnabledInSubscriptionAndPaid()).count();
             Optional<Role> optionalRole = roleService.findById(invitation.getRole().getId());
             if (optionalRole.isPresent() && optionalRole.get().belongsToCompany(user.getCompany())) {
+                roleService.assertCanGrant(user.getRole(), optionalRole.get());
                 if (companyUsersCount + invitation.getEmails().size() <= user.getCompany().getSubscription().getUsersCount() || !optionalRole.get().isPaid()) {
                     invitation.getEmails().forEach(email ->
                             invite(email, optionalRole.get(), user, invitation.getDisableSendingEmail())
@@ -519,12 +520,18 @@ public class UserService {
     }
 
     public User patchUserRole(Long userId, Long roleId, User requester) {
+        // INC-02 (C11): nobody changes their own role.
+        if (requester.getId().equals(userId))
+            throw new CustomException("You cannot change your own role", HttpStatus.FORBIDDEN);
         Optional<User> optionalUserToPatch = findByIdAndCompany(userId, requester.getCompany().getId());
         Optional<Role> optionalRole = roleService.findById(roleId);
 
         if (optionalUserToPatch.isPresent() && optionalRole.isPresent() && optionalRole.get().belongsToCompany(requester.getCompany())) {
             User userToPatch = optionalUserToPatch.get();
             if (requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                // INC-02 (D-6, D-21): both the current role of the user and the resulting one
+                assertCanManage(requester, userToPatch);
+                roleService.assertCanGrant(requester.getRole(), optionalRole.get());
                 int usersCount =
                         (int) findByCompany(requester.getCompany().getId()).stream().filter(User::isEnabledInSubscriptionAndPaid).count();
                 if (usersCount <= requester.getCompany().getSubscription().getUsersCount()) {
@@ -541,12 +548,26 @@ public class UserService {
         }
     }
 
+    /**
+     * INC-02 (D-21, D-22): the single rule to manage another user, that is to change their role or password, disable
+     * or delete them. Nobody manages the company owner but the owner, nor a user whose current role is superior to
+     * their own (D-6). Changing one's own role is forbidden apart (D-7).
+     */
+    public void assertCanManage(User manager, User target) {
+        if (manager.getId().equals(target.getId())) return;
+        if (target.isOwnsCompany())
+            throw new CustomException("Only the company owner can manage their own user", HttpStatus.FORBIDDEN);
+        if (!roleService.isWithin(manager.getRole(), target.getRole()))
+            throw new CustomException("You cannot manage a user whose role is superior to yours", HttpStatus.FORBIDDEN);
+    }
+
     public User disableUser(Long id, User requester) {
         Optional<User> optionalUserToDisable = findByIdAndCompany(id, requester.getCompany().getId());
 
         if (optionalUserToDisable.isPresent()) {
             User userToDisable = optionalUserToDisable.get();
             if (requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+                assertCanManage(requester, userToDisable);
                 userToDisable.setEnabled(false);
                 userToDisable.setEnabledInSubscription(false);
                 return save(userToDisable);
@@ -564,6 +585,7 @@ public class UserService {
         if (optionalUserToSoftDelete.isPresent()) {
             User userToSoftDelete = optionalUserToSoftDelete.get();
             if (requester.getId().equals(id) || requester.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
+                assertCanManage(requester, userToSoftDelete);
                 userToSoftDelete.setEnabled(false);
                 userToSoftDelete.setEnabledInSubscription(false);
                 userToSoftDelete.setEmail(userToSoftDelete.getEmail().concat("_".concat(id.toString())));

@@ -15,10 +15,20 @@ public class CustomException extends RuntimeException {
     private final String message;
     @Getter
     private final HttpStatus httpStatus;
+    /**
+     * Stable identifier of the rule that rejected the request, for clients that tell errors apart; null if none.
+     */
+    @Getter
+    private final String code;
 
     public CustomException(String message, HttpStatus httpStatus) {
+        this(message, httpStatus, null);
+    }
+
+    public CustomException(String message, HttpStatus httpStatus, String code) {
         this.message = message;
         this.httpStatus = httpStatus;
+        this.code = code;
     }
 
     @Override

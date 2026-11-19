@@ -9,8 +9,13 @@ import java.util.List;
 
 @Data
 @NoArgsConstructor
-@Schema(description = "DTO for patching an existing role")
+@Schema(description = "DTO for patching an existing role. Each permission set sent replaces the current one; a null " +
+        "or omitted set keeps the current one, and an empty set removes every permission of that set.")
 public class RolePatchDTO {
+
+    @Schema(description = "Version of the role as read by the client. Required (400 when missing); a stale version " +
+            "is rejected with 409", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Long version;
 
     @Schema(description = "Name")
     private String name;

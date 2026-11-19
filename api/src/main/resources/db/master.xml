@@ -227,4 +227,8 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_16_1794888123_request_estimated_fields_configuration.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_18_1795016833_own_user_role_id_restrict.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_18_1795021887_role_version.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

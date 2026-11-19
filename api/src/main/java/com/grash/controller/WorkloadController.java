@@ -84,7 +84,8 @@ public class WorkloadController {
         if (!licenseService.hasEntitlement(LicenseEntitlement.RESOURCE_PLANNING)) {
             throw new CustomException("You need a license for resource planning", HttpStatus.FORBIDDEN);
         }
-        if (!user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) || !user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+        // INC-02 (R-05): planning shows every work order of the company, so it takes the detail view of all of them
+        if (!WorkOrder.canViewAll(user) || !user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
         }
         if (!user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.RESOURCE_PLANNING)) {

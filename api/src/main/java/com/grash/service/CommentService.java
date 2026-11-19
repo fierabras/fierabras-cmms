@@ -180,6 +180,13 @@ public class CommentService {
 
     public long countByWorkOrderIdWithFiles(Long workOrderId, User user) {
         workOrderService.checkAccessToWorkOrderId(workOrderId, user);
+        return countWithFilesByWorkOrder(workOrderId);
+    }
+
+    /**
+     * Server-side count without access check, for the closing requirements of a work order (INC-02, T-15).
+     */
+    public long countWithFilesByWorkOrder(Long workOrderId) {
         return commentRepository.countByWorkOrderIdWithFiles(workOrderId);
     }
 }

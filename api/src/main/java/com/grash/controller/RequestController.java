@@ -19,6 +19,7 @@ import com.grash.model.enums.RoleType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.service.*;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -126,7 +127,7 @@ public class RequestController {
     public SuccessResponse getPending(HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT) && user.getRole().getViewPermissions().contains(PermissionEntity.REQUESTS)) {
-            return new SuccessResponse(true, requestService.countPending(user.getCompany().getId()).toString());
+            return new SuccessResponse(true, requestService.countPending(user).toString());
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
 
@@ -231,15 +232,11 @@ public class RequestController {
                                     @Parameter(description = "Request approval data") @RequestBody RequestApproveDTO requestApproveDTO,
                                     HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<Request> optionalRequest = requestService.findById(id);
-        if (!(user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || user.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        assertCanReview(user);
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
-            }
+            assertPending(savedRequest);
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.REQUEST_APPROVED,
                             user.getCompany().getId());
@@ -259,9 +256,10 @@ public class RequestController {
             webhookPayload.put("newStatus", "APPROVED");
             webhookPayload.put("workOrderId", result.getId());
             Object serializedRequest = requestMapper.toShowDto(savedRequest);
-            webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE,
-                    webhookPayload,
-                    "changedRequest", serializedRequest, null, null, null, null, null);
+            // INC-02 (E-05): the external effects of the review run once it is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                    WebhookEvent.WORK_REQUEST_STATUS_CHANGE, webhookPayload,
+                    "changedRequest", serializedRequest, null, null, null, null, null));
 
             List<User> usersToMail =
                     userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))
@@ -272,23 +270,24 @@ public class RequestController {
                 User requester = userService.findById(savedRequest.getCreatedBy()).get();
                 String message = messageSource.getMessage("request_approved_description",
                         new Object[]{savedRequest.getTitle()}, Helper.getLocale(user));
-                notificationService.createMultiple(Collections.singletonList(new Notification(message, requester,
-                        NotificationType.WORK_ORDER, result.getId())), true, title);
+                List<Notification> requesterNotification = Collections.singletonList(new Notification(message,
+                        requester, NotificationType.WORK_ORDER, result.getId()));
+                AfterCommit.run(() -> notificationService.createMultiple(requesterNotification, true, title));
                 usersToMail.add(requester);
             }
             String message2 = messageSource.getMessage("request_approved_description_limited_admin",
                     new Object[]{user.getFullName(), savedRequest.getTitle()}, Helper.getLocale(user));
-            notificationService.createMultiple(userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
-                    NotificationType.WORK_ORDER, result.getId())).collect(Collectors.toList()), true, title);
+            List<Notification> limitedAdminNotifications = userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
+                    NotificationType.WORK_ORDER, result.getId())).collect(Collectors.toList());
+            AfterCommit.run(() -> notificationService.createMultiple(limitedAdminNotifications, true, title));
 
             Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                 put("workOrderLink", frontendUrl + "/app/work-orders/" + result.getId());
                 put("workOrderTitle", result.getTitle());
             }};
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail)
-                            .toArray(String[]::new), title, mailVariables, "approved-request.html",
-                    Helper.getLocale(user),
-                    null);
+            String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
+            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
+                    title, mailVariables, "approved-request.html", Helper.getLocale(user), null));
 
             return result;
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
@@ -300,15 +299,11 @@ public class RequestController {
                                  @RequestParam @Parameter(description = "Reason of the request") String reason,
                                  HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<Request> optionalRequest = requestService.findById(id);
-        if (!(user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || user.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))) {
-            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
-        }
+        assertCanReview(user);
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
-            }
+            assertPending(savedRequest);
             if (reason == null || reason.trim().isEmpty())
                 throw new CustomException("Please give a reason", HttpStatus.NOT_ACCEPTABLE);
             savedRequest.setCancellationReason(reason);
@@ -325,9 +320,10 @@ public class RequestController {
             webhookPayload.put("newStatus", "CANCELLED");
             webhookPayload.put("cancellationReason", reason);
             Object serializedRequest = requestMapper.toShowDto(savedRequest);
-            webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE,
-                    webhookPayload,
-                    "changedRequest", serializedRequest, null, null, null, null, null);
+            // INC-02 (E-05): the external effects of the review run once it is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                    WebhookEvent.WORK_REQUEST_STATUS_CHANGE, webhookPayload,
+                    "changedRequest", serializedRequest, null, null, null, null, null));
 
             String title = messageSource.getMessage("request_rejected", null, Helper.getLocale(user));
             List<User> usersToMail =
@@ -339,23 +335,24 @@ public class RequestController {
 
                 String message = messageSource.getMessage("request_rejected_description",
                         new Object[]{savedRequest.getTitle()}, Helper.getLocale(user));
-                notificationService.createMultiple(Collections.singletonList(new Notification(message, requester,
-                        NotificationType.INFO, null)), true, title);
+                List<Notification> requesterNotification = Collections.singletonList(new Notification(message,
+                        requester, NotificationType.INFO, null));
+                AfterCommit.run(() -> notificationService.createMultiple(requesterNotification, true, title));
                 usersToMail.add(requester);
             }
             String message2 = messageSource.getMessage("request_rejected_description_limited_admin",
                     new Object[]{user.getFullName(), savedRequest.getTitle()}, Helper.getLocale(user));
-            notificationService.createMultiple(userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
-                    NotificationType.INFO, null)).collect(Collectors.toList()), true, title);
+            List<Notification> limitedAdminNotifications = userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
+                    NotificationType.INFO, null)).collect(Collectors.toList());
+            AfterCommit.run(() -> notificationService.createMultiple(limitedAdminNotifications, true, title));
 
             Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                 put("requestLink", frontendUrl + "/app/requests/" + savedRequest.getId());
                 put("requestTitle", savedRequest.getTitle());
             }};
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail)
-                            .toArray(String[]::new), title, mailVariables, "rejected-request.html",
-                    Helper.getLocale(user),
-                    null);
+            String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
+            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
+                    title, mailVariables, "rejected-request.html", Helper.getLocale(user), null));
 
             return requestMapper.toShowDto(requestService.save(savedRequest));
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
@@ -376,6 +373,31 @@ public class RequestController {
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * INC-02 (T-09): approving or rejecting takes exactly what the web UI requires to show those actions
+     * (frontend/src/content/own/Requests/RequestDetails.tsx:194-198 and hasCreatePermission in
+     * frontend/src/contexts/JWTAuthContext.tsx:868-872): view on settings or the LIMITED_ADMIN role, and create on
+     * work orders without being a super account user.
+     */
+    private static void assertCanReview(User user) {
+        Role role = user.getRole();
+        boolean reviewer = role.getViewPermissions().contains(PermissionEntity.SETTINGS)
+                || RoleCode.LIMITED_ADMIN.equals(role.getCode());
+        boolean createsWorkOrders = role.getCreatePermissions().contains(PermissionEntity.WORK_ORDERS)
+                && user.getSuperAccountRelations().isEmpty();
+        if (!(reviewer && createsWorkOrders)) throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * Only a pending request (neither approved nor rejected) can be approved or rejected.
+     */
+    private static void assertPending(Request request) {
+        if (request.getWorkOrder() != null)
+            throw new CustomException("Request is already approved", HttpStatus.NOT_ACCEPTABLE);
+        if (request.isCancelled())
+            throw new CustomException("Request is already rejected", HttpStatus.NOT_ACCEPTABLE);
     }
 
 }

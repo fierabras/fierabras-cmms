@@ -39,7 +39,7 @@ public class GlobalExceptionHandlerController {
     @ExceptionHandler(CustomException.class)
     public ResponseEntity<SuccessResponse> handleCustomException(HttpServletResponse res, CustomException ex) {
         ex.printStackTrace();
-        return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage()), ex.getHttpStatus());
+        return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage(), ex.getCode()), ex.getHttpStatus());
     }
 
     @ExceptionHandler(AccessDeniedException.class)

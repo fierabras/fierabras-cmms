@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- INC-02 (T-13): optimistic locking for roles. Two editors starting from the same snapshot overwrote each
+         other's permissions; a stale PATCH is now rejected with 409. Existing rows start at version 0. -->
+    <changeSet id="2026_11_18_1795021887_role_version" author="fierabras">
+        <addColumn tableName="role">
+            <column name="version" type="BIGINT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="role" columnName="version"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

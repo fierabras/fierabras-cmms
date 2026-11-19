@@ -22,9 +22,12 @@ import { addRole } from '../../../../slices/role';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import useAuth from '../../../../hooks/useAuth';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
-import { getErrorMessage } from '../../../../utils/api';
 import { PermissionEntity, PermissionRoot } from '../../../../models/owns/role';
-import { defaultPermissions } from '../../../../utils/roles';
+import {
+  defaultPermissions,
+  holdsPermission,
+  roleErrorMessage
+} from '../../../../utils/roles';
 import PermissionsMatrix from './PermissionsMatrix';
 
 interface PageHeaderProps {
@@ -34,7 +37,7 @@ interface PageHeaderProps {
 
 function PageHeader({ rolesNumber, formatValues }: PageHeaderProps) {
   const { t }: { t: any } = useTranslation();
-  const { hasFeature } = useAuth();
+  const { hasFeature, user } = useAuth();
   const [open, setOpen] = useState(false);
   const dispatch = useDispatch();
   const { showSnackBar } = useContext(CustomSnackBarContext);
@@ -51,7 +54,10 @@ function PageHeader({ rolesNumber, formatValues }: PageHeaderProps) {
     showSnackBar(t('role_create_success'), 'success');
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('role_create_failure')), 'error');
+    showSnackBar(
+      roleErrorMessage(err, t, t('role_create_failure')),
+      'error'
+    );
 
   const permissionRoots: PermissionRoot[] = [
     'viewPermissions',
@@ -125,7 +131,9 @@ function PageHeader({ rolesNumber, formatValues }: PageHeaderProps) {
               Object.values(PermissionEntity).flatMap((entity) =>
                 permissionRoots.map((root) => [
                   `${root}_${entity}`,
-                  defaultPermissions[root].includes(entity)
+                  // INC-02 (D-6): a default the user does not hold is not offered
+                  defaultPermissions[root].includes(entity) &&
+                    holdsPermission(user?.role, root, entity)
                 ])
               )
             ),
@@ -208,7 +216,11 @@ function PageHeader({ rolesNumber, formatValues }: PageHeaderProps) {
                     <Typography variant="h4" sx={{ pb: 2 }}>
                       {t('permissions')}
                     </Typography>
-                    <PermissionsMatrix values={values} handleChange={handleChange} />
+                    <PermissionsMatrix
+                      values={values}
+                      handleChange={handleChange}
+                      grantor={user?.role}
+                    />
                   </Grid>
                 </Grid>
               </DialogContent>

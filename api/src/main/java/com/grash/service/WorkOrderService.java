@@ -25,6 +25,7 @@ import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 
 import com.grash.repository.WorkOrderRepository;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import com.grash.utils.MultipartFileImpl;
 import com.grash.utils.TenantAspectUtils;
@@ -62,6 +63,7 @@ import jakarta.persistence.criteria.JoinType;
 import java.io.ByteArrayOutputStream;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static com.grash.utils.Consts.usageBasedLicenseLimits;
@@ -129,15 +131,17 @@ public class WorkOrderService {
 
         WorkOrder savedWorkOrder = workOrderRepository.saveAndFlush(workOrder);
         em.refresh(savedWorkOrder);
-        notify(savedWorkOrder, Helper.getLocale(company));
+        // INC-02 (E-05): the external effects of a new work order run once it is committed
+        Locale locale = Helper.getLocale(company);
+        AfterCommit.run(() -> notify(savedWorkOrder, locale));
         Collection<Workflow> workflows =
                 workflowService.findByMainConditionAndCompany(WFMainCondition.WORK_ORDER_CREATED, company.getId());
         workflows.forEach(workflow -> workflowService.runWorkOrder(workflow, savedWorkOrder));
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("workOrderId", savedWorkOrder.getId());
         Object serializedWorkOrder = workOrderMapper.toShowDto(savedWorkOrder);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_WORK_ORDER, webhookPayload,
-                "newWorkOrder", serializedWorkOrder, null, null, null, null, null);
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_WORK_ORDER,
+                webhookPayload, "newWorkOrder", serializedWorkOrder, null, null, null, null, null));
         return savedWorkOrder;
     }
 
@@ -355,6 +359,16 @@ public class WorkOrderService {
                 Sort.by(Sort.Direction.DESC, "createdAt")));
     }
 
+    /**
+     * INC-02 (R-05): the last work orders of a preventive maintenance the user can see (detail rule), filtered
+     * before the limit.
+     */
+    public List<WorkOrder> findLastByPM(Long id, int count, User user) {
+        if (WorkOrder.canViewAll(user)) return findLastByPM(id, count).getContent();
+        return workOrderRepository.findByParentPreventiveMaintenance_Id(id, Sort.by(Sort.Direction.DESC, "createdAt"))
+                .stream().filter(workOrder -> workOrder.isAccessibleBy(user)).limit(count).toList();
+    }
+
     public Collection<WorkOrder> findByLocation(Long id) {
         return workOrderRepository.findByLocation_Id(id);
     }
@@ -514,21 +528,45 @@ public class WorkOrderService {
         return workOrderRepository.findByDueDateBetweenAndCompany_Id(date1, date2, id);
     }
 
-    public void importWorkOrder(WorkOrder workOrder, WorkOrderImportDTO dto, Company company) {
+    /**
+     * @param importer the user importing, null for the demo data shipped with the server (only new rows)
+     */
+    public void importWorkOrder(WorkOrder workOrder, WorkOrderImportDTO dto, Company company, User importer) {
+        Status previous = workOrder.getId() == null ? null : workOrder.getStatus();
         checkUsageBasedLimit(company);
         Helper.populateWorkOrderBaseFromImportDTO(workOrder, dto, company, locationService, teamService, userService,
                 assetService, workOrderCategoryService);
         workOrder.setCompany(company);
         workOrder.setDueDate(Helper.getDateFromExcelDate(dto.getDueDate()));
         workOrder.setCustomId(getWorkOrderNumber(company));
-        workOrder.setRequiredSignature(Helper.getBooleanFromString(dto.getRequiredSignature()));
 
-        Optional<User> optionalCompletedBy = userService.findByEmailAndCompany(dto.getCompletedByEmail(),
-                company.getId());
-        optionalCompletedBy.ifPresent(workOrder::setCompletedBy);
-        workOrder.setCompletedOn(dto.getCompletedOn() == null ? null : Helper.addSeconds(new Date(), 60 * 10));
         workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
-        workOrder.setStatus(Status.getStatusFromString(dto.getStatus()));
+        Status status = Status.getStatusFromString(dto.getStatus());
+        // INC-02 (T-14, D-15): the import keeps the closing date of the file (Excel serial date, as dueDate).
+        Date closedOn = Helper.getDateFromExcelDate(dto.getCompletedOn());
+        if (previous != null && status == Status.COMPLETE) {
+            // INC-02 (D-20): a row updating an existing work order to COMPLETE follows the closing rule (D-19)
+            if (importer == null)
+                throw new IllegalStateException("Only a user import can update a work order to COMPLETE");
+            // INC-02 (E-07, D-31): the closing date comes from the file (D-15) and is never made up
+            Double excelClosedOn = dto.getCompletedOn();
+            if (previous != Status.COMPLETE && (excelClosedOn == null || !Double.isFinite(excelClosedOn)
+                    || excelClosedOn <= 0))
+                throw new CustomException("A valid completion date is required to close work order " +
+                        workOrder.getId(), HttpStatus.NOT_ACCEPTABLE);
+            complete(workOrder, previous, workOrder.getSignature(), importer, closedOn);
+        } else {
+            // INC-02 (T-15, D-20), approved exception for historical data, new rows only: an imported work order
+            // cannot carry files, tasks, labor, parts, costs nor a signature, and keeps the closing user of the file.
+            userService.findByEmailAndCompany(dto.getCompletedByEmail(), company.getId())
+                    .ifPresent(workOrder::setCompletedBy);
+            workOrder.setCompletedOn(closedOn);
+            workOrder.setStatus(status);
+        }
+        // INC-02 (E-01): applied after the closing check, which uses the persisted requirement; an omitted column
+        // keeps it
+        if (dto.getRequiredSignature() != null)
+            workOrder.setRequiredSignature(Helper.getBooleanFromString(dto.getRequiredSignature()));
         workOrder.setFeedback(dto.getFeedback());
         List<Customer> customers = new ArrayList<>();
         dto.getCustomersNames().forEach(name -> {
@@ -587,7 +625,13 @@ public class WorkOrderService {
                                             .field("team")
                                             .operation("in")
                                             .value("")
-                                            .values(teamService.findByUser(user.getId()).stream().map(Team::getId).collect(Collectors.toList())).build()
+                                            .values(teamService.findByUser(user.getId()).stream().map(Team::getId).collect(Collectors.toList())).build(),
+                                    // INC-02 (R-05): as in the detail, the work orders of an own request
+                                    FilterField.builder()
+                                            .field("id")
+                                            .operation("in")
+                                            .value("")
+                                            .values(new ArrayList<>(workOrderRepository.findIdsByParentRequestCreatedBy(user.getId()))).build()
                             )).build());
                 } else if (searchCriteria.getFilterFields().stream().anyMatch(filterField -> filterField.getField().equals("assignedToUser"))) {
                     searchCriteria.getFilterFields().add(
@@ -612,7 +656,9 @@ public class WorkOrderService {
                                             )).build());
                 }
 
-            } else if (user.getRole().getCode().equals(RoleCode.REQUESTER)) {
+            } else {
+                // INC-02 (T-12): as in the work order detail (WorkOrder.isAccessibleBy), without view on work orders a
+                // user only sees the work orders of their own requests, whatever the role.
                 searchCriteria.getFilterFields().add(FilterField.builder()
                         .field("parentRequest.createdBy")
                         .value(user.getId())
@@ -806,20 +852,21 @@ public class WorkOrderService {
         if (dto.getSignature() != null && !licenseService.hasEntitlement(LicenseEntitlement.SIGNATURE_CAPTURE))
             throw new CustomException("You need a license to add signature to work order",
                     HttpStatus.FORBIDDEN);
-        mutableWO.setSignature(dto.getSignature());
-        mutableWO.setStatus(dto.getStatus());
         mutableWO.setFeedback(dto.getFeedback());
 
         if (dto.getStatus() != Status.COMPLETE) {
+            mutableWO.setStatus(dto.getStatus());
+            mutableWO.setSignature(dto.getSignature());
             mutableWO.setCompletedOn(null);
             mutableWO.setCompletedBy(null);
         }
         if (mutableWO.canBeEditedBy(user) && (dto.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))) {
+            // INC-02 (D-22): only the effective transition into COMPLETE records the closing data and runs its effects
+            boolean closes = dto.getStatus() == Status.COMPLETE
+                    && complete(mutableWO, savedWorkOrderStatusBefore, dto.getSignature(), user, null);
             if (!dto.getStatus().equals(Status.IN_PROGRESS)) {
-                if (dto.getStatus().equals(Status.COMPLETE)) {
-                    mutableWO.setCompletedBy(user);
-                    mutableWO.setCompletedOn(new Date());
+                if (closes) {
                     if (mutableWO.getAsset() != null) {
                         Asset asset = mutableWO.getAsset();
                         Collection<WorkOrder> workOrdersOfSameAsset = findByAsset(asset.getId());
@@ -830,14 +877,13 @@ public class WorkOrderService {
                     if (mutableWO.getParentPreventiveMaintenance() != null)
                         scheduleService.scheduleNextWorkOrderJobAfterCompletion(mutableWO.getParentPreventiveMaintenance().getSchedule().getId(), mutableWO.getCompletedOn());
                 }
-                Collection<Labor> labors = laborService.findByWorkOrder(id);
-                Collection<Labor> primaryTimes = labors.stream().filter(Labor::isLogged).collect(Collectors.toList());
-                primaryTimes.forEach(laborService::stop);
+                // INC-02 (E-02): closing stops the timers in complete(), only on the effective transition
+                if (dto.getStatus() != Status.COMPLETE) stopRunningTimers(id);
             }
             WorkOrder patchedWorkOrder = saveAndFlushWithWebhook(mutableWO, user.getCompany(),
                     originalWorkOrder);
 
-            if (patchedWorkOrder.getStatus().equals(Status.COMPLETE) && !savedWorkOrderStatusBefore.equals(Status.COMPLETE)) {
+            if (closes) {
                 List<User> admins =
                         userService.findWorkersByCompany(user.getCompany().getId()).stream().filter(ownUser -> ownUser.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) && ownUser.isEnabled() && ownUser.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
                 notificationService.createMultiple(admins.stream().map(admin -> new Notification(messageSource.getMessage("complete_work_order_content", new String[]{patchedWorkOrder.getTitle(), user.getFullName()}, Helper.getLocale(admin)), admin,
@@ -890,6 +936,75 @@ public class WorkOrderService {
         } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * INC-02 (D-19, D-20, D-22): the single rule for a work order that ends in COMPLETE. Only the effective transition
+     * into COMPLETE checks the closing requirements and records the signature, who closed it (the user, never the
+     * client) and when; a work order that already was COMPLETE keeps its signature, closing user and closing date.
+     * The caller runs the closing side effects only when this returns true.
+     *
+     * @param previous the status before the change, null for a work order not yet persisted
+     * @param closedOn the closing date, null for now; an import keeps the date of its file (D-15)
+     * @return whether this call is the effective transition into COMPLETE
+     */
+    private boolean complete(WorkOrder workOrder, Status previous, String signature, User user, Date closedOn) {
+        workOrder.setStatus(Status.COMPLETE);
+        if (previous == Status.COMPLETE) return false;
+        assertClosingRequirements(workOrder, previous != null, signature, user);
+        workOrder.setSignature(signature);
+        workOrder.setCompletedBy(user);
+        workOrder.setCompletedOn(closedOn == null ? new Date() : closedOn);
+        if (previous != null) stopRunningTimers(workOrder.getId());
+        return true;
+    }
+
+    /**
+     * INC-02 (E-02): stops the running timers of a work order. A stopped timer keeps its duration and its cost.
+     */
+    private void stopRunningTimers(Long workOrderId) {
+        laborService.findByWorkOrder(workOrderId).stream()
+                .filter(labor -> labor.isLogged() && labor.getStatus() == TimeStatus.RUNNING)
+                .forEach(laborService::stop);
+    }
+
+    /**
+     * INC-02 (T-15): the closing requirements the web UI checks before completing a work order
+     * (WorkOrderDetails.tsx, canComplete and the signature of the completion dialog), enforced on the server. A
+     * requirement applies when the company configures its field as REQUIRED; the signature, when the work order
+     * requires one. A work order not yet persisted (creation) has no comments, tasks, labor, parts nor costs. New
+     * historical rows of an import are an approved exception (D-20) and do not call this method.
+     */
+    private void assertClosingRequirements(WorkOrder workOrder, boolean persisted, String signature, User user) {
+        // Read from the database, not from the cached user, so a configuration change applies at once
+        Company company = companyService.findById(user.getCompany().getId())
+                .orElseThrow(() -> new CustomException("Company not found", HttpStatus.NOT_FOUND));
+        Collection<FieldConfiguration> fields =
+                company.getCompanySettings().getWorkOrderConfiguration().getWorkOrderFieldConfigurations();
+        Predicate<String> required = name -> fields.stream().anyMatch(field -> name.equals(field.getFieldName())
+                && field.getFieldType() == FieldType.REQUIRED);
+        Long id = persisted ? workOrder.getId() : null;
+        boolean hasFiles = (workOrder.getFiles() != null && !workOrder.getFiles().isEmpty())
+                || (id != null && commentService.countWithFilesByWorkOrder(id) > 0);
+        if (required.test("completeFiles") && !hasFiles)
+            throw closingRequirementNotMet("required_files_on_completion", user);
+        if (required.test("completeTasks") && id != null && taskService.findByWorkOrder(id).stream()
+                .anyMatch(task -> task.getValue() == null || task.getValue().isEmpty()))
+            throw closingRequirementNotMet("required_tasks_on_completion", user);
+        if (required.test("completeTime") && (id == null || laborService.findByWorkOrder(id).stream()
+                .noneMatch(labor -> labor.getDuration() > 0)))
+            throw closingRequirementNotMet("required_labor_on_completion", user);
+        if (required.test("completeParts") && (id == null || partQuantityService.findByWorkOrder(id).isEmpty()))
+            throw closingRequirementNotMet("required_part_on_completion", user);
+        if (required.test("completeCost") && (id == null || additionalCostService.findByWorkOrder(id).isEmpty()))
+            throw closingRequirementNotMet("required_cost_on_completion", user);
+        if (workOrder.isRequiredSignature() && (signature == null || signature.isBlank()))
+            throw closingRequirementNotMet("required_signature", user);
+    }
+
+    private CustomException closingRequirementNotMet(String messageKey, User user) {
+        return new CustomException(messageSource.getMessage(messageKey, null, Helper.getLocale(user)),
+                HttpStatus.NOT_ACCEPTABLE);
+    }
+
     public byte[] generatePdfBytes(WorkOrder savedWorkOrder, User user, ReportConfig config) {
         StorageService storageService = storageServiceFactory.getStorageService();
         Context thymeleafContext = new Context();
@@ -910,7 +1025,7 @@ public class WorkOrderService {
         Collection<Labor> labors = config.isCost() ? laborService.findByWorkOrder(savedWorkOrder.getId()) :
                 Collections.emptyList();
         Collection<Relation> relations = config.isRelations() ?
-                relationService.findByWorkOrder(savedWorkOrder.getId()) :
+                relationService.findVisibleByWorkOrder(savedWorkOrder.getId(), user) :
                 Collections.emptyList();
         Collection<AdditionalCost> additionalCosts = config.isCost() ?
                 additionalCostService.findByWorkOrder(savedWorkOrder.getId()) : Collections.emptyList();
@@ -995,8 +1110,7 @@ public class WorkOrderService {
         Optional<WorkOrder> optionalWorkOrder = findById(id);
         if (optionalWorkOrder.isPresent()) {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
-            if (user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) &&
-                    (user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) || user.getId().equals(savedWorkOrder.getCreatedBy()) || savedWorkOrder.isAssignedTo(user))) {
+            if (savedWorkOrder.isAccessibleBy(user)) {
                 byte[] bytes = generatePdfBytes(savedWorkOrder, user, config);
                 MultipartFile file = new MultipartFileImpl(bytes, "Work Order Report.pdf");
                 return storageServiceFactory.getStorageService().uploadAndSign(file,
@@ -1041,6 +1155,13 @@ public class WorkOrderService {
                 && (workOrderReq.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))))
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+        // INC-02 (T-11, D-22): as in changeStatus, closing data comes from the server, never from the client.
+        if (Status.COMPLETE.equals(workOrderReq.getStatus())) {
+            complete(workOrderReq, null, workOrderReq.getSignature(), user, null);
+        } else {
+            workOrderReq.setCompletedBy(null);
+            workOrderReq.setCompletedOn(null);
+        }
         if (user.getCompany().getCompanySettings().getGeneralPreferences().isAutoAssignWorkOrders()) {
             User primaryUser = workOrderReq.getPrimaryUser();
             workOrderReq.setPrimaryUser(primaryUser == null ? user : primaryUser);
@@ -1081,10 +1202,7 @@ public class WorkOrderService {
         }
         WorkOrder savedWorkOrder = optionalWorkOrder.get();
 
-        if (!user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) ||
-                (!user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) &&
-                        !user.getId().equals(savedWorkOrder.getCreatedBy()) &&
-                        !savedWorkOrder.isAssignedTo(user))) {
+        if (!savedWorkOrder.isAccessibleBy(user)) {
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
         }
 
@@ -1157,14 +1275,14 @@ public class WorkOrderService {
                 for (Long compId : companyIds) {
                     result.addAll(preventiveMaintenanceService.getEvents(dateRange.getEnd(), compId).stream()
                             .filter(calendarEvent -> calendarEvent.getDate().after(new Date()))
-                            .filter(calendarEvent -> canViewWorkOrderBase(user, calendarEvent.getEvent()))
+                            .filter(calendarEvent -> canViewPreventiveMaintenance(user, calendarEvent.getEvent()))
                             .map(calendarEvent -> new CalendarEvent<>(calendarEvent.getType(),
                                     preventiveMaintenanceMapper.toBaseMiniDto(calendarEvent.getEvent()),
                                     calendarEvent.getDate()))
                             .toList());
                     result.addAll(findByDueDateBetweenAndCompany(dateRange.getStart(),
                             dateRange.getEnd(),
-                            compId).stream().filter(workOrder -> canViewWorkOrderBase(user, workOrder)).map(workOrderMapper::toBaseMiniDto).map(workOrderMiniDTO -> new CalendarEvent<>("WORK_ORDER",
+                            compId).stream().filter(workOrder -> workOrder.isAccessibleBy(user)).map(workOrderMapper::toBaseMiniDto).map(workOrderMiniDTO -> new CalendarEvent<>("WORK_ORDER",
                             workOrderMiniDTO, workOrderMiniDTO.getDueDate())).toList());
                 }
                 return result;
@@ -1172,11 +1290,13 @@ public class WorkOrderService {
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
 
-    private boolean canViewWorkOrderBase(User user, WorkOrderBase workOrderBase) {
-        boolean canViewOthers =
-                user.getRole().getViewOtherPermissions().contains(workOrderBase instanceof PreventiveMaintenance ?
-                        PermissionEntity.PREVENTIVE_MAINTENANCES : PermissionEntity.WORK_ORDERS);
-        return canViewOthers || (workOrderBase.getCreatedBy() != null && workOrderBase.getCreatedBy().equals(user.getId())) || workOrderBase.isAssignedTo(user);
+    /**
+     * Calendar events of preventive maintenances. Work orders follow the detail rule (INC-02, R-05).
+     */
+    private boolean canViewPreventiveMaintenance(User user, WorkOrderBase preventiveMaintenance) {
+        boolean canViewOthers = user.getRole().getViewOtherPermissions()
+                .contains(PermissionEntity.PREVENTIVE_MAINTENANCES);
+        return canViewOthers || (preventiveMaintenance.getCreatedBy() != null && preventiveMaintenance.getCreatedBy().equals(user.getId())) || preventiveMaintenance.isAssignedTo(user);
 
     }
 

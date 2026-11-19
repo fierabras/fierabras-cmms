@@ -23,10 +23,11 @@ public class Request extends WorkOrderBase {
     @Schema(description = "Custom identifier for the request")
     private String customId;
 
-    @Schema(description = "Whether the request has been cancelled")
+    // INC-02 (R-02): the review state is set by the server (approve and cancel), never by the client.
+    @Schema(description = "Whether the request has been cancelled", accessMode = Schema.AccessMode.READ_ONLY)
     private boolean cancelled;
 
-    @Schema(description = "Reason provided for cancelling the request")
+    @Schema(description = "Reason provided for cancelling the request", accessMode = Schema.AccessMode.READ_ONLY)
     private String cancellationReason;
 
     @Schema(description = "Indicates whether this is a demo request")
@@ -36,7 +37,8 @@ public class Request extends WorkOrderBase {
     @OneToOne(fetch = FetchType.LAZY)
     private File audioDescription;
 
-    @Schema(description = "Work order created from this request (if approved)")
+    @Schema(description = "Work order created from this request (if approved)",
+            accessMode = Schema.AccessMode.READ_ONLY)
     @OneToOne(fetch = FetchType.LAZY)
     private WorkOrder workOrder;
 

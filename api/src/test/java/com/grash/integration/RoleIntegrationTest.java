@@ -232,6 +232,7 @@ class RoleIntegrationTest extends AbstractIntegrationTest {
     @Test
     void update_changesRoleFields() {
         RolePatchDTO patch = new RolePatchDTO();
+        patch.setVersion(companyRole.getVersion()); // INC-02 D-14: the version is required
         patch.setName("Updated Role");
         patch.setDescription("Updated description");
         patch.setExternalId("ext-1");

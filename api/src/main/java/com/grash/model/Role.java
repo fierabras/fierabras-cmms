@@ -19,13 +19,18 @@ import java.util.Set;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@EqualsAndHashCode(exclude = "companySettings")
+@EqualsAndHashCode(exclude = {"companySettings", "version"})
 @Schema(description = "Role entity defining user permissions and access levels")
 public class Role {
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     @Schema(description = "Unique identifier", accessMode = Schema.AccessMode.READ_ONLY)
     private Long id;
+
+    @Version
+    @Schema(description = "Version for optimistic locking; send it back when editing the role",
+            accessMode = Schema.AccessMode.READ_ONLY)
+    private Long version;
 
     @NotNull
     @Schema(description = "Type of role", requiredMode = Schema.RequiredMode.REQUIRED)

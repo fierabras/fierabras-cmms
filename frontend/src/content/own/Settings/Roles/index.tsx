@@ -45,7 +45,11 @@ import RoleDetails from './RoleDetails';
 import EditRole from './EditRole';
 import useAuth from '../../../../hooks/useAuth';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
-import { defaultPermissions } from '../../../../utils/roles';
+import {
+  defaultPermissions,
+  isRoleWithin,
+  roleErrorMessage
+} from '../../../../utils/roles';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
 
 const DialogWrapper = styled(Dialog)(
@@ -105,7 +109,7 @@ function Roles() {
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const dispatch = useDispatch();
   const { roles, loadingGet } = useSelector((state) => state.roles);
-  const { hasFeature } = useAuth();
+  const { hasFeature, user } = useAuth();
 
   useEffect(() => {
     if (currentRole) {
@@ -126,11 +130,13 @@ function Roles() {
     newValues.companySettings = { id: companySettings.id };
     newValues.roleType = 'ROLE_CLIENT';
 
+    // INC-02 (T-05): always work on copies. The role arrays come from the Redux state, which can be frozen; pushing
+    // into them threw a TypeError and the edit was silently not sent.
     permissionRoots.forEach((root) => {
       if (useDefaultPermissions) {
         newValues[root] = [...defaultPermissions[root]];
-      } else if (!newValues[root]) {
-        newValues[root] = [];
+      } else {
+        newValues[root] = [...(newValues[root] ?? [])];
       }
     });
 
@@ -160,7 +166,10 @@ function Roles() {
     showSnackBar(t('role_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('role_delete_failure'), 'error');
+    showSnackBar(
+      roleErrorMessage(err, t, t('role_delete_failure')),
+      'error'
+    );
 
   const handleOpenDetails = (id: number) => {
     const foundRole = roles.find((role) => role.id === id);
@@ -328,7 +337,12 @@ function Roles() {
             label={t('to_delete')}
           />
         ];
-        if (params.row.code !== 'USER_CREATED') actions = [];
+        // INC-02 (T-07, D-6, D-11): default roles and roles superior to the user's cannot be edited or deleted
+        if (
+          params.row.code !== 'USER_CREATED' ||
+          !isRoleWithin(params.row, user?.role)
+        )
+          actions = [];
         return actions;
       }
     }

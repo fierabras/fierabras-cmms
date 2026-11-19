@@ -50,7 +50,7 @@ public class RelationController {
             if (!optionalWorkOrder.get().isAccessibleBy(user)) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
-            return relationService.findByWorkOrder(id).stream()
+            return relationService.findVisibleByWorkOrder(id, user).stream()
                     .map(relationMapper::toShowDto)
                     .collect(Collectors.toList());
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);

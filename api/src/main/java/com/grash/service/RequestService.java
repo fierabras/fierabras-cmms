@@ -12,6 +12,7 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.RequestMapper;
 import com.grash.model.*;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.Priority;
 import com.grash.model.enums.webhook.WebhookEvent;
@@ -19,6 +20,7 @@ import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.FieldConfigurationRepository;
 import com.grash.repository.RequestRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -64,6 +66,7 @@ public class RequestService {
         }
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
+        startPending(request);
         Long nextSequence = customSequenceService.getNextRequestSequence(company);
         request.setCustomId("R" + String.format("%06d", nextSequence));
 
@@ -81,6 +84,7 @@ public class RequestService {
     public Request create(Request request, Company company, RequestPortal requestPortal) {
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
+        startPending(request);
         Long nextSequence = customSequenceService.getNextRequestSequence(company);
         request.setCustomId("R" + String.format("%06d", nextSequence));
         request.setRequestPortal(requestPortal);
@@ -102,6 +106,17 @@ public class RequestService {
         webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST, webhookPayload,
                 "newRequest", serializedRequest2, null, null, null, null, null);
         return savedRequest;
+    }
+
+    /**
+     * INC-02 (R-02): a new request always starts pending, whatever the client sends. Its id and its review state
+     * (rejection and approval) belong to the server; only approve and cancel change the review state afterwards.
+     */
+    private static void startPending(Request request) {
+        request.setId(null);
+        request.setCancelled(false);
+        request.setCancellationReason(null);
+        request.setWorkOrder(null);
     }
 
     @Transactional
@@ -139,6 +154,30 @@ public class RequestService {
 
     public Optional<Request> findById(Long id) {
         return requestRepository.findById(id);
+    }
+
+    public static final String REQUEST_UNDER_REVIEW = "REQUEST_UNDER_REVIEW";
+    private static final String REVIEW_LOCK_TIMEOUT = "5s";
+
+    /**
+     * INC-02 (R-07): the request to approve or reject, locked until the review transaction ends. A concurrent review
+     * of the same request waits and then reads it already reviewed, so only one review wins and only the winner runs
+     * the effects (work order, notifications, workflows, webhooks).
+     * <p>
+     * INC-02 (E-05): the wait is bounded. PostgreSQL ignores the JPA lock timeout, so it is set on the transaction for
+     * this lock only; past it the review answers 409 and changes nothing.
+     */
+    public Optional<Request> findByIdForReview(Long id) {
+        em.createNativeQuery("SET LOCAL lock_timeout = '" + REVIEW_LOCK_TIMEOUT + "'").executeUpdate();
+        Optional<Request> request;
+        try {
+            request = requestRepository.findByIdForUpdate(id);
+        } catch (PessimisticLockingFailureException e) {
+            throw new CustomException("This request is being reviewed by another user, try again",
+                    HttpStatus.CONFLICT, REQUEST_UNDER_REVIEW);
+        }
+        em.createNativeQuery("SET LOCAL lock_timeout = DEFAULT").executeUpdate();
+        return request;
     }
 
     public Collection<Request> findByCompany(Long id) {
@@ -229,8 +268,15 @@ public class RequestService {
         }
     }
 
-    public Integer countPending(Long companyId) {
-        return requestRepository.countPending(companyId);
+    /**
+     * INC-02 (R-06): the pending requests the user can open, with the rule of the request detail: every one with
+     * view on other requests, otherwise only their own.
+     */
+    public Integer countPending(User user) {
+        Long companyId = user.getCompany().getId();
+        return user.getRole().getViewOtherPermissions().contains(PermissionEntity.REQUESTS)
+                ? requestRepository.countPending(companyId)
+                : requestRepository.countPendingByCreatedBy(companyId, user.getId());
     }
 
     public List<Request> findByCategoryAndCreatedAtBetween(Long id, Date start, Date end) {

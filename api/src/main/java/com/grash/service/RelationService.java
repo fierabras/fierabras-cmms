@@ -120,6 +120,17 @@ public class RelationService {
                 .collect(Collectors.toList());
     }
 
+    /**
+     * INC-02 (R-05, E-03): the relations of a work order that the user may see. Both ends of a relation are shown,
+     * so both must be visible. Used by GET /relations and by the PDF report.
+     */
+    public Collection<Relation> findVisibleByWorkOrder(Long id, User user) {
+        return findByWorkOrder(id).stream()
+                .filter(relation -> relation.getParent().isAccessibleBy(user)
+                        && relation.getChild().isAccessibleBy(user))
+                .collect(Collectors.toList());
+    }
+
     public Collection<Relation> findByParentAndChild(Long parentId, Long childId) {
         return relationRepository.findByParent_IdAndChild_Id(parentId, childId);
     }

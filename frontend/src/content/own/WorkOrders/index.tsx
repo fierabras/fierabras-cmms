@@ -183,6 +183,15 @@ function WorkOrders() {
   } = useContext(CompanySettingsContext);
   const hasResourcePlanningEntitlement =
     useLicenseEntitlement('RESOURCE_PLANNING');
+  // INC-02 (E-04): the conditions of the backend, WorkOrder.canViewAll for the
+  // exports and WorkloadController.checkAccess for the planning
+  const canViewAllWorkOrders =
+    hasViewPermission(PermissionEntity.WORK_ORDERS) &&
+    hasViewOtherPermission(PermissionEntity.WORK_ORDERS);
+  const canPlanWorkload =
+    canViewAllWorkOrders &&
+    user.role.editOtherPermissions.includes(PermissionEntity.PEOPLE_AND_TEAMS) &&
+    user.superAccountRelations.length === 0;
   const tabs: {
     value: string;
     label: string;
@@ -205,10 +214,7 @@ function WorkOrders() {
       requiresUpgrade:
         !hasResourcePlanningEntitlement ||
         !hasFeature(PlanFeature.RESOURCE_PLANNING),
-      hidden:
-        !hasViewOtherPermission(PermissionEntity.WORK_ORDERS) ||
-        !hasViewPermission(PermissionEntity.PEOPLE_AND_TEAMS) ||
-        user.superAccountRelations.length > 0
+      hidden: !canPlanWorkload
     },
     {
       value: 'column',
@@ -414,7 +420,7 @@ function WorkOrders() {
     if (viewParam === 'calendar') {
       setCurrentTab('calendar');
     }
-    if (viewParam === 'workload') {
+    if (viewParam === 'workload' && canPlanWorkload) {
       setCurrentTab('workload');
     }
   }, []);
@@ -985,7 +991,7 @@ function WorkOrders() {
         'aria-labelledby': 'basic-button'
       }}
     >
-      {hasViewOtherPermission(PermissionEntity.WORK_ORDERS) &&
+      {canViewAllWorkOrders &&
         exportMenuItems.map((item) => (
           <MenuItem
             key={item.key}
@@ -1053,9 +1059,11 @@ function WorkOrders() {
               )}
           </Tabs>
           <Stack direction={'row'} alignItems="center" spacing={1}>
-            <IconButton onClick={handleOpenMenu} color="primary">
-              <MoreVertTwoToneIcon />
-            </IconButton>
+            {canViewAllWorkOrders && (
+              <IconButton onClick={handleOpenMenu} color="primary">
+                <MoreVertTwoToneIcon />
+              </IconButton>
+            )}
             {hasCreatePermission(PermissionEntity.WORK_ORDERS) && (
               <SplitButton
                 onMainClick={() => setOpenAddModal(true)}
@@ -1177,12 +1185,14 @@ function WorkOrders() {
                 }
               />
             ) : (
-              <WorkloadView
-                handleOpenDetails={(id, type) => {
-                  if (type === 'WORK_ORDER') handleOpenDetails(id);
-                  else navigate(getPreventiveMaintenanceUrl(id));
-                }}
-              />
+              canPlanWorkload && (
+                <WorkloadView
+                  handleOpenDetails={(id, type) => {
+                    if (type === 'WORK_ORDER') handleOpenDetails(id);
+                    else navigate(getPreventiveMaintenanceUrl(id));
+                  }}
+                />
+              )
             )}
           </Box>
         </Card>

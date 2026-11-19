@@ -9,11 +9,14 @@ import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.RoleRepository;
+import com.grash.repository.UserRepository;
 import com.grash.utils.Helper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,6 +42,8 @@ class RoleServiceTest {
     private CompanySettingsService companySettingsService;
     @Mock
     private LicenseService licenseService;
+    @Mock
+    private UserRepository userRepository;
 
     private Role adminRole;
     private Role customRole;
@@ -108,7 +113,9 @@ class RoleServiceTest {
 
         @Test
         void existingRole_updatesAndSaves() {
+            adminRole.setVersion(0L);
             RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(0L);
             patch.setName("Updated");
             patch.setDescription("desc");
             Role updatedRole = Role.builder().id(1L).name("Updated").build();
@@ -125,6 +132,49 @@ class RoleServiceTest {
         }
 
         @Test
+        void staleVersion_throwsConflictAndDoesNotSave() {
+            adminRole.setVersion(3L);
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(2L);
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            verify(roleRepository, never()).save(any(Role.class));
+        }
+
+        @Test
+        void missingVersion_throwsBadRequestAndDoesNotSave() {
+            // INC-02 (D-14): the client must send the version it read.
+            RolePatchDTO patch = new RolePatchDTO();
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.BAD_REQUEST, ex.getHttpStatus());
+            verify(roleRepository, never()).save(any(Role.class));
+        }
+
+        @Test
+        void concurrentTransaction_optimisticLockFailure_throwsConflict() {
+            adminRole.setVersion(0L);
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setVersion(0L);
+            when(roleRepository.existsById(1L)).thenReturn(true);
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+            when(roleMapper.updateRole(adminRole, patch)).thenReturn(adminRole);
+            when(roleRepository.save(adminRole))
+                    .thenThrow(new ObjectOptimisticLockingFailureException(Role.class, 1L));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.update(1L, patch));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+        }
+
+        @Test
         void nonExistingRole_throwsNotFound() {
             RolePatchDTO patch = new RolePatchDTO();
             when(roleRepository.existsById(99L)).thenReturn(false);
@@ -135,6 +185,129 @@ class RoleServiceTest {
             assertEquals(HttpStatus.NOT_FOUND, ex.getHttpStatus());
             verify(roleRepository, never()).findById(anyLong());
             verify(roleRepository, never()).save(any(Role.class));
+        }
+    }
+
+    @Nested
+    class AssertCanGrant {
+
+        private Role grantor;
+
+        @BeforeEach
+        void init() {
+            grantor = Role.builder()
+                    .createPermissions(new HashSet<>(Set.of(PermissionEntity.WORK_ORDERS)))
+                    .viewPermissions(new HashSet<>(Set.of(PermissionEntity.WORK_ORDERS, PermissionEntity.SETTINGS)))
+                    .viewOtherPermissions(new HashSet<>(Set.of(PermissionEntity.ASSETS)))
+                    .editOtherPermissions(new HashSet<>(Set.of(PermissionEntity.REQUESTS)))
+                    .deleteOtherPermissions(new HashSet<>(Set.of(PermissionEntity.LOCATIONS)))
+                    .build();
+        }
+
+        private Role requested(Set<PermissionEntity> create, Set<PermissionEntity> view,
+                               Set<PermissionEntity> viewOther, Set<PermissionEntity> editOther,
+                               Set<PermissionEntity> deleteOther) {
+            return Role.builder().createPermissions(create).viewPermissions(view).viewOtherPermissions(viewOther)
+                    .editOtherPermissions(editOther).deleteOtherPermissions(deleteOther).build();
+        }
+
+        @Test
+        void subsetOfEverySet_passes() {
+            Role role = requested(Set.of(PermissionEntity.WORK_ORDERS), Set.of(PermissionEntity.SETTINGS),
+                    Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(PermissionEntity.LOCATIONS));
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, role));
+        }
+
+        @Test
+        void permissionHeldOnlyInAnotherSet_throwsForbidden() {
+            // The grantor views ASSETS of others but cannot create them: sets are compared one by one.
+            List<Role> escalations = List.of(
+                    requested(Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(PermissionEntity.ASSETS), Set.of(), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(PermissionEntity.WORK_ORDERS), Set.of(), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(), Set.of(PermissionEntity.ASSETS), Set.of()),
+                    requested(Set.of(), Set.of(), Set.of(), Set.of(), Set.of(PermissionEntity.REQUESTS)));
+
+            for (Role escalation : escalations) {
+                CustomException ex = assertThrows(CustomException.class,
+                        () -> roleService.assertCanGrant(grantor, escalation), escalation.toString());
+                assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            }
+        }
+
+        @Test
+        void nullRequestedSets_grantNothing() {
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, requested(null, null, null, null, null)));
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, new RolePatchDTO()));
+        }
+
+        @Test
+        void nullHeldSets_holdNothing() {
+            Role emptyGrantor = Role.builder().build();
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(emptyGrantor, requested(Set.of(), null, Set.of(),
+                    null, Set.of())));
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.assertCanGrant(emptyGrantor,
+                    requested(null, Set.of(PermissionEntity.WORK_ORDERS), null, null, null)));
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void patchWithUnheldPermission_throwsForbidden() {
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setViewPermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setEditOtherPermissions(List.of(PermissionEntity.WORK_ORDERS));
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.assertCanGrant(grantor, patch));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void manage_currentRoleSuperiorToManager_throwsForbiddenEvenWhenDowngrading() {
+            Role superior = requested(Set.of(PermissionEntity.WORK_ORDERS, PermissionEntity.ASSETS), Set.of(), Set.of(),
+                    Set.of(), Set.of());
+            RolePatchDTO downgrade = new RolePatchDTO();
+            downgrade.setCreatePermissions(List.of(PermissionEntity.WORK_ORDERS));
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> roleService.assertCanManage(grantor, superior, downgrade));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void manage_resultingRoleSuperiorToManager_throwsForbidden() {
+            Role current = requested(Set.of(PermissionEntity.WORK_ORDERS), null, null, null, null);
+            RolePatchDTO escalation = new RolePatchDTO();
+            escalation.setDeleteOtherPermissions(List.of(PermissionEntity.ASSETS));
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> roleService.assertCanManage(grantor, current, escalation));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+        }
+
+        @Test
+        void manage_currentAndResultingWithinManager_passes() {
+            Role current = requested(Set.of(PermissionEntity.WORK_ORDERS), Set.of(PermissionEntity.SETTINGS),
+                    Set.of(), Set.of(PermissionEntity.REQUESTS), Set.of());
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setViewPermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setEditOtherPermissions(List.of());
+
+            assertDoesNotThrow(() -> roleService.assertCanManage(grantor, current, patch));
+        }
+
+        @Test
+        void patchWithinHeldPermissions_passes() {
+            RolePatchDTO patch = new RolePatchDTO();
+            patch.setCreatePermissions(List.of(PermissionEntity.WORK_ORDERS));
+            patch.setViewPermissions(List.of());
+            patch.setEditOtherPermissions(List.of(PermissionEntity.REQUESTS));
+
+            assertDoesNotThrow(() -> roleService.assertCanGrant(grantor, patch));
         }
     }
 
@@ -162,6 +335,41 @@ class RoleServiceTest {
             roleService.delete(1L);
 
             verify(roleRepository).deleteById(1L);
+        }
+
+        @Test
+        void roleWithUsers_throwsConflictAndDoesNotDelete() {
+            when(userRepository.existsByRole_Id(1L)).thenReturn(true);
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            verify(roleRepository, never()).deleteById(anyLong());
+        }
+
+        @Test
+        void userAssignedConcurrently_constraintViolation_throwsConflict() {
+            // No user before the deletion, one assigned meanwhile: the foreign key of users rejects it.
+            when(userRepository.existsByRole_Id(1L)).thenReturn(false, true);
+            doThrow(new DataIntegrityViolationException("fkrlvsrdrcmmbtbgeqr8y4j69p4"))
+                    .when(roleRepository).deleteById(1L);
+
+            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            assertEquals("ROLE_IN_USE", ex.getCode());
+        }
+
+        @Test
+        void otherConstraintViolation_withoutUsers_isNotReportedAsRoleInUse() {
+            // INC-02 (R-10): the 409 of "role with users" comes only from the foreign key of users
+            DataIntegrityViolationException other = new DataIntegrityViolationException("another constraint");
+            doThrow(other).when(roleRepository).deleteById(1L);
+
+            DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class,
+                    () -> roleService.delete(1L));
+
+            assertSame(other, ex);
         }
     }
 

@@ -12,6 +12,7 @@ import { Role } from '../../../../models/owns/role';
 import PermissionsMatrix from './PermissionsMatrix';
 import useAuth from '../../../../hooks/useAuth';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
+import { isRoleWithin } from '../../../../utils/roles';
 
 interface RoleDetailsProps {
   role: Role;
@@ -20,7 +21,7 @@ interface RoleDetailsProps {
 }
 export default function RoleDetails(props: RoleDetailsProps) {
   const { role, handleOpenUpdate, handleOpenDelete } = props;
-  const { hasFeature } = useAuth();
+  const { hasFeature, user } = useAuth();
   const { t }: { t: any } = useTranslation();
 
   return (
@@ -42,7 +43,7 @@ export default function RoleDetails(props: RoleDetailsProps) {
           <Typography variant="h2">{role?.name}</Typography>
           <Typography variant="subtitle1">{role?.description}</Typography>
         </Box>
-        {role.code === 'USER_CREATED' && (
+        {role.code === 'USER_CREATED' && isRoleWithin(role, user?.role) && (
           <Box>
             <Tooltip
               title={

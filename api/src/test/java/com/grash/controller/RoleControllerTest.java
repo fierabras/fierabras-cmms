@@ -1,6 +1,7 @@
 package com.grash.controller;
 
 import com.grash.dto.RolePatchDTO;
+import com.grash.exception.CustomException;
 import com.grash.model.Company;
 import com.grash.model.Role;
 import com.grash.model.Subscription;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -31,11 +33,15 @@ import java.util.Set;
 
 import static com.grash.utils.Helper.setCurrentUser;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -100,6 +106,9 @@ class RoleControllerTest extends AbstractControllerTest {
                 .roleType(RoleType.ROLE_CLIENT)
                 .name("Restricted Client")
                 .viewPermissions(new HashSet<>())
+                // As a role read from the database: empty sets, never null (GET /roles reads it, INC-02 R-09, D-24)
+                .editOtherPermissions(new HashSet<>())
+                .createPermissions(new HashSet<>())
                 .build();
 
         clientUserWithoutPermission = new User();
@@ -294,6 +303,93 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
         }
+
+        @Test
+        void patch_withoutSettingsPermission_returns403() throws Exception {
+            setCurrentUser(clientUserWithoutPermission);
+            when(userService.whoami(any())).thenReturn(clientUserWithoutPermission);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Updated\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
+        }
+
+        @Test
+        void patch_defaultCodeRoleOfCompany_returns403() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            companyRole.setCode(RoleCode.TECHNICIAN);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Updated\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
+        }
+
+        @Test
+        void delete_defaultCodeRoleOfCompany_returns403() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            companyRole.setCode(RoleCode.TECHNICIAN);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+
+            mockMvc.perform(delete("/roles/4"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).delete(anyLong());
+        }
+
+        @Test
+        void delete_roleSuperiorToRequester_returns403AndDoesNotDelete() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(clientUser.getRole(), companyRole);
+
+            mockMvc.perform(delete("/roles/4"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).delete(anyLong());
+        }
+
+        @Test
+        void create_permissionsNotHeldByRequester_returns403AndDoesNotCreate() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(eq(clientUser.getRole()), any(Role.class));
+
+            mockMvc.perform(post("/roles")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"New Role\",\"roleType\":\"ROLE_CLIENT\"}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).create(any(Role.class));
+        }
+
+        @Test
+        void patch_permissionsNotHeldByRequester_returns403AndDoesNotUpdate() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanManage(eq(clientUser.getRole()), eq(companyRole), any(RolePatchDTO.class));
+
+            mockMvc.perform(patch("/roles/4")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"viewPermissions\":[\"SETTINGS\"]}"))
+                    .andExpect(status().isForbidden());
+
+            verify(roleService, never()).update(anyLong(), any(RolePatchDTO.class));
+        }
     }
 
     @Nested
@@ -371,6 +467,33 @@ class RoleControllerTest extends AbstractControllerTest {
             assertEquals(RoleCode.USER_CREATED, captured.getCode());
             assertEquals(RoleType.ROLE_CLIENT, captured.getRoleType());
             assertTrue(captured.isPaid());
+            assertSame(company.getCompanySettings(), captured.getCompanySettings());
+        }
+
+        @Test
+        void create_ignoresClientIdAndServerFields() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(roleService.create(any(Role.class))).thenReturn(companyRole);
+
+            mockMvc.perform(post("/roles")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"id\":5,\"name\":\"New Role\",\"description\":\"d\",\"externalId\":\"x\"," +
+                                    "\"code\":\"ADMIN\",\"roleType\":\"ROLE_SUPER_ADMIN\"," +
+                                    "\"viewPermissions\":[\"SETTINGS\"]}"))
+                    .andExpect(status().isOk());
+
+            ArgumentCaptor<Role> captor = ArgumentCaptor.forClass(Role.class);
+            verify(roleService).create(captor.capture());
+            Role captured = captor.getValue();
+            assertNull(captured.getId());
+            assertEquals("New Role", captured.getName());
+            assertEquals("d", captured.getDescription());
+            assertEquals("x", captured.getExternalId());
+            assertEquals(RoleCode.USER_CREATED, captured.getCode());
+            assertEquals(RoleType.ROLE_CLIENT, captured.getRoleType());
+            assertEquals(Set.of(PermissionEntity.SETTINGS), captured.getViewPermissions());
+            assertTrue(captured.getCreatePermissions().isEmpty());
             assertSame(company.getCompanySettings(), captured.getCompanySettings());
         }
 

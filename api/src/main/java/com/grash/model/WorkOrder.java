@@ -128,11 +128,26 @@ public class WorkOrder extends WorkOrderBase {
                 completionTimes.stream().mapToLong(value -> value).sum() / completionTimes.size();
     }
 
+    /**
+     * INC-02 (D-22): the work order detail rule, shared by every read of work orders. With view on work orders, a
+     * user sees every work order, or only their own and assigned ones without view on others; the work order of an
+     * own request is always visible. Queries use its equivalent, WorkOrderService.getSearchCriteria.
+     */
     public boolean isAccessibleBy(User user) {
-        return (user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) &&
-                (user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS) || (getCreatedBy() != null && getCreatedBy().equals(user.getId())) || isAssignedTo(user)))
+        return canViewAll(user)
+                || (user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS) &&
+                ((getCreatedBy() != null && getCreatedBy().equals(user.getId())) || isAssignedTo(user)))
                 || getParentRequest() != null && user.getId().equals(getParentRequest().getCreatedBy())
                 ;
+    }
+
+    /**
+     * INC-02 (D-22): whether the detail rule lets the user see every work order of the company. The reads of every
+     * work order of the company at once (planning, exports) take it.
+     */
+    public static boolean canViewAll(User user) {
+        return user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS)
+                && user.getRole().getViewOtherPermissions().contains(PermissionEntity.WORK_ORDERS);
     }
 }
 

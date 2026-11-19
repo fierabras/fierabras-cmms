@@ -1661,6 +1661,19 @@ class UserServiceTest {
         }
 
         @Test
+        void roleWithPermissionsNotHeld_throws403AndInvitesNobody() {
+            when(roleService.findById(2L)).thenReturn(Optional.of(invitedRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(user.getRole(), invitedRole);
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> userService.inviteUsers(invitationDTO, user));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            verify(userInvitationService, never()).create(any(UserInvitation.class));
+        }
+
+        @Test
         void nonPaidRole_bypassesSubscriptionLimit_success() {
             invitedRole.setPaid(false);
             when(roleService.findById(2L)).thenReturn(Optional.of(invitedRole));
@@ -1747,6 +1760,8 @@ class UserServiceTest {
                     .editOtherPermissions(new HashSet<>(Set.of(PermissionEntity.PEOPLE_AND_TEAMS)))
                     .build();
             user.setRole(adminRole);
+            // INC-02 (D-21): the role of the target user is within the requester's unless a test says otherwise
+            lenient().when(roleService.isWithin(adminRole, targetUser.getRole())).thenReturn(true);
         }
 
         @Test
@@ -1809,6 +1824,55 @@ class UserServiceTest {
             assertEquals(newRole, result.getRole());
             verify(userRepository).save(targetUser);
         }
+
+        @Test
+        void ownRole_throws403AndDoesNotSave() {
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> userService.patchUserRole(user.getId(), 2L, user));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        void roleWithPermissionsNotHeld_throws403AndDoesNotSave() {
+            when(userRepository.findByIdAndCompany_Id(2L, 1L)).thenReturn(Optional.of(targetUser));
+            when(roleService.findById(2L)).thenReturn(Optional.of(newRole));
+            doThrow(new CustomException("You cannot grant permissions you do not have", HttpStatus.FORBIDDEN))
+                    .when(roleService).assertCanGrant(user.getRole(), newRole);
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> userService.patchUserRole(2L, 2L, user));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        void currentRoleSuperior_throws403AndDoesNotSave() {
+            when(userRepository.findByIdAndCompany_Id(2L, 1L)).thenReturn(Optional.of(targetUser));
+            when(roleService.findById(2L)).thenReturn(Optional.of(newRole));
+            when(roleService.isWithin(user.getRole(), targetUser.getRole())).thenReturn(false);
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> userService.patchUserRole(2L, 2L, user));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        void companyOwner_throws403AndDoesNotSave() {
+            targetUser.setOwnsCompany(true);
+            when(userRepository.findByIdAndCompany_Id(2L, 1L)).thenReturn(Optional.of(targetUser));
+            when(roleService.findById(2L)).thenReturn(Optional.of(newRole));
+
+            CustomException ex = assertThrows(CustomException.class,
+                    () -> userService.patchUserRole(2L, 2L, user));
+
+            assertEquals(HttpStatus.FORBIDDEN, ex.getHttpStatus());
+            verify(userRepository, never()).save(any(User.class));
+        }
     }
 
     @Nested
@@ -1828,6 +1892,8 @@ class UserServiceTest {
                     .editOtherPermissions(new HashSet<>(Set.of(PermissionEntity.PEOPLE_AND_TEAMS)))
                     .build();
             user.setRole(adminRole);
+            // INC-02 (D-21): the role of the target user is within the requester's unless a test says otherwise
+            lenient().when(roleService.isWithin(adminRole, targetUser.getRole())).thenReturn(true);
         }
 
         @Test
@@ -1882,6 +1948,7 @@ class UserServiceTest {
                     .viewPermissions(new HashSet<>(Set.of(PermissionEntity.SETTINGS)))
                     .build();
             user.setRole(adminRole);
+            lenient().when(roleService.isWithin(adminRole, targetUser.getRole())).thenReturn(true);
         }
 
         @Test
