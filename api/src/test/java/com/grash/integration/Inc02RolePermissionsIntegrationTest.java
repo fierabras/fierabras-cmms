@@ -500,6 +500,87 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     () -> assertFalse(isCancelled(second.getId()), "request must stay pending"));
         }
 
+        // ----- RF-07: CA-06 (grant) and CA-05 (only an approval links a work order to a request) -----
+
+        @Test
+        @DisplayName("RF-07 CA-06: after view on settings is granted and the user logs in again, approving succeeds")
+        void approveRequest_granted_succeedsAfterNewLogin() throws Exception {
+            Tenant tenant = newTenant("RF07-approve-granted");
+            Perms withoutSettings = new Perms(set(PermissionEntity.REQUESTS), set(),
+                    set(PermissionEntity.WORK_ORDERS), set(), set());
+            Role role = createCustomRole(tenant.company(), "RF07 reviewer", withoutSettings);
+            User reviewer = createUser(tenant.company(), role);
+            Request first = createRequest(tenant.company(), tenant.admin(), null);
+            Request second = createRequest(tenant.company(), tenant.admin(), null);
+
+            HttpResult before = approve(login(reviewer), first.getId());
+            assertEquals(403, before.status(), "precondition, approve before the grant: " + before);
+            grant(tenant, role, requestReviewer);
+
+            HttpResult after = approve(login(reviewer), second.getId());
+
+            assertAll(
+                    () -> assertTrue(after.is2xx(), "approve after the grant and new login: " + after),
+                    () -> assertNull(workOrderIdOf(first.getId()), "the first request must stay unapproved"),
+                    () -> assertNotNull(workOrderIdOf(second.getId()), "the second request must get a work order"));
+        }
+
+        private final Perms workOrderCreator = new Perms(
+                set(PermissionEntity.WORK_ORDERS, PermissionEntity.REQUESTS), set(PermissionEntity.WORK_ORDERS),
+                set(PermissionEntity.WORK_ORDERS), set(PermissionEntity.WORK_ORDERS), set());
+
+        @Test
+        @DisplayName("RF-07 CA-05: parentRequest sent when creating a work order is ignored and the request stays pending")
+        void workOrderCreate_parentRequestInPayload_ignored() throws Exception {
+            Tenant tenant = newTenant("RF07-wo-create");
+            String token = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "RF07 creator", workOrderCreator)));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode().put("title", "RF07 direct work order");
+            body.putObject("parentRequest").put("id", request.getId());
+
+            HttpResult created = call(post("/work-orders").contentType(MediaType.APPLICATION_JSON).content(json(body)),
+                    token);
+            assertTrue(created.is2xx(), "POST /work-orders: " + created);
+            long workOrderId = objectMapper.readTree(created.body()).get("id").asLong();
+            HttpResult read = call(get("/work-orders/" + workOrderId), token);
+
+            assertAll(
+                    () -> assertTrue(read.is2xx(), "GET /work-orders/{id}: " + read),
+                    () -> assertTrue(!objectMapper.readTree(read.body()).hasNonNull("parentRequest"),
+                            "the work order must have no parent request: " + read),
+                    () -> assertEquals(0, count("SELECT count(*) FROM work_order WHERE parent_request_id = ?",
+                            request.getId()), "no work order may point to the request"),
+                    () -> assertNull(workOrderIdOf(request.getId()), "request must stay unapproved"),
+                    () -> assertFalse(isCancelled(request.getId()), "request must stay pending"));
+        }
+
+        @Test
+        @DisplayName("RF-07 CA-05: parentRequest sent when editing a work order is ignored and the request stays pending")
+        void workOrderPatch_parentRequestInPayload_ignored() throws Exception {
+            Tenant tenant = newTenant("RF07-wo-patch");
+            String token = login(createUser(tenant.company(),
+                    createCustomRole(tenant.company(), "RF07 editor", workOrderCreator)));
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            WorkOrder workOrder = createWorkOrder(tenant.company(), tenant.admin(), null);
+            ObjectNode body = objectMapper.createObjectNode().put("title", "RF07 edited work order");
+            body.putObject("parentRequest").put("id", request.getId());
+
+            HttpResult patched = call(patch("/work-orders/" + workOrder.getId()).contentType(MediaType.APPLICATION_JSON)
+                    .content(json(body)), token);
+            HttpResult read = call(get("/work-orders/" + workOrder.getId()), token);
+
+            assertAll(
+                    () -> assertTrue(patched.is2xx(), "PATCH /work-orders/{id}: " + patched),
+                    () -> assertTrue(read.is2xx(), "GET /work-orders/{id}: " + read),
+                    () -> assertTrue(!objectMapper.readTree(read.body()).hasNonNull("parentRequest"),
+                            "the work order must have no parent request: " + read),
+                    () -> assertEquals(0, count("SELECT count(*) FROM work_order WHERE parent_request_id = ?",
+                            request.getId()), "no work order may point to the request"),
+                    () -> assertNull(workOrderIdOf(request.getId()), "request must stay unapproved"),
+                    () -> assertFalse(isCancelled(request.getId()), "request must stay pending"));
+        }
+
         // ----- T-09: the backend requires exactly what the UI requires (RequestDetails.tsx) -----
 
         @Test
@@ -3078,6 +3159,15 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         HttpResult patched = patchRoleLikeUi(login(tenant.admin()), tenant.company(), role.getId(), remaining);
         assertTrue(patched.is2xx(), "precondition, PATCH /roles/{id} by the administrator: " + patched);
         assertEquals(remaining, permsInDb(role.getId()), "precondition, permission removed in the database");
+    }
+
+    /**
+     * An administrator of the tenant replaces the role permissions through the API, as the UI does.
+     */
+    private void grant(Tenant tenant, Role role, Perms granted) throws Exception {
+        HttpResult patched = patchRoleLikeUi(login(tenant.admin()), tenant.company(), role.getId(), granted);
+        assertTrue(patched.is2xx(), "precondition, PATCH /roles/{id} by the administrator: " + patched);
+        assertEquals(granted, permsInDb(role.getId()), "precondition, permission granted in the database");
     }
 
     private void putPerms(ObjectNode node, Perms perms) {
