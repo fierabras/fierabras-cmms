@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.advancedsearch.OrderedIdQuery;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.model.*;
 import com.grash.model.enums.DateFormat;
@@ -24,6 +25,7 @@ import java.util.Locale;
 @RequiredArgsConstructor
 public class XlsxExportService {
 
+    private final OrderedIdQuery orderedIdQuery;
     private final TabularExportService tabularExportService;
     private final WorkOrderService workOrderService;
     private final RequestService requestService;
@@ -35,7 +37,7 @@ public class XlsxExportService {
         GeneralPreferences preferences = user.getCompany().getCompanySettings().getGeneralPreferences();
         DateFormat dateFormat = preferences.getDateFormat();
         String timeZone = preferences.getTimeZone();
-        List<Long> ids = tabularExportService.findOrderedIds(WorkOrder.class,
+        List<Long> ids = orderedIdQuery.findOrderedIds(WorkOrder.class,
                 workOrderService.getSpecification(scopedCriteria), scopedCriteria.sortWithIdTiebreak());
         // D-02: the columns of the former CSV export, in the same order
         List<ExportColumn<WorkOrder>> columns = List.of(
@@ -91,7 +93,7 @@ public class XlsxExportService {
         String timeZone = companySettings.getGeneralPreferences().getTimeZone();
         boolean dueDateHidden = companySettings.getWorkOrderRequestConfiguration().getFieldConfigurations().stream()
                 .anyMatch(field -> field.getFieldName().equals("dueDate") && field.getFieldType() == FieldType.HIDDEN);
-        List<Long> ids = tabularExportService.findOrderedIds(Request.class,
+        List<Long> ids = orderedIdQuery.findOrderedIds(Request.class,
                 requestService.getSpecification(scopedCriteria), scopedCriteria.sortWithIdTiebreak());
         List<ExportColumn<Request>> columns = new ArrayList<>(List.of(
                 new ExportColumn<>("Folio", Request::getCustomId),

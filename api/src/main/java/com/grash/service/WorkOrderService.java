@@ -1,6 +1,7 @@
 package com.grash.service;
 
 import com.grash.advancedsearch.FilterField;
+import com.grash.advancedsearch.OrderedIdQuery;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.advancedsearch.SpecificationBuilder;
 import com.grash.dto.*;
@@ -105,6 +106,7 @@ public class WorkOrderService {
     private final StorageServiceFactory storageServiceFactory;
     private final Environment environment;
     private final ResourceBundleMessageSource emailMessageSource;
+    private final OrderedIdQuery orderedIdQuery;
     private TaskService taskService;
     private RelationService relationService;
     private CommentService commentService;
@@ -371,9 +373,8 @@ public class WorkOrderService {
     }
 
     public Page<WorkOrder> findBySearchCriteria(SearchCriteria searchCriteria) {
-        Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
-                searchCriteria.sortWithIdTiebreak());
-        return workOrderRepository.findAll(getSpecification(searchCriteria), page);
+        return orderedIdQuery.findPage(WorkOrder.class, getSpecification(searchCriteria), searchCriteria,
+                workOrderRepository::findAllById, WorkOrder::getId);
     }
 
     /**

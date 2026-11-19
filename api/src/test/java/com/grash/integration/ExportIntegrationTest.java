@@ -3,7 +3,10 @@ package com.grash.integration;
 import com.grash.advancedsearch.FilterField;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.dto.RequestShowDTO;
+import com.grash.dto.WorkOrderBaseMiniDTO;
+import com.grash.dto.workOrder.WorkOrderShowDTO;
 import com.grash.exception.CustomException;
+import com.grash.mapper.WorkOrderMapper;
 import com.grash.model.*;
 import com.grash.model.enums.*;
 import com.grash.repository.*;
@@ -31,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -79,6 +83,8 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
     private WorkOrderCategoryRepository workOrderCategoryRepository;
     @Autowired
     private WorkOrderService workOrderService;
+    @Autowired
+    private WorkOrderMapper workOrderMapper;
     @Autowired
     private RequestRepository requestRepository;
     @Autowired
@@ -169,18 +175,38 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
 
     private List<Long> listedWorkOrderIds(User user, Supplier<SearchCriteria> criteria, int pageSize) {
         User current = reload(user);
-        List<Long> ids = new ArrayList<>();
-        int page = 0;
-        Page<WorkOrder> result;
-        do {
-            SearchCriteria pageCriteria = criteria.get();
-            pageCriteria.setPageNum(page++);
-            pageCriteria.setPageSize(pageSize);
-            result = workOrderService.findBySearchCriteria(workOrderService.getSearchCriteria(current,
-                    pageCriteria));
-            result.forEach(workOrder -> ids.add(workOrder.getId()));
-        } while (result.hasNext());
-        return new ArrayList<>(new LinkedHashSet<>(ids));
+        return allPages(page -> workOrderService.findBySearchCriteria(workOrderService.getSearchCriteria(current,
+                pageOf(criteria, page, pageSize))), pageSize).stream().map(WorkOrder::getId).toList();
+    }
+
+    private static SearchCriteria pageOf(Supplier<SearchCriteria> criteria, int page, int pageSize) {
+        SearchCriteria pageCriteria = criteria.get();
+        pageCriteria.setPageNum(page);
+        pageCriteria.setPageSize(pageSize);
+        return pageCriteria;
+    }
+
+    /**
+     * Every record of a paged list, in its order (C-1): every page but the last is full, the total of every page is
+     * the number of records, and a page out of range is empty with the same total.
+     */
+    private static <T> List<T> allPages(IntFunction<Page<T>> pageReader, int pageSize) {
+        Page<T> first = pageReader.apply(0);
+        long total = first.getTotalElements();
+        int pages = first.getTotalPages();
+        List<T> records = new ArrayList<>();
+        for (int page = 0; page < pages; page++) {
+            Page<T> result = page == 0 ? first : pageReader.apply(page);
+            assertEquals(total, result.getTotalElements(), "total of page " + page);
+            long expectedSize = page < pages - 1 ? pageSize : total - (long) pageSize * (pages - 1);
+            assertEquals(expectedSize, result.getNumberOfElements(), "records of page " + page);
+            records.addAll(result.getContent());
+        }
+        assertEquals(total, records.size(), "total = records listed");
+        Page<T> outOfRange = pageReader.apply(pages + 1);
+        assertTrue(outOfRange.getContent().isEmpty(), "page out of range");
+        assertEquals(total, outOfRange.getTotalElements(), "total of a page out of range");
+        return records;
     }
 
     private byte[] exportWorkOrders(User user, SearchCriteria criteria) {
@@ -302,7 +328,7 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
                 };
                 List<Long> expectedIds = idsWhere(expected.get(name));
                 assertFalse(expectedIds.isEmpty(), name);
-                assertSameAsList(admin, criteria, expectedIds, listPageSizeFor(name));
+                assertSameAsList(admin, criteria, expectedIds);
             });
 
             Supplier<SearchCriteria> combined = () -> {
@@ -312,21 +338,12 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
                 return searchCriteria;
             };
             assertSameAsList(admin, combined, idsWhere(i -> i % 4 <= 1 && i % 5 == 0 && i % 10 != 0
-                    && i >= 50 && i < 99), listPageSizeFor("assignedTo"));
+                    && i >= 50 && i < 99));
         }
 
-        /**
-         * TD-EXP-06: when an {@code inm} filter repeats rows, the paged list loses records (Hibernate merges the
-         * repeated rows of a page and Spring Data takes the smaller page as the last one). The export is compared
-         * with the list read in one page, which holds them all, and with the expected set of the fixture.
-         */
-        private int listPageSizeFor(String filterName) {
-            return filterName.equals("assignedTo") ? 10_000 : LIST_PAGE_SIZE;
-        }
-
-        // TD-EXP-06: characterization of the list defect, outside the scope of this sprint
+        // TC-1a: an inm filter repeats rows (0, 1, 2 and 3 assignees); the list pages over distinct work orders
         @Test
-        void pagedListWithRepeatingJoin_losesRecords_butTheExportDoesNot() {
+        void repeatingJoinFilter_pagesOverDistinctWorkOrders() {
             Supplier<SearchCriteria> criteria = () -> {
                 SearchCriteria searchCriteria = new SearchCriteria();
                 searchCriteria.getFilterFields().add(FilterField.builder().field("assignedTo").operation("inm")
@@ -334,10 +351,44 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
                                 assignees.get(1).getId())).build());
                 return searchCriteria;
             };
-            List<Long> expected = idsWhere(i -> i % 4 != 3);
+            for (int pageSize : List.of(10, 50)) {
+                assertSameAsList(admin, criteria, idsWhere(i -> i % 4 != 3), pageSize);
+            }
+        }
 
-            assertTrue(listedWorkOrderIds(admin, criteria).size() < expected.size());
-            assertEquals(expected, exportedIds(exportWorkOrders(admin, criteria.get())).stream().sorted().toList());
+        // TC-1b: the scope of a user without view on others repeats rows, without any filter
+        @Test
+        void userWithoutViewOther_pagesOverDistinctWorkOrders() {
+            List<Long> expected = new ArrayList<>(idsWhere(i -> i % 7 == 0));
+            for (int i = 0; i < 12; i++) {
+                WorkOrder workOrder = newWorkOrder(company, "Own WO " + i);
+                workOrder.setPrimaryUser(technician);
+                workOrder.getAssignedTo().addAll(assignees);
+                expected.add(workOrderRepository.save(workOrder).getId());
+            }
+            em.flush();
+            em.clear();
+
+            for (int pageSize : List.of(10, 50)) {
+                assertSameAsList(technician, SearchCriteria::new, expected.stream().sorted().toList(), pageSize);
+            }
+        }
+
+        // TC-1d: the mini and full DTOs of a page keep their content
+        @Test
+        void listPages_mapToTheirDtos() {
+            User current = reload(technician);
+            Page<WorkOrder> page = workOrderService.findBySearchCriteria(workOrderService.getSearchCriteria(current,
+                    pageOf(SearchCriteria::new, 1, 10)));
+            List<Long> expected = idsWhere(i -> i % 7 == 0).subList(10, 20);
+
+            assertEquals(expected, page.map(workOrderMapper::toBaseMiniDto).map(WorkOrderBaseMiniDTO::getId)
+                    .getContent());
+            Page<WorkOrderShowDTO> shown = page.map(workOrderMapper::toShowDto);
+            assertEquals(expected, shown.map(WorkOrderShowDTO::getId).getContent());
+            assertTrue(shown.getContent().stream().allMatch(workOrder -> workOrder.getAssignedTo().stream()
+                    .anyMatch(user -> user.getId().equals(technician.getId()))));
+            assertEquals(36, shown.getTotalElements());
         }
 
         // T-03
@@ -505,18 +556,13 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
     // ---------------------------------------------------------------- requests (RF-10)
 
     private List<String> listedRequestFolios(User user, Supplier<SearchCriteria> criteria) {
+        return listedRequestFolios(user, criteria, LIST_PAGE_SIZE);
+    }
+
+    private List<String> listedRequestFolios(User user, Supplier<SearchCriteria> criteria, int pageSize) {
         User current = reload(user);
-        List<String> folios = new ArrayList<>();
-        int page = 0;
-        Page<RequestShowDTO> result;
-        do {
-            SearchCriteria pageCriteria = criteria.get();
-            pageCriteria.setPageNum(page++);
-            pageCriteria.setPageSize(LIST_PAGE_SIZE);
-            result = requestService.findBySearchCriteria(requestService.getSearchCriteria(current, pageCriteria));
-            result.forEach(request -> folios.add(request.getCustomId()));
-        } while (result.hasNext());
-        return new ArrayList<>(new LinkedHashSet<>(folios));
+        return allPages(page -> requestService.findBySearchCriteria(requestService.getSearchCriteria(current,
+                pageOf(criteria, page, pageSize))), pageSize).stream().map(RequestShowDTO::getCustomId).toList();
     }
 
     private byte[] exportRequests(User user, SearchCriteria criteria) {
@@ -629,7 +675,12 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
         }
 
         private void assertSameAsList(User user, Supplier<SearchCriteria> criteria, List<String> expectedSet) {
-            List<String> listed = listedRequestFolios(user, criteria);
+            assertSameAsList(user, criteria, expectedSet, LIST_PAGE_SIZE);
+        }
+
+        private void assertSameAsList(User user, Supplier<SearchCriteria> criteria, List<String> expectedSet,
+                                      int listPageSize) {
+            List<String> listed = listedRequestFolios(user, criteria, listPageSize);
             List<String> exported = exportedFolios(exportRequests(user, criteria.get()));
 
             assertEquals(listed, exported, "file sequence = list sequence");
@@ -656,6 +707,16 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
                     "CANCELLED"), FilterField.builder().field("title").operation("cn").value("fuga")
                     .values(new ArrayList<>()).build())),
                     foliosWhere(i -> ((i / 2) % 4 == 3 || (i / 2) % 4 == 1) && i % 3 != 1 && i % 4 == 0));
+        }
+
+        // TC-1c: the criteria of T-01 and T-06 with the page size of the web list
+        @Test
+        void listCriteria_pageOverTheSameRequestsAsTheExport() {
+            assertSameAsList(admin, withFilters(() -> List.of(priority(), status("APPROVED", "CANCELLED",
+                    "PENDING"))), foliosWhere(i -> true), 10);
+            assertSameAsList(admin, withFilters(() -> List.of(priority("HIGH", "LOW"), status("PENDING",
+                    "CANCELLED"))), foliosWhere(i -> ((i / 2) % 4 == 3 || (i / 2) % 4 == 1) && i % 3 != 1), 10);
+            assertSameAsList(requester, SearchCriteria::new, foliosWhere(i -> i % 5 == 0), 10);
         }
 
         // T-03 for requests

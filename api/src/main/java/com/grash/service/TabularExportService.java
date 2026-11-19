@@ -3,15 +3,8 @@ package com.grash.service;
 import com.grash.utils.ExportColumn;
 import com.grash.utils.XlsxTableWriter;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.MessageSource;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
-import org.springframework.data.jpa.repository.query.QueryUtils;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -23,7 +16,7 @@ import java.util.stream.Collectors;
 /**
  * Generic XLSX export of the records selected by a list query (INC-01, INC-03, RF-10).
  * <p>
- * The ids are read with one query using the specification and the sort of the list, then the records are loaded and
+ * The ids come from {@link com.grash.advancedsearch.OrderedIdQuery}, as for the list; the records are loaded and
  * written in batches, in the order of the ids. The file is only returned when every selected record was written.
  */
 @Service
@@ -34,23 +27,6 @@ public class TabularExportService {
 
     private final EntityManager entityManager;
     private final MessageSource messageSource;
-
-    /**
-     * Ids of the records matching the specification, in the given order, without repetitions (the first occurrence
-     * is kept: the joins of some filters repeat rows).
-     */
-    public <T> List<Long> findOrderedIds(Class<T> type, Specification<T> specification, Sort sort) {
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Long> query = criteriaBuilder.createQuery(Long.class);
-        Root<T> root = query.from(type);
-        if (specification != null) {
-            Predicate predicate = specification.toPredicate(root, query, criteriaBuilder);
-            if (predicate != null) query.where(predicate);
-        }
-        query.select(root.get("id"));
-        query.orderBy(QueryUtils.toOrders(sort, root, criteriaBuilder));
-        return new ArrayList<>(new LinkedHashSet<>(entityManager.createQuery(query).getResultList()));
-    }
 
     /**
      * Writes one row per id, in the order of {@code ids}.

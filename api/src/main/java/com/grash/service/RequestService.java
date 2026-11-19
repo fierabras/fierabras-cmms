@@ -1,6 +1,7 @@
 package com.grash.service;
 
 import com.grash.advancedsearch.FilterField;
+import com.grash.advancedsearch.OrderedIdQuery;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.advancedsearch.SpecificationBuilder;
 import com.grash.dto.RequestPatchDTO;
@@ -24,8 +25,6 @@ import com.grash.repository.RequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -56,6 +55,7 @@ public class RequestService {
     private final FieldConfigurationRepository fieldConfigurationRepository;
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final OrderedIdQuery orderedIdQuery;
 
 
     @Transactional
@@ -242,9 +242,8 @@ public class RequestService {
     }
 
     public Page<RequestShowDTO> findBySearchCriteria(SearchCriteria searchCriteria) {
-        Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
-                searchCriteria.sortWithIdTiebreak());
-        return requestRepository.findAll(getSpecification(searchCriteria), page).map(requestMapper::toShowDto);
+        return orderedIdQuery.findPage(Request.class, getSpecification(searchCriteria), searchCriteria,
+                requestRepository::findAllById, Request::getId).map(requestMapper::toShowDto);
     }
 
     /**
