@@ -163,6 +163,31 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
         return messageSource.getMessage(key, null, Helper.getLocale(company));
     }
 
+    /**
+     * A user as the session cache keeps it: loaded before a change, with the configuration of its company already
+     * read.
+     */
+    private User cachedUser(User user) {
+        User cached = reload(user);
+        cached.getRole().getViewPermissions().size();
+        cached.getRole().getViewOtherPermissions().size();
+        cached.getSuperAccountRelations().size();
+        CompanySettings settings = cached.getCompany().getCompanySettings();
+        settings.getGeneralPreferences().getTimeZone();
+        settings.getWorkOrderRequestConfiguration().getFieldConfigurations().forEach(FieldConfiguration::getFieldType);
+        em.clear();
+        return cached;
+    }
+
+    private void changeDatePreferences(Company company) {
+        GeneralPreferences preferences = companySettingsRepository.findById(company.getCompanySettings().getId())
+                .get().getGeneralPreferences();
+        preferences.setDateFormat(DateFormat.MMDDYY);
+        preferences.setTimeZone("Pacific/Kiritimati");
+        em.flush();
+        em.clear();
+    }
+
     private static FilterField filter(String field, String operation, Object value, List<Object> values) {
         return FilterField.builder().field(field).operation(operation).value(value).values(values).build();
     }
@@ -431,6 +456,20 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
         @Test
         void userWithoutViewOther_exportsOnlyWhatTheirListShows() {
             assertSameAsList(technician, SearchCriteria::new, idsWhere(i -> i % 7 == 0));
+        }
+
+        // C-2: the date preferences are read from the database, not from the user of the session cache
+        @Test
+        void datePreferenceChanges_applyToAUserLoadedBefore() throws IOException {
+            User cached = cachedUser(admin);
+            changeDatePreferences(company);
+
+            byte[] bytes = xlsxExportService.exportWorkOrders(cached, workOrderService.getSearchCriteria(cached,
+                    new SearchCriteria()));
+
+            List<List<String>> rows = XlsxTestUtils.readText(bytes, 20);
+            assertEquals(String.valueOf(idsByIndex.get(0)), rows.get(1).get(0));
+            assertEquals("01/02/26", rows.get(1).get(5), "due date in MM/dd/yy, Pacific/Kiritimati");
         }
 
         // T-05 (INV-10)
@@ -796,6 +835,29 @@ class ExportIntegrationTest extends AbstractIntegrationTest {
             assertFalse(hiddenRows.get(0).contains(message("Due_Date", company)));
             assertEquals(Arrays.asList(folio(0), "Solicitud 000 fuga", "Descripción 0", message("NONE", company),
                     message("Request_Rejected", company), "Compresor Ñ", "Almacén", createdAt), hiddenRows.get(1));
+        }
+
+        // C-2 (RF-10 CA-04): the configuration is read from the database, not from the user of the session cache
+        @Test
+        void configurationChanges_applyToAUserLoadedBefore() throws IOException {
+            SearchCriteria criteria = new SearchCriteria();
+            criteria.getFilterFields().add(FilterField.builder().field("customId").operation("in").value("")
+                    .values(List.of(folio(0))).build());
+            Date createdAt = em.createQuery("SELECT r.createdAt FROM Request r WHERE r.customId = :folio"
+                    + " AND r.company.id = :company", Date.class).setParameter("folio", folio(0))
+                    .setParameter("company", company.getId()).getSingleResult();
+            User cached = cachedUser(admin);
+            hideRequestField("dueDate");
+            changeDatePreferences(company);
+
+            byte[] bytes = xlsxExportService.exportRequests(cached, requestService.getSearchCriteria(cached,
+                    criteria));
+
+            assertEquals(8, XlsxTestUtils.headerCount(bytes));
+            List<List<String>> rows = XlsxTestUtils.readText(bytes, 8);
+            assertFalse(rows.get(0).contains(message("Due_Date", company)));
+            assertEquals(Helper.getFormattedDate(createdAt, DateFormat.MMDDYY, "Pacific/Kiritimati"),
+                    rows.get(1).get(7));
         }
 
         private void hideRequestField(String fieldName) {

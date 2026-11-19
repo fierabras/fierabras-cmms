@@ -29,12 +29,22 @@ public class XlsxExportService {
     private final TabularExportService tabularExportService;
     private final WorkOrderService workOrderService;
     private final RequestService requestService;
+    private final CompanyService companyService;
     private final MessageSource messageSource;
+
+    /**
+     * C-2: the company and its configuration are read from the database, in the transaction of the export: the user
+     * may come from the session cache, with a configuration read before a change.
+     */
+    private Company currentCompany(User user) {
+        return companyService.findById(user.getCompany().getId()).orElseThrow();
+    }
 
     @Transactional(readOnly = true)
     public byte[] exportWorkOrders(User user, SearchCriteria scopedCriteria) throws IOException {
-        Locale locale = Helper.getLocale(user);
-        GeneralPreferences preferences = user.getCompany().getCompanySettings().getGeneralPreferences();
+        Company company = currentCompany(user);
+        Locale locale = Helper.getLocale(company);
+        GeneralPreferences preferences = company.getCompanySettings().getGeneralPreferences();
         DateFormat dateFormat = preferences.getDateFormat();
         String timeZone = preferences.getTimeZone();
         List<Long> ids = orderedIdQuery.findOrderedIds(WorkOrder.class,
@@ -87,8 +97,9 @@ public class XlsxExportService {
      */
     @Transactional(readOnly = true)
     public byte[] exportRequests(User user, SearchCriteria scopedCriteria) throws IOException {
-        Locale locale = Helper.getLocale(user);
-        CompanySettings companySettings = user.getCompany().getCompanySettings();
+        Company company = currentCompany(user);
+        Locale locale = Helper.getLocale(company);
+        CompanySettings companySettings = company.getCompanySettings();
         DateFormat dateFormat = companySettings.getGeneralPreferences().getDateFormat();
         String timeZone = companySettings.getGeneralPreferences().getTimeZone();
         boolean dueDateHidden = companySettings.getWorkOrderRequestConfiguration().getFieldConfigurations().stream()
