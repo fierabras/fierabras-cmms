@@ -50,6 +50,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.util.Pair;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -374,11 +375,28 @@ public class WorkOrderService {
     }
 
     public Page<WorkOrder> findBySearchCriteria(SearchCriteria searchCriteria) {
+        Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
+                searchCriteria.sortWithIdTiebreak());
+        return workOrderRepository.findAll(getSpecification(searchCriteria), page);
+    }
+
+    /**
+     * The filters of the work order list, shared by the list and its export (INC-01).
+     */
+    public Specification<WorkOrder> getSpecification(SearchCriteria searchCriteria) {
         SpecificationBuilder<WorkOrder> builder = new SpecificationBuilder<>();
         searchCriteria.getFilterFields().forEach(builder::with);
-        Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
-                searchCriteria.getDirection(), searchCriteria.getSortField());
-        return workOrderRepository.findAll(builder.build(), page);
+        return builder.build();
+    }
+
+    /**
+     * The work orders of the export, with the relations of its columns.
+     */
+    public List<WorkOrder> findAllForExport(List<Long> ids) {
+        List<WorkOrder> workOrders = workOrderRepository.findAllForExportByIdIn(ids);
+        // a second collection cannot be fetched with the first; in the same transaction this query fills it
+        workOrderRepository.findAllWithCustomersByIdIn(ids);
+        return workOrders;
     }
 
     public WorkOrder save(WorkOrder workOrder) {

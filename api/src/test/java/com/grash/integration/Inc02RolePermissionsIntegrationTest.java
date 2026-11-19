@@ -2520,14 +2520,16 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             HttpResult unscheduled = call(get("/workload/unscheduled"), token);
             HttpResult overview = call(get("/workload/overview").param("startDate", "2026-11-01")
                     .param("endDate", "2026-11-07"), token);
-            HttpResult export = call(get("/export/work-orders").param("uuid", uuid), token);
+            // INC-01: the export is a POST with the criteria of the list
+            HttpResult export = call(post("/export/work-orders").param("uuid", uuid)
+                    .contentType(MediaType.APPLICATION_JSON).content("{}"), token);
             HttpResult costs = call(get("/export/costs-times").param("uuid", uuid), token);
             HttpResult adminUnscheduled = call(get("/workload/unscheduled"), login(tenant.admin()));
 
             assertAll(
                     () -> assertEquals(403, unscheduled.status(), "GET /workload/unscheduled: " + unscheduled),
                     () -> assertEquals(403, overview.status(), "GET /workload/overview: " + overview),
-                    () -> assertEquals(403, export.status(), "GET /export/work-orders: " + export),
+                    () -> assertEquals(403, export.status(), "POST /export/work-orders: " + export),
                     () -> assertEquals(403, costs.status(), "GET /export/costs-times: " + costs),
                     () -> assertTrue(adminUnscheduled.is2xx(), "administrator, GET /workload/unscheduled: "
                             + adminUnscheduled));
