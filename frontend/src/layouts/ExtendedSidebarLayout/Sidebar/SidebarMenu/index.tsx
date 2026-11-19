@@ -247,8 +247,10 @@ function SidebarMenu() {
 
   useEffect(() => {
     if (user.id) {
-      dispatch(getUrgentWorkOrdersCount());
-      if (user.role.code !== 'REQUESTER') dispatch(getPendingRequestsCount());
+      if (hasViewPermission(PermissionEntity.WORK_ORDERS))
+        dispatch(getUrgentWorkOrdersCount());
+      if (hasViewPermission(PermissionEntity.REQUESTS))
+        dispatch(getPendingRequestsCount());
     }
   }, [user.id]);
   return (
