@@ -280,26 +280,15 @@ class WorkOrderControllerTest extends AbstractControllerTest {
                     .andExpect(status().isForbidden());
         }
 
+        /**
+         * TD-INC06-02 A1: the urgent count is a work order count, so view WORK_ORDERS is enough (as for the default
+         * Technician role, which has no view REQUESTS).
+         */
         @Test
-        void getUrgentCount_success() throws Exception {
-            Role clientWithRequestsRole = Role.builder()
-                    .id(3L)
-                    .roleType(RoleType.ROLE_CLIENT)
-                    .name("Client With Requests")
-                    .viewPermissions(new HashSet<>(Collections.singletonList(PermissionEntity.REQUESTS)))
-                    .build();
-            User urgentClient = new User();
-            urgentClient.setId(3L);
-            urgentClient.setFirstName("Jane");
-            urgentClient.setLastName("Doe");
-            urgentClient.setEmail("jane@test.com");
-            urgentClient.setRole(clientWithRequestsRole);
-            urgentClient.setEnabled(true);
-            urgentClient.setUserSettings(new UserSettings());
-
-            setCurrentUser(urgentClient);
-            when(userService.whoami(any())).thenReturn(urgentClient);
-            when(workOrderService.countUrgent(urgentClient)).thenReturn(5);
+        void getUrgentCount_withViewWorkOrders_success() throws Exception {
+            setCurrentUser(clientUser);
+            when(userService.whoami(any())).thenReturn(clientUser);
+            when(workOrderService.countUrgent(clientUser)).thenReturn(5);
 
             mockMvc.perform(get("/work-orders/urgent"))
                     .andExpect(status().isOk())
@@ -307,13 +296,32 @@ class WorkOrderControllerTest extends AbstractControllerTest {
                     .andExpect(jsonPath("$.message").value("5"));
         }
 
+        /**
+         * TD-INC06-02 A2: without view WORK_ORDERS the urgent count is denied, even with view REQUESTS.
+         */
         @Test
-        void getUrgentCount_forbidden() throws Exception {
-            setCurrentUser(clientUser);
-            when(userService.whoami(any())).thenReturn(clientUser);
+        void getUrgentCount_withoutViewWorkOrders_forbidden() throws Exception {
+            Role requestsOnlyRole = Role.builder()
+                    .id(3L)
+                    .roleType(RoleType.ROLE_CLIENT)
+                    .name("Requests Only")
+                    .viewPermissions(new HashSet<>(Collections.singletonList(PermissionEntity.REQUESTS)))
+                    .build();
+            User requestsOnlyUser = new User();
+            requestsOnlyUser.setId(3L);
+            requestsOnlyUser.setFirstName("Jane");
+            requestsOnlyUser.setLastName("Doe");
+            requestsOnlyUser.setEmail("jane@test.com");
+            requestsOnlyUser.setRole(requestsOnlyRole);
+            requestsOnlyUser.setEnabled(true);
+            requestsOnlyUser.setUserSettings(new UserSettings());
+
+            setCurrentUser(requestsOnlyUser);
+            when(userService.whoami(any())).thenReturn(requestsOnlyUser);
 
             mockMvc.perform(get("/work-orders/urgent"))
                     .andExpect(status().isForbidden());
+            verify(workOrderService, never()).countUrgent(any());
         }
     }
 
