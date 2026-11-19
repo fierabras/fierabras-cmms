@@ -70,7 +70,8 @@ public class AsyncExportService {
             log.info("Export completed for {}, uuid: {}", entity, uuid);
         } catch (Exception e) {
             log.error("Export failed for {}, uuid: {}", entity, uuid, e);
-            messagingTemplate.convertAndSend("/exports/" + uuid, "error: " + e.getMessage());
+            // C-3: the detail of the failure only goes to the log
+            messagingTemplate.convertAndSend("/exports/" + uuid, "error: export failed");
         }
     }
 

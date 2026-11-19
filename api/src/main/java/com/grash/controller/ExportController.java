@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/export")
@@ -34,6 +35,16 @@ public class ExportController {
     private final WorkOrderService workOrderService;
     private final RequestService requestService;
 
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+    /**
+     * C-3: the uuid names the export file and its WebSocket topic, so it must be a UUID.
+     */
+    private static void checkUuid(String uuid) {
+        if (!UUID_PATTERN.matcher(uuid).matches()) throw new CustomException("Invalid uuid", HttpStatus.BAD_REQUEST);
+    }
+
     @PostMapping("/work-orders")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
     public ResponseEntity<SuccessResponse> exportWorkOrders(HttpServletRequest req, @Parameter(description = "Unique " +
@@ -41,6 +52,7 @@ public class ExportController {
                                                             @Parameter(description = "Criteria of the work order " +
                                                                     "list; pageNum and pageSize are ignored")
                                                             @RequestBody SearchCriteria searchCriteria) {
+        checkUuid(uuid);
         User user = userService.whoami(req);
 
         // INC-01 (D-03): whoever sees the list exports it, limited to the scope of their list
@@ -58,6 +70,7 @@ public class ExportController {
                                                           @Parameter(description = "Criteria of the request list; " +
                                                                   "pageNum and pageSize are ignored")
                                                           @RequestBody SearchCriteria searchCriteria) {
+        checkUuid(uuid);
         User user = userService.whoami(req);
         // RF-10 (D-03): the scope of the request list, which refuses users without view of requests
         asyncExportService.exportRequests(user, requestService.getSearchCriteria(user, searchCriteria), uuid);

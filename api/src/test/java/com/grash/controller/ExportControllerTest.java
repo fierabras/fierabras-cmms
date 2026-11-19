@@ -41,6 +41,8 @@ class ExportControllerTest extends AbstractControllerTest {
 
     private static final String CRITERIA = "{\"filterFields\":[],\"pageNum\":3,\"pageSize\":10,"
             + "\"sortField\":\"title\",\"direction\":\"DESC\"}";
+    private static final String UUID_1 = "0b6f3f8e-5d0a-4c1e-9a52-2f6b1c7d8e91";
+    private static final String UUID_2 = "7c1d2e3f-4a5b-4c6d-8e7f-901a2b3c4d5e";
 
     @Autowired
     private MockMvc mockMvc;
@@ -76,7 +78,7 @@ class ExportControllerTest extends AbstractControllerTest {
     void workOrders_withoutViewPermission_isForbidden() throws Exception {
         user(Set.of(), Set.of());
 
-        mockMvc.perform(post("/export/work-orders").param("uuid", "u1")
+        mockMvc.perform(post("/export/work-orders").param("uuid", UUID_1)
                         .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
                 .andExpect(status().isForbidden());
 
@@ -90,15 +92,31 @@ class ExportControllerTest extends AbstractControllerTest {
         SearchCriteria scoped = new SearchCriteria();
         when(workOrderService.getSearchCriteria(eq(user), any(SearchCriteria.class))).thenReturn(scoped);
 
-        mockMvc.perform(post("/export/work-orders").param("uuid", "u1")
+        mockMvc.perform(post("/export/work-orders").param("uuid", UUID_1)
                         .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.message").value("u1"));
+                .andExpect(jsonPath("$.message").value(UUID_1));
 
         verify(workOrderService).getSearchCriteria(eq(user), argThat(criteria ->
                 "title".equals(criteria.getSortField())));
-        verify(asyncExportService).exportWorkOrders(user, scoped, "u1");
+        verify(asyncExportService).exportWorkOrders(user, scoped, UUID_1);
+    }
+
+    // C-3: the uuid names the export file and its WebSocket topic
+    @Test
+    void invalidUuid_isABadRequest() throws Exception {
+        user(Set.of(PermissionEntity.WORK_ORDERS, PermissionEntity.REQUESTS), Set.of());
+
+        for (String endpoint : new String[]{"/export/work-orders", "/export/requests"}) {
+            for (String uuid : new String[]{"u1", "../../999/traversal", "", UUID_1 + "/x"}) {
+                mockMvc.perform(post(endpoint).param("uuid", uuid)
+                                .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
+                        .andExpect(status().isBadRequest());
+            }
+        }
+
+        verifyNoInteractions(asyncExportService);
     }
 
     @Test
@@ -118,7 +136,7 @@ class ExportControllerTest extends AbstractControllerTest {
         when(requestService.getSearchCriteria(eq(user), any(SearchCriteria.class)))
                 .thenThrow(new CustomException("Access Denied", HttpStatus.FORBIDDEN));
 
-        mockMvc.perform(post("/export/requests").param("uuid", "u2")
+        mockMvc.perform(post("/export/requests").param("uuid", UUID_2)
                         .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
                 .andExpect(status().isForbidden());
 
@@ -132,15 +150,15 @@ class ExportControllerTest extends AbstractControllerTest {
         SearchCriteria scoped = new SearchCriteria();
         when(requestService.getSearchCriteria(eq(user), any(SearchCriteria.class))).thenReturn(scoped);
 
-        mockMvc.perform(post("/export/requests").param("uuid", "u2")
+        mockMvc.perform(post("/export/requests").param("uuid", UUID_2)
                         .contentType(MediaType.APPLICATION_JSON).content(CRITERIA))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.message").value("u2"));
+                .andExpect(jsonPath("$.message").value(UUID_2));
 
         verify(requestService).getSearchCriteria(eq(user), argThat(criteria ->
                 "title".equals(criteria.getSortField())));
-        verify(asyncExportService).exportRequests(user, scoped, "u2");
+        verify(asyncExportService).exportRequests(user, scoped, UUID_2);
     }
 
     // §4.2: costs-times keeps WorkOrder.canViewAll

@@ -49,11 +49,12 @@ public class SearchCriteria implements Cloneable {
 
     /**
      * INC-01: the requested order with ties broken by ascending id, so that the pages of a list and its export
-     * follow one stable sequence.
+     * follow one stable sequence. A missing field or direction defaults to id and ascending.
      */
     public Sort sortWithIdTiebreak() {
-        Sort sort = Sort.by(direction, sortField);
-        return "id".equals(sortField) ? sort : sort.and(Sort.by(Direction.ASC, "id"));
+        String field = sortField == null ? "id" : sortField;
+        Sort sort = Sort.by(direction == null ? Direction.ASC : direction, field);
+        return "id".equals(field) ? sort : sort.and(Sort.by(Direction.ASC, "id"));
     }
 
     @Override

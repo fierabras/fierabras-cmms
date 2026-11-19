@@ -79,6 +79,17 @@ class AsyncExportServiceTest {
         verifyNoInteractions(storageServiceFactory);
     }
 
+    // C-3: the detail of the failure only goes to the log
+    @Test
+    void failure_publishesAGenericError() throws IOException {
+        when(xlsxExportService.exportWorkOrders(user, criteria))
+                .thenThrow(new IllegalArgumentException("No property 'password' found for type 'User'"));
+
+        asyncExportService.exportWorkOrders(user, criteria, "u1");
+
+        verify(messagingTemplate).convertAndSend("/exports/u1", "error: export failed");
+    }
+
     // T-10 (I-4)
     @Test
     void workOrders_incompleteFile_publishesAnErrorAndNoUrl() throws IOException {
