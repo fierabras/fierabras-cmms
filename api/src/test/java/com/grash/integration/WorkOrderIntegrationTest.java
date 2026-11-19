@@ -33,6 +33,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -201,6 +203,11 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
 
             workOrderService.create(dto, company);
 
+            // INC-02 (E-05): the webhook waits for the commit of the transaction that creates the work order. This
+            // test transaction is rolled back, so its commit callbacks are run here.
+            verify(webhookDispatchService, never()).dispatchWebhook(any(), any(), anyMap(), any(), any(), any(),
+                    any(), any(), any(), any());
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
             verify(webhookDispatchService).dispatchWebhook(
                     eq(company),
                     eq(WebhookEvent.NEW_WORK_ORDER),
