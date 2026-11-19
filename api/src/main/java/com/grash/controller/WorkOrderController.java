@@ -196,7 +196,7 @@ public class WorkOrderController {
     @PreAuthorize("permitAll()")
     public SuccessResponse getUrgentCount(HttpServletRequest req) {
         User user = userService.whoami(req);
-        if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT) && user.getRole().getViewPermissions().contains(PermissionEntity.REQUESTS)) {
+        if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT) && user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS)) {
             return new SuccessResponse(true, workOrderService.countUrgent(user).toString());
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
