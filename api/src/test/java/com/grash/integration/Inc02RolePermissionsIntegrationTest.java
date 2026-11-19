@@ -1842,7 +1842,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             User importer = importer(tenant);
             WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
             WorkOrderImportDTO row = WorkOrderImportDTO.builder().id(existing.getId()).title("R03 update")
-                    .status("Complete").completedByEmail(tenant.admin().getEmail()).build();
+                    .status("Complete").completedByEmail(tenant.admin().getEmail()).completedOn(45000.5).build();
 
             CustomException ex = assertThrows(CustomException.class,
                     () -> importService.importWorkOrders(List.of(row), tenant.company(), importer));
@@ -1964,6 +1964,32 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             importService.importWorkOrders(List.of(row), tenant.company(), importer);
 
             assertTrue(requiresSignature(existing.getId()), "an omitted column must not change the requirement");
+        }
+
+        // ----- E-07 (F-10, D-31): closing an existing work order through the import takes a valid date -----
+
+        @Test
+        @DisplayName("INC-02 E-07 (D-31): an import row closing an existing work order without a valid date rejects the import")
+        void importUpdateToComplete_withoutValidDate_rejected_nothingImported() {
+            Tenant tenant = newTenant("E07-date");
+            User importer = importer(tenant);
+            WorkOrder existing = createWorkOrder(tenant.company(), tenant.admin(), null);
+            List<org.junit.jupiter.api.function.Executable> checks = new ArrayList<>();
+            for (Double completedOn : Arrays.asList(null, -1.0, Double.NaN)) {
+                WorkOrderImportDTO newRow = WorkOrderImportDTO.builder().title("E07 new").status("Open").build();
+                WorkOrderImportDTO closingRow = WorkOrderImportDTO.builder().id(existing.getId()).title("E07 update")
+                        .status("Complete").completedOn(completedOn).build();
+
+                CustomException ex = assertThrows(CustomException.class,
+                        () -> importService.importWorkOrders(List.of(newRow, closingRow), tenant.company(), importer),
+                        "completedOn " + completedOn);
+
+                checks.add(() -> assertEquals(HttpStatus.NOT_ACCEPTABLE, ex.getHttpStatus(), "completedOn " + completedOn));
+                checks.add(() -> assertEquals(Status.OPEN, statusOf(existing.getId()), "completedOn " + completedOn));
+                checks.add(() -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                        tenant.company().getId()), "nothing may be imported, completedOn " + completedOn));
+            }
+            assertAll(checks);
         }
 
         // ----- R-04: a work order already COMPLETE keeps its closing evidence and gets no closing effects again -----

@@ -545,6 +545,12 @@ public class WorkOrderService {
             // INC-02 (D-20): a row updating an existing work order to COMPLETE follows the closing rule (D-19)
             if (importer == null)
                 throw new IllegalStateException("Only a user import can update a work order to COMPLETE");
+            // INC-02 (E-07, D-31): the closing date comes from the file (D-15) and is never made up
+            Double excelClosedOn = dto.getCompletedOn();
+            if (previous != Status.COMPLETE && (excelClosedOn == null || !Double.isFinite(excelClosedOn)
+                    || excelClosedOn <= 0))
+                throw new CustomException("A valid completion date is required to close work order " +
+                        workOrder.getId(), HttpStatus.NOT_ACCEPTABLE);
             complete(workOrder, previous, workOrder.getSignature(), importer, closedOn);
         } else {
             // INC-02 (T-15, D-20), approved exception for historical data, new rows only: an imported work order
