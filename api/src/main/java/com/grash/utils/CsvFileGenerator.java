@@ -29,49 +29,6 @@ public class CsvFileGenerator {
     private final LaborService laborService;
     private final UserService userService;
 
-    public void writeWorkOrdersToCsv(Collection<WorkOrder> workOrders, Writer writer, Locale locale,
-                                     String csvSeparator, boolean includeHeaders) {
-        try {
-            CSVFormat csvFormat = CSVFormat.DEFAULT.withDelimiter(csvSeparator.charAt(0));
-            CSVPrinter printer = new CSVPrinter(writer, csvFormat);
-            if (includeHeaders) {
-                List<String> headers = Arrays.asList("ID", "Title", "Status", "Priority", "Description", "Due_Date",
-                        "Estimated_Duration", "Requires_Signature", "Category", "Location_Name", "Team_Name",
-                        "Primary_User_Email", "Assigned_To_Emails", "Asset_Name", "Completed_By_Email", "Completed_On",
-                        "Archived", "Feedback", "Customers", "Created_At");
-                printer.printRecord(headers.stream().map(header -> messageSource.getMessage(header, null, locale)).collect(Collectors.toList()));
-            }
-            for (WorkOrder workOrder : workOrders) {
-                printer.printRecord(workOrder.getId(),
-                        workOrder.getTitle(),
-                        workOrder.getStatus() == null ? null :
-                                messageSource.getMessage(workOrder.getStatus().toString(), null, locale),
-                        workOrder.getPriority() == null ? null :
-                                messageSource.getMessage(workOrder.getPriority().toString(), null, locale),
-                        workOrder.getDescription(),
-                        workOrder.getDueDate(),
-                        workOrder.getEstimatedDuration(),
-                        Helper.getStringFromBoolean(workOrder.isRequiredSignature(), messageSource, locale),
-                        workOrder.getCategory() == null ? null : workOrder.getCategory().getName(),
-                        workOrder.getLocation() == null ? null : workOrder.getLocation().getName(),
-                        workOrder.getTeam() == null ? null : workOrder.getTeam().getName(),
-                        workOrder.getPrimaryUser() == null ? null : workOrder.getPrimaryUser().getEmail(),
-                        Helper.enumerate(workOrder.getAssignedTo().stream().map(User::getEmail).collect(Collectors.toList())),
-                        workOrder.getAsset() == null ? null : workOrder.getAsset().getName(),
-                        workOrder.getCompletedBy() == null ? null : workOrder.getCompletedBy().getEmail(),
-                        workOrder.getCompletedOn(),
-                        Helper.getStringFromBoolean(workOrder.isArchived(), messageSource, locale),
-                        workOrder.getFeedback(),
-                        Helper.enumerate(workOrder.getCustomers().stream().map(Customer::getName).collect(Collectors.toList())),
-                        workOrder.getCreatedAt()
-                );
-            }
-            printer.flush();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
     public void writeAssetsToCsv(Collection<Asset> assets, Writer writer, Locale locale, String csvSeparator,
                                  boolean includeHeaders) {
         try {

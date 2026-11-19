@@ -305,10 +305,6 @@ public class WorkOrderService {
         return workOrderRepository.findByCompany_Id(id);
     }
 
-    public Page<WorkOrder> findByCompanyForExport(Long companyId, Pageable pageable) {
-        return workOrderRepository.findByCompanyForExport(companyId, pageable);
-    }
-
     public void notify(WorkOrder workOrder, Locale locale) {
         String title = messageSource.getMessage("new_wo", null, locale);
         String message = messageSource.getMessage("notification_wo_assigned", new Object[]{workOrder.getTitle()},
