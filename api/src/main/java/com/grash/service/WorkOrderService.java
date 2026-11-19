@@ -25,6 +25,7 @@ import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 
 import com.grash.repository.WorkOrderRepository;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import com.grash.utils.MultipartFileImpl;
 import com.grash.utils.TenantAspectUtils;
@@ -130,15 +131,17 @@ public class WorkOrderService {
 
         WorkOrder savedWorkOrder = workOrderRepository.saveAndFlush(workOrder);
         em.refresh(savedWorkOrder);
-        notify(savedWorkOrder, Helper.getLocale(company));
+        // INC-02 (E-05): the external effects of a new work order run once it is committed
+        Locale locale = Helper.getLocale(company);
+        AfterCommit.run(() -> notify(savedWorkOrder, locale));
         Collection<Workflow> workflows =
                 workflowService.findByMainConditionAndCompany(WFMainCondition.WORK_ORDER_CREATED, company.getId());
         workflows.forEach(workflow -> workflowService.runWorkOrder(workflow, savedWorkOrder));
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("workOrderId", savedWorkOrder.getId());
         Object serializedWorkOrder = workOrderMapper.toShowDto(savedWorkOrder);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_WORK_ORDER, webhookPayload,
-                "newWorkOrder", serializedWorkOrder, null, null, null, null, null);
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_WORK_ORDER,
+                webhookPayload, "newWorkOrder", serializedWorkOrder, null, null, null, null, null));
         return savedWorkOrder;
     }
 

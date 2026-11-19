@@ -20,6 +20,7 @@ import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.FieldConfigurationRepository;
 import com.grash.repository.RequestRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -155,13 +156,28 @@ public class RequestService {
         return requestRepository.findById(id);
     }
 
+    public static final String REQUEST_UNDER_REVIEW = "REQUEST_UNDER_REVIEW";
+    private static final String REVIEW_LOCK_TIMEOUT = "5s";
+
     /**
      * INC-02 (R-07): the request to approve or reject, locked until the review transaction ends. A concurrent review
      * of the same request waits and then reads it already reviewed, so only one review wins and only the winner runs
      * the effects (work order, notifications, workflows, webhooks).
+     * <p>
+     * INC-02 (E-05): the wait is bounded. PostgreSQL ignores the JPA lock timeout, so it is set on the transaction for
+     * this lock only; past it the review answers 409 and changes nothing.
      */
     public Optional<Request> findByIdForReview(Long id) {
-        return requestRepository.findByIdForUpdate(id);
+        em.createNativeQuery("SET LOCAL lock_timeout = '" + REVIEW_LOCK_TIMEOUT + "'").executeUpdate();
+        Optional<Request> request;
+        try {
+            request = requestRepository.findByIdForUpdate(id);
+        } catch (PessimisticLockingFailureException e) {
+            throw new CustomException("This request is being reviewed by another user, try again",
+                    HttpStatus.CONFLICT, REQUEST_UNDER_REVIEW);
+        }
+        em.createNativeQuery("SET LOCAL lock_timeout = DEFAULT").executeUpdate();
+        return request;
     }
 
     public Collection<Request> findByCompany(Long id) {

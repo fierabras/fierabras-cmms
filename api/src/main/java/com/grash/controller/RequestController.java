@@ -19,6 +19,7 @@ import com.grash.model.enums.RoleType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.service.*;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -255,9 +256,10 @@ public class RequestController {
             webhookPayload.put("newStatus", "APPROVED");
             webhookPayload.put("workOrderId", result.getId());
             Object serializedRequest = requestMapper.toShowDto(savedRequest);
-            webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE,
-                    webhookPayload,
-                    "changedRequest", serializedRequest, null, null, null, null, null);
+            // INC-02 (E-05): the external effects of the review run once it is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                    WebhookEvent.WORK_REQUEST_STATUS_CHANGE, webhookPayload,
+                    "changedRequest", serializedRequest, null, null, null, null, null));
 
             List<User> usersToMail =
                     userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN))
@@ -268,23 +270,24 @@ public class RequestController {
                 User requester = userService.findById(savedRequest.getCreatedBy()).get();
                 String message = messageSource.getMessage("request_approved_description",
                         new Object[]{savedRequest.getTitle()}, Helper.getLocale(user));
-                notificationService.createMultiple(Collections.singletonList(new Notification(message, requester,
-                        NotificationType.WORK_ORDER, result.getId())), true, title);
+                List<Notification> requesterNotification = Collections.singletonList(new Notification(message,
+                        requester, NotificationType.WORK_ORDER, result.getId()));
+                AfterCommit.run(() -> notificationService.createMultiple(requesterNotification, true, title));
                 usersToMail.add(requester);
             }
             String message2 = messageSource.getMessage("request_approved_description_limited_admin",
                     new Object[]{user.getFullName(), savedRequest.getTitle()}, Helper.getLocale(user));
-            notificationService.createMultiple(userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
-                    NotificationType.WORK_ORDER, result.getId())).collect(Collectors.toList()), true, title);
+            List<Notification> limitedAdminNotifications = userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
+                    NotificationType.WORK_ORDER, result.getId())).collect(Collectors.toList());
+            AfterCommit.run(() -> notificationService.createMultiple(limitedAdminNotifications, true, title));
 
             Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                 put("workOrderLink", frontendUrl + "/app/work-orders/" + result.getId());
                 put("workOrderTitle", result.getTitle());
             }};
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail)
-                            .toArray(String[]::new), title, mailVariables, "approved-request.html",
-                    Helper.getLocale(user),
-                    null);
+            String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
+            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
+                    title, mailVariables, "approved-request.html", Helper.getLocale(user), null));
 
             return result;
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
@@ -317,9 +320,10 @@ public class RequestController {
             webhookPayload.put("newStatus", "CANCELLED");
             webhookPayload.put("cancellationReason", reason);
             Object serializedRequest = requestMapper.toShowDto(savedRequest);
-            webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE,
-                    webhookPayload,
-                    "changedRequest", serializedRequest, null, null, null, null, null);
+            // INC-02 (E-05): the external effects of the review run once it is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                    WebhookEvent.WORK_REQUEST_STATUS_CHANGE, webhookPayload,
+                    "changedRequest", serializedRequest, null, null, null, null, null));
 
             String title = messageSource.getMessage("request_rejected", null, Helper.getLocale(user));
             List<User> usersToMail =
@@ -331,23 +335,24 @@ public class RequestController {
 
                 String message = messageSource.getMessage("request_rejected_description",
                         new Object[]{savedRequest.getTitle()}, Helper.getLocale(user));
-                notificationService.createMultiple(Collections.singletonList(new Notification(message, requester,
-                        NotificationType.INFO, null)), true, title);
+                List<Notification> requesterNotification = Collections.singletonList(new Notification(message,
+                        requester, NotificationType.INFO, null));
+                AfterCommit.run(() -> notificationService.createMultiple(requesterNotification, true, title));
                 usersToMail.add(requester);
             }
             String message2 = messageSource.getMessage("request_rejected_description_limited_admin",
                     new Object[]{user.getFullName(), savedRequest.getTitle()}, Helper.getLocale(user));
-            notificationService.createMultiple(userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
-                    NotificationType.INFO, null)).collect(Collectors.toList()), true, title);
+            List<Notification> limitedAdminNotifications = userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN) && !user1.getId().equals(user.getId())).map(user1 -> new Notification(message2, user1,
+                    NotificationType.INFO, null)).collect(Collectors.toList());
+            AfterCommit.run(() -> notificationService.createMultiple(limitedAdminNotifications, true, title));
 
             Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                 put("requestLink", frontendUrl + "/app/requests/" + savedRequest.getId());
                 put("requestTitle", savedRequest.getTitle());
             }};
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail)
-                            .toArray(String[]::new), title, mailVariables, "rejected-request.html",
-                    Helper.getLocale(user),
-                    null);
+            String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
+            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
+                    title, mailVariables, "rejected-request.html", Helper.getLocale(user), null));
 
             return requestMapper.toShowDto(requestService.save(savedRequest));
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);

@@ -2158,6 +2158,125 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // E-05 (F-06): the review of a request runs its external effects after the commit, and bounds its lock
+    // =====================================================================================================
+
+    @Nested
+    @DisplayName("INC-02 request review effects and lock")
+    class RequestReviewEffectsTests {
+
+        @Test
+        @DisplayName("INC-02 E-05 (F-06): an approval rolled back at commit emits no notification")
+        void approve_rolledBackAtCommit_noEffects() throws Exception {
+            assertRolledBackWithoutEffects("E05-approve", true);
+        }
+
+        @Test
+        @DisplayName("INC-02 E-05 (F-06): a rejection rolled back at commit emits no notification")
+        void reject_rolledBackAtCommit_noEffects() throws Exception {
+            assertRolledBackWithoutEffects("E05-reject", false);
+        }
+
+        @Test
+        @DisplayName("INC-02 E-05 (F-06): a committed approval still notifies the requester")
+        void approve_committed_notifiesRequester() throws Exception {
+            Tenant tenant = newTenant("E05-commit");
+            User requester = createUser(tenant.company(), createCustomRole(tenant.company(), "E05 requester",
+                    new Perms(set(PermissionEntity.REQUESTS), set(), set(PermissionEntity.REQUESTS), set(), set())));
+            Request request = createRequest(tenant.company(), requester, null);
+
+            HttpResult result = approve(login(tenant.admin()), request.getId());
+
+            assertTrue(result.is2xx(), "approve: " + result);
+            assertTrue(awaitNotifications(requester, 1, 10_000) >= 1, "the requester is notified after the commit");
+        }
+
+        @Test
+        @DisplayName("INC-02 E-05 (F-06): a review waits a bounded time for the lock of a request under review")
+        void approve_requestLocked_waitIsBounded() throws Exception {
+            Tenant tenant = newTenant("E05-lock");
+            Request request = createRequest(tenant.company(), tenant.admin(), null);
+            String token = login(tenant.admin());
+            CountDownLatch locked = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> holder = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                    jdbcTemplate.queryForList("SELECT id FROM request WHERE id = ? FOR UPDATE", request.getId());
+                    locked.countDown();
+                    try {
+                        release.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }));
+                assertTrue(locked.await(10, TimeUnit.SECONDS), "precondition, another review holds the lock");
+
+                long start = System.nanoTime();
+                HttpResult result = approve(token, request.getId());
+                long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+                release.countDown();
+                holder.get(30, TimeUnit.SECONDS);
+
+                assertAll(
+                        () -> assertEquals(409, result.status(), "approve while locked: " + result),
+                        () -> assertTrue(result.body().contains("REQUEST_UNDER_REVIEW"), "code: " + result.body()),
+                        () -> assertTrue(waitedMs < 10_000, "the wait must be bounded, waited " + waitedMs + " ms"),
+                        () -> assertNull(workOrderIdOf(request.getId()), "no work order may be created"));
+            } finally {
+                release.countDown();
+                executor.shutdownNow();
+            }
+        }
+
+        /**
+         * A deferred constraint trigger fails the COMMIT of the review of this request only, after the controller
+         * has run every statement, so the transaction rolls back where it can no longer be avoided.
+         */
+        private void assertRolledBackWithoutEffects(String label, boolean approve) throws Exception {
+            Tenant tenant = newTenant(label);
+            User requester = createUser(tenant.company(), createCustomRole(tenant.company(), label + " requester",
+                    new Perms(set(PermissionEntity.REQUESTS), set(), set(PermissionEntity.REQUESTS), set(), set())));
+            Request request = createRequest(tenant.company(), requester, null);
+            String trigger = "inc02_e05_" + request.getId();
+            jdbcTemplate.execute("CREATE OR REPLACE FUNCTION " + trigger + "() RETURNS trigger AS $$ BEGIN " +
+                    "RAISE EXCEPTION 'INC-02 E-05 forced rollback'; END $$ LANGUAGE plpgsql");
+            jdbcTemplate.execute("CREATE CONSTRAINT TRIGGER " + trigger + " AFTER UPDATE ON request " +
+                    "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.id = " + request.getId() + ") " +
+                    "EXECUTE FUNCTION " + trigger + "()");
+            try {
+                String token = login(tenant.admin());
+                HttpResult result = approve ? approve(token, request.getId()) : reject(token, request.getId());
+
+                assertAll(
+                        () -> assertFalse(result.is2xx(), "the review must fail at commit: " + result),
+                        () -> assertNull(workOrderIdOf(request.getId()), "no work order may be kept"),
+                        () -> assertFalse(isCancelled(request.getId()), "the request must stay pending"),
+                        // The notifications are asynchronous: wait long enough for one dispatched before the commit
+                        () -> assertEquals(0, awaitNotifications(requester, 1, 3_000),
+                                "no notification may be emitted for a review rolled back"));
+            } finally {
+                jdbcTemplate.execute("DROP TRIGGER IF EXISTS " + trigger + " ON request");
+                jdbcTemplate.execute("DROP FUNCTION IF EXISTS " + trigger + "()");
+            }
+        }
+
+        /**
+         * Waits until the user has at least {@code expected} notifications or the time runs out; returns the count.
+         */
+        private long awaitNotifications(User user, long expected, long timeoutMs) throws InterruptedException {
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            long found;
+            do {
+                found = count("SELECT count(*) FROM notification WHERE user_id = ?", user.getId());
+                if (found >= expected) return found;
+                Thread.sleep(200);
+            } while (System.currentTimeMillis() < deadline);
+            return found;
+        }
+    }
+
+    // =====================================================================================================
     // T-12: work order collections apply the view rule of the work order detail (Codex A-10)
     // =====================================================================================================
 
