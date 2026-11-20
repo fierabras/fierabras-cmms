@@ -32,6 +32,8 @@ public class MultipartFileImpl implements MultipartFile {
             return "text/csv";
         } else if (nameLowerCase.endsWith(".pdf")) {
             return "application/pdf";
+        } else if (nameLowerCase.endsWith(".xlsx")) {
+            return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         }
         return null;
     }

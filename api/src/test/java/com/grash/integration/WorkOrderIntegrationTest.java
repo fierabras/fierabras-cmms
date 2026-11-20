@@ -1151,51 +1151,6 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
-        void findByCompanyForExport_eagerlyFetchesRelations() {
-            Asset asset = new Asset();
-            asset.setName("Pump");
-            asset.setCompany(company);
-            asset.setStatus(AssetStatus.OPERATIONAL);
-            asset.setFiles(new ArrayList<>());
-            asset.setCustomers(new ArrayList<>());
-            asset.setTeams(new ArrayList<>());
-            asset.setParts(new ArrayList<>());
-            asset.setCustomFieldValues(new ArrayList<>());
-            asset = assetRepository.saveAndFlush(asset);
-
-            Location location = new Location();
-            location.setName("Building A");
-            location.setCompany(company);
-            location = locationRepository.saveAndFlush(location);
-
-            WorkOrder wo = new WorkOrder();
-            wo.setTitle("Export WO");
-            wo.setStatus(Status.COMPLETE);
-            wo.setPriority(Priority.NONE);
-            wo.setEstimatedDuration(1.0);
-            wo.setCompany(company);
-            wo.setCreatedBy(user.getId());
-            wo.setAsset(asset);
-            wo.setLocation(location);
-            wo.setCompletedBy(user);
-            wo.setCompletedOn(new Date());
-            wo.setAssignedTo(new ArrayList<>());
-            wo.setCustomers(new ArrayList<>());
-            wo.setFiles(new ArrayList<>());
-            wo.setCustomFieldValues(new ArrayList<>());
-            workOrderRepository.saveAndFlush(wo);
-
-            em.clear();
-            Page<WorkOrder> result = workOrderService.findByCompanyForExport(
-                    company.getId(), org.springframework.data.domain.PageRequest.of(0, 10));
-
-            assertFalse(result.isEmpty());
-            WorkOrder fetched = result.getContent().get(0);
-            assertNotNull(fetched.getAsset());
-            assertNotNull(fetched.getLocation());
-        }
-
-        @Test
         void findByAssetAndCreatedAtBetween_filtersCorrectly() {
             Asset asset = new Asset();
             asset.setName("Filter Asset");

@@ -164,66 +164,6 @@ class CsvFileGeneratorTest {
     }
 
     @Nested
-    class WriteWorkOrdersToCsv {
-
-        @Test
-        void withHeaders_writesHeaderAndRecords() {
-            StringWriter writer = createWriter();
-            WorkOrder wo = buildWorkOrder(1L);
-            wo.getAssignedTo().add(buildUser(1L, "user@test.com"));
-            Customer customer = new Customer();
-            customer.setName("Test Customer");
-            wo.getCustomers().add(customer);
-
-            csvFileGenerator.writeWorkOrdersToCsv(List.of(wo), writer, LOCALE, CSV_SEPARATOR, true);
-
-            String output = writer.toString();
-            assertTrue(output.contains("ID"));
-            assertTrue(output.contains(wo.getTitle()));
-            assertTrue(output.contains(wo.getId().toString()));
-        }
-
-        @Test
-        void withoutHeaders_skipsHeaderRow() {
-            StringWriter writer = createWriter();
-            WorkOrder wo = buildWorkOrder(1L);
-
-            csvFileGenerator.writeWorkOrdersToCsv(List.of(wo), writer, LOCALE, CSV_SEPARATOR, false);
-
-            String output = writer.toString();
-            assertFalse(output.startsWith("ID"));
-            assertTrue(output.contains(wo.getId().toString()));
-        }
-
-        @Test
-        void emptyCollection_writesNothing() {
-            StringWriter writer = createWriter();
-
-            csvFileGenerator.writeWorkOrdersToCsv(Collections.emptyList(), writer, LOCALE, CSV_SEPARATOR, false);
-
-            assertTrue(writer.toString().isEmpty());
-        }
-
-        @Test
-        void nullFields_handlesGracefully() {
-            StringWriter writer = createWriter();
-            WorkOrder wo = buildWorkOrder(1L);
-            wo.setStatus(null);
-            wo.setPriority(null);
-            wo.setCategory(null);
-            wo.setLocation(null);
-            wo.setTeam(null);
-            wo.setPrimaryUser(null);
-            wo.setCompletedBy(null);
-
-            csvFileGenerator.writeWorkOrdersToCsv(List.of(wo), writer, LOCALE, CSV_SEPARATOR, false);
-
-            String output = writer.toString();
-            assertTrue(output.contains(wo.getId().toString()));
-        }
-    }
-
-    @Nested
     class WriteAssetsToCsv {
 
         @Test
@@ -463,8 +403,9 @@ class CsvFileGeneratorTest {
             }
         };
 
+        // TD-EXP-01: the remaining CSV exports still swallow write errors (C4)
         assertDoesNotThrow(() ->
-                csvFileGenerator.writeWorkOrdersToCsv(List.of(buildWorkOrder(1L)), failingWriter, LOCALE,
+                csvFileGenerator.writeLocationsToCsv(List.of(buildLocation(1L)), failingWriter, LOCALE,
                         CSV_SEPARATOR, false));
     }
 }

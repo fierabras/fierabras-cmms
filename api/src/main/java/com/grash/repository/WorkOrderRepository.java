@@ -18,14 +18,19 @@ import java.util.Optional;
 public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, JpaSpecificationExecutor<WorkOrder> {
     Collection<WorkOrder> findByCompany_Id(Long id);
 
-    @Query("SELECT w FROM WorkOrder w " +
-            "LEFT JOIN FETCH w.asset " +
+    @Query("SELECT DISTINCT w FROM WorkOrder w " +
+            "LEFT JOIN FETCH w.category " +
             "LEFT JOIN FETCH w.location " +
-            "LEFT JOIN FETCH w.assignedTo " +
+            "LEFT JOIN FETCH w.team " +
+            "LEFT JOIN FETCH w.primaryUser " +
+            "LEFT JOIN FETCH w.asset " +
             "LEFT JOIN FETCH w.completedBy " +
-            "LEFT JOIN FETCH w.parentPreventiveMaintenance " +
-            "WHERE w.company.id = :companyId")
-    Page<WorkOrder> findByCompanyForExport(@Param("companyId") Long companyId, Pageable pageable);
+            "LEFT JOIN FETCH w.assignedTo " +
+            "WHERE w.id IN :ids")
+    List<WorkOrder> findAllForExportByIdIn(@Param("ids") List<Long> ids);
+
+    @Query("SELECT DISTINCT w FROM WorkOrder w LEFT JOIN FETCH w.customers WHERE w.id IN :ids")
+    List<WorkOrder> findAllWithCustomersByIdIn(@Param("ids") List<Long> ids);
 
     Collection<WorkOrder> findByIdInAndCompany_Id(List<Long> ids, Long companyId);
 

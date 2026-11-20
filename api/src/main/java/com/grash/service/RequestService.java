@@ -1,5 +1,7 @@
 package com.grash.service;
 
+import com.grash.advancedsearch.FilterField;
+import com.grash.advancedsearch.OrderedIdQuery;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.advancedsearch.SpecificationBuilder;
 import com.grash.dto.RequestPatchDTO;
@@ -15,6 +17,7 @@ import com.grash.model.enums.CustomFieldEntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.Priority;
+import com.grash.model.enums.RoleType;
 import com.grash.model.enums.webhook.WebhookEvent;
 
 import com.grash.repository.FieldConfigurationRepository;
@@ -22,8 +25,6 @@ import com.grash.repository.RequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,7 @@ public class RequestService {
     private final FieldConfigurationRepository fieldConfigurationRepository;
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final OrderedIdQuery orderedIdQuery;
 
 
     @Transactional
@@ -206,7 +208,49 @@ public class RequestService {
         return requestRepository.findByCreatedAtBetweenAndCompany_Id(date1, date2, id);
     }
 
+    /**
+     * The scope of the request list for the user, shared by the list and its export (RF-10): the company (or the
+     * companies of a super account) and, without view other requests, only the own ones.
+     *
+     * @throws CustomException 403 for a client user without view of requests
+     */
+    public SearchCriteria getSearchCriteria(User user, SearchCriteria searchCriteria) {
+        if (user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT)) {
+            if (user.getRole().getViewPermissions().contains(PermissionEntity.REQUESTS)) {
+                if (!user.getSuperAccountRelations().isEmpty()) {
+                    List<Long> childCompanyIds = user.getSuperAccountRelations().stream()
+                            .map(rel -> rel.getChildUser().getCompany().getId())
+                            .distinct()
+                            .toList();
+                    searchCriteria.getFilterFields().add(FilterField.builder()
+                            .field("company")
+                            .operation("inm")
+                            .joinType(JoinType.LEFT)
+                            .value("")
+                            .values(new ArrayList<>(childCompanyIds))
+                            .build());
+                } else {
+                    searchCriteria.filterCompany(user);
+                }
+                boolean canViewOthers = user.getRole().getViewOtherPermissions().contains(PermissionEntity.REQUESTS);
+                if (!canViewOthers) {
+                    searchCriteria.filterCreatedBy(user);
+                }
+            } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
+        }
+        return searchCriteria;
+    }
+
     public Page<RequestShowDTO> findBySearchCriteria(SearchCriteria searchCriteria) {
+        return orderedIdQuery.findPage(Request.class, getSpecification(searchCriteria), searchCriteria,
+                requestRepository::findAllById, Request::getId).map(requestMapper::toShowDto);
+    }
+
+    /**
+     * The filters of the request list, shared by the list and its export (RF-10). Status and priority have their own
+     * predicates.
+     */
+    public Specification<Request> getSpecification(SearchCriteria searchCriteria) {
         SpecificationBuilder<Request> builder = new SpecificationBuilder<>();
         SearchCriteria searchCriteriaClone = searchCriteria.clone();
 
@@ -249,13 +293,18 @@ public class RequestService {
             }
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
         });
-        searchCriteria.getFilterFields().
-                removeIf(filterField -> filterField.getField().equals("status") || filterField.getField().equals(
-                        "priority"));
-        searchCriteria.getFilterFields().forEach(builder::with);
-        Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
-                searchCriteria.getDirection(), searchCriteria.getSortField());
-        return requestRepository.findAll(builder.build(), page).map(requestMapper::toShowDto);
+        searchCriteria.getFilterFields().stream()
+                .filter(filterField -> !filterField.getField().equals("status") && !filterField.getField().equals(
+                        "priority"))
+                .forEach(builder::with);
+        return builder.build();
+    }
+
+    /**
+     * The requests of the export, with the relations of its columns.
+     */
+    public List<Request> findAllForExport(List<Long> ids) {
+        return requestRepository.findAllForExportByIdIn(ids);
     }
 
     public boolean isRequestInCompany(Request request, long companyId, boolean optional) {

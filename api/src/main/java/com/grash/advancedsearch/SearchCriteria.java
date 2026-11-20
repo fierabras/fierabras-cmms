@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.Direction;
 
 import java.util.ArrayList;
@@ -44,6 +45,16 @@ public class SearchCriteria implements Cloneable {
                 .value(user.getId())
                 .operation("eq")
                 .values(new ArrayList<>()).build());
+    }
+
+    /**
+     * INC-01: the requested order with ties broken by ascending id, so that the pages of a list and its export
+     * follow one stable sequence. A missing field or direction defaults to id and ascending.
+     */
+    public Sort sortWithIdTiebreak() {
+        String field = sortField == null ? "id" : sortField;
+        Sort sort = Sort.by(direction == null ? Direction.ASC : direction, field);
+        return "id".equals(field) ? sort : sort.and(Sort.by(Direction.ASC, "id"));
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.advancedsearch.SearchCriteria;
 import com.grash.factory.StorageServiceFactory;
 import com.grash.model.*;
 import com.grash.model.User;
@@ -20,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.concurrent.Callable;
 
 @Service
 @RequiredArgsConstructor
@@ -34,42 +36,42 @@ public class AsyncExportService {
     private final MeterService meterService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
     private final CsvFileGenerator csvFileGenerator;
+    private final XlsxExportService xlsxExportService;
     private final StorageServiceFactory storageServiceFactory;
     private final SimpMessageSendingOperations messagingTemplate;
     private final EntityManager entityManager;
 
+    /**
+     * INC-01: the work orders of the list, with its filters, order and scope ({@code scopedCriteria}).
+     */
     @Async
-    public void exportWorkOrders(User user, String uuid) {
-        try {
-            ByteArrayOutputStream target = new ByteArrayOutputStream();
-            OutputStreamWriter outputStreamWriter = new OutputStreamWriter(target, StandardCharsets.UTF_8);
-            int page = 0;
-            Page<WorkOrder> result;
-            String csvSeparator = user.getCompany().getCompanySettings().getGeneralPreferences().getCsvSeparator();
-            Locale locale = Helper.getLocale(user);
-            do {
-                result = workOrderService.findByCompanyForExport(user.getCompany().getId(), PageRequest.of(page, 100));
-                csvFileGenerator.writeWorkOrdersToCsv(
-                        result.getContent(),
-                        outputStreamWriter,
-                        locale,
-                        csvSeparator,
-                        page == 0);
+    public void exportWorkOrders(User user, SearchCriteria scopedCriteria, String uuid) {
+        deliver(user, uuid, "work-orders", "Work Orders.xlsx",
+                () -> xlsxExportService.exportWorkOrders(user, scopedCriteria));
+    }
 
-                entityManager.clear();
-                page++;
-            }
-            while (result.hasNext());
-            outputStreamWriter.close();
-            byte[] bytes = target.toByteArray();
-            MultipartFile file = new MultipartFileImpl(bytes, "Work Orders.csv");
+    /**
+     * RF-10: the requests of the list, with its filters, order and scope ({@code scopedCriteria}).
+     */
+    @Async
+    public void exportRequests(User user, SearchCriteria scopedCriteria, String uuid) {
+        deliver(user, uuid, "requests", "Requests.xlsx", () -> xlsxExportService.exportRequests(user, scopedCriteria));
+    }
+
+    /**
+     * Uploads the generated file and publishes its signed URL, or publishes an error without any URL (I-4, I-5).
+     */
+    private void deliver(User user, String uuid, String entity, String fileName, Callable<byte[]> generator) {
+        try {
+            MultipartFile file = new MultipartFileImpl(generator.call(), fileName);
             String filePath = storageServiceFactory.getStorageService().uploadAndSign(file,
-                    user.getCompany().getId() + "/exports/" + uuid + "/work-orders");
+                    user.getCompany().getId() + "/exports/" + uuid + "/" + entity);
             messagingTemplate.convertAndSend("/exports/" + uuid, filePath);
-            log.info("Export completed for work-orders, uuid: {}", uuid);
+            log.info("Export completed for {}, uuid: {}", entity, uuid);
         } catch (Exception e) {
-            log.error("Export failed for work-orders, uuid: {}", uuid, e);
-            messagingTemplate.convertAndSend("/exports/" + uuid, "error: " + e.getMessage());
+            log.error("Export failed for {}, uuid: {}", entity, uuid, e);
+            // C-3: the detail of the failure only goes to the log
+            messagingTemplate.convertAndSend("/exports/" + uuid, "error: export failed");
         }
     }
 

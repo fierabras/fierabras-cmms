@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Card,
+  CircularProgress,
   debounce,
   Dialog,
   DialogContent,
@@ -10,9 +11,14 @@ import {
   Divider,
   Drawer,
   Grid,
+  IconButton,
+  Menu,
+  MenuItem,
   Stack,
   Typography
 } from '@mui/material';
+import MoreVertTwoToneIcon from '@mui/icons-material/MoreVertTwoTone';
+import useExport from '../../../hooks/useExport';
 import { useTranslation } from 'react-i18next';
 import { useContext, useEffect, useMemo, useState } from 'react';
 import { TitleContext } from '../../../contexts/TitleContext';
@@ -176,6 +182,15 @@ function Requests() {
     fieldMapping
   });
   const { showSnackBar } = useContext(CustomSnackBarContext);
+  // RF-10: export of the list with its current criteria
+  const { exportEntity, loadingExport } = useExport();
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const handleOpenMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleCloseMenu = () => {
+    setAnchorEl(null);
+  };
   const handleOpenDrawer = (request: Request) => {
     setCurrentRequest(request);
     window.history.replaceState(
@@ -563,6 +578,30 @@ function Requests() {
       </DialogContent>
     </Dialog>
   );
+  const renderMenu = () => (
+    <Menu
+      anchorEl={anchorEl}
+      open={Boolean(anchorEl)}
+      onClose={handleCloseMenu}
+    >
+      <MenuItem
+        disabled={loadingExport.requests}
+        onClick={async () => {
+          try {
+            await exportEntity('requests', criteria);
+          } catch (error) {
+            showSnackBar(t('export_failed'), 'error');
+          }
+          handleCloseMenu();
+        }}
+      >
+        <Stack spacing={2} direction="row">
+          {loadingExport.requests && <CircularProgress size="1rem" />}
+          <Typography>{t('export_requests')}</Typography>
+        </Stack>
+      </MenuItem>
+    </Menu>
+  );
   if (hasViewPermission(PermissionEntity.REQUESTS))
     return (
       <>
@@ -571,14 +610,18 @@ function Requests() {
         </Helmet>
         {renderAddModal()}
         {renderUpdateModal()}
+        {renderMenu()}
         <Box justifyContent="center" alignItems="stretch" paddingX={4}>
-          {hasCreatePermission(PermissionEntity.REQUESTS) && (
-            <Box
-              display="flex"
-              flexDirection="row"
-              justifyContent="right"
-              alignItems="center"
-            >
+          <Box
+            display="flex"
+            flexDirection="row"
+            justifyContent="right"
+            alignItems="center"
+          >
+            <IconButton onClick={handleOpenMenu} color="primary">
+              <MoreVertTwoToneIcon />
+            </IconButton>
+            {hasCreatePermission(PermissionEntity.REQUESTS) && (
               <Button
                 startIcon={<AddTwoToneIcon />}
                 sx={{ my: 1 }}
@@ -587,8 +630,8 @@ function Requests() {
               >
                 {t('request')}
               </Button>
-            </Box>
-          )}
+            )}
+          </Box>
           <Card
             sx={{
               py: 2,

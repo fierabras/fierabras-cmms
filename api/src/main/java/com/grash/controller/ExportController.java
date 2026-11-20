@@ -1,5 +1,6 @@
 package com.grash.controller;
 
+import com.grash.advancedsearch.SearchCriteria;
 import com.grash.dto.SuccessResponse;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
@@ -14,11 +15,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/export")
@@ -28,19 +32,50 @@ import jakarta.servlet.http.HttpServletRequest;
 public class ExportController {
     private final UserService userService;
     private final AsyncExportService asyncExportService;
+    private final WorkOrderService workOrderService;
+    private final RequestService requestService;
 
-    @GetMapping("/work-orders")
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+
+    /**
+     * C-3: the uuid names the export file and its WebSocket topic, so it must be a UUID.
+     */
+    private static void checkUuid(String uuid) {
+        if (!UUID_PATTERN.matcher(uuid).matches()) throw new CustomException("Invalid uuid", HttpStatus.BAD_REQUEST);
+    }
+
+    @PostMapping("/work-orders")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
     public ResponseEntity<SuccessResponse> exportWorkOrders(HttpServletRequest req, @Parameter(description = "Unique " +
-            "identifier for tracking the export job") @RequestParam String uuid) {
+            "identifier for tracking the export job") @RequestParam String uuid,
+                                                            @Parameter(description = "Criteria of the work order " +
+                                                                    "list; pageNum and pageSize are ignored")
+                                                            @RequestBody SearchCriteria searchCriteria) {
+        checkUuid(uuid);
         User user = userService.whoami(req);
 
-        // INC-02 (R-05): the export holds every work order of the company, so it takes the detail view of all of them
-        if (WorkOrder.canViewAll(user)) {
-            asyncExportService.exportWorkOrders(user, uuid);
+        // INC-01 (D-03): whoever sees the list exports it, limited to the scope of their list
+        if (user.getRole().getViewPermissions().contains(PermissionEntity.WORK_ORDERS)) {
+            asyncExportService.exportWorkOrders(user, workOrderService.getSearchCriteria(user, searchCriteria), uuid);
             return ResponseEntity.ok()
                     .body(new SuccessResponse(true, uuid));
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
+    }
+
+    @PostMapping("/requests")
+    @PreAuthorize("hasRole('ROLE_CLIENT')")
+    public ResponseEntity<SuccessResponse> exportRequests(HttpServletRequest req, @Parameter(description = "Unique " +
+            "identifier for tracking the export job") @RequestParam String uuid,
+                                                          @Parameter(description = "Criteria of the request list; " +
+                                                                  "pageNum and pageSize are ignored")
+                                                          @RequestBody SearchCriteria searchCriteria) {
+        checkUuid(uuid);
+        User user = userService.whoami(req);
+        // RF-10 (D-03): the scope of the request list, which refuses users without view of requests
+        asyncExportService.exportRequests(user, requestService.getSearchCriteria(user, searchCriteria), uuid);
+        return ResponseEntity.ok()
+                .body(new SuccessResponse(true, uuid));
     }
 
     @GetMapping("/assets")

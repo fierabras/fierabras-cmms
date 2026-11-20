@@ -977,10 +977,25 @@ function WorkOrders() {
       </DialogContent>
     </Dialog>
   );
-  const exportMenuItems: { key: ExportEntityType; label: string }[] = [
-    { key: 'work-orders', label: 'export_work_orders' },
-    { key: 'costs-times', label: 'export_cost_and_time' }
+  // INC-01 (D-03): the work order export follows the view of the list and
+  // takes its criteria; costs and times keep the view of every work order
+  const allExportMenuItems: {
+    key: ExportEntityType;
+    label: string;
+    visible: boolean;
+  }[] = [
+    {
+      key: 'work-orders',
+      label: 'export_work_orders',
+      visible: hasViewPermission(PermissionEntity.WORK_ORDERS)
+    },
+    {
+      key: 'costs-times',
+      label: 'export_cost_and_time',
+      visible: canViewAllWorkOrders
+    }
   ];
+  const exportMenuItems = allExportMenuItems.filter((item) => item.visible);
   const renderMenu = () => (
     <Menu
       id="basic-menu"
@@ -991,16 +1006,18 @@ function WorkOrders() {
         'aria-labelledby': 'basic-button'
       }}
     >
-      {canViewAllWorkOrders &&
-        exportMenuItems.map((item) => (
+      {exportMenuItems.map((item) => (
           <MenuItem
             key={item.key}
             disabled={loadingExport[item.key]}
             onClick={async () => {
               try {
-                await exportEntity(item.key);
+                await exportEntity(
+                  item.key,
+                  item.key === 'work-orders' ? criteria : undefined
+                );
               } catch (error) {
-                showSnackBar(t('Export failed'), 'error');
+                showSnackBar(t('export_failed'), 'error');
               }
               handleCloseMenu();
             }}
@@ -1059,7 +1076,7 @@ function WorkOrders() {
               )}
           </Tabs>
           <Stack direction={'row'} alignItems="center" spacing={1}>
-            {canViewAllWorkOrders && (
+            {exportMenuItems.length > 0 && (
               <IconButton onClick={handleOpenMenu} color="primary">
                 <MoreVertTwoToneIcon />
               </IconButton>

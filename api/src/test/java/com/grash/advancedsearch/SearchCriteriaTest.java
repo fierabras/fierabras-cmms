@@ -42,6 +42,23 @@ class SearchCriteriaTest {
         assertEquals("id", criteria.getSortField());
     }
 
+    // C-3: a criteria without sort field or direction sorts by ascending id
+    @Test
+    void sortWithIdTiebreak_withoutFieldOrDirection_sortsByAscendingId() {
+        SearchCriteria criteria = new SearchCriteria();
+        criteria.setSortField(null);
+        criteria.setDirection(null);
+        assertEquals(Sort.by(Sort.Direction.ASC, "id"), criteria.sortWithIdTiebreak());
+
+        criteria.setSortField("title");
+        assertEquals(Sort.by(Sort.Direction.ASC, "title").and(Sort.by(Sort.Direction.ASC, "id")),
+                criteria.sortWithIdTiebreak());
+
+        criteria.setSortField(null);
+        criteria.setDirection(Sort.Direction.DESC);
+        assertEquals(Sort.by(Sort.Direction.DESC, "id"), criteria.sortWithIdTiebreak());
+    }
+
     @Test
     void builder_shouldCreateCustomCriteria() {
         SearchCriteria criteria = SearchCriteria.builder()
