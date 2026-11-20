@@ -205,6 +205,12 @@ function Restore-AtlasCMMS {
         [string]$BackupFile
     )
 
+    # Restore is disabled: Windows PowerShell pipes the SQL dump as ASCII and
+    # replaces every accented character with "?" while reporting success.
+    Write-Host "Error: Restore is not supported by this script because it corrupts accented characters." -ForegroundColor Red
+    Write-Host "Restore with scripts/backup/atlas-backup.sh on Linux instead (see dev-docs/Backup.md). Nothing was restored."
+    exit 1
+
     # Check if backup file is specified
     if ([string]::IsNullOrEmpty($BackupFile)) {
         Write-Host "Error: Backup filename not specified." -ForegroundColor Red

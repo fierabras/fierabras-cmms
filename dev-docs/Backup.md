@@ -50,6 +50,11 @@ To skip backing up the files:
 ```
 
 ### Restoring from a Backup
+
+**Restore is currently disabled in `atlas-backup.ps1`.** Windows PowerShell replaced every accented character with `?` in the restored database while reporting success, so the script now refuses to restore and exits with an error. Restore with the Linux script instead (see [Linux Instructions](#linux-instructions)); the `.zip` backups created on Windows are not compatible with it.
+
+The original usage is kept below for reference.
+
 Ensure the backend container is stopped.
 To restore your Atlas CMMS system from a backup:
 
