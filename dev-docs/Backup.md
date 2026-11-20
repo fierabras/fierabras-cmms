@@ -1,75 +1,12 @@
 # Atlas CMMS Backup and Restore Guide
 
-This document provides instructions for backing up and restoring your Atlas CMMS system using the provided utility scripts. The utilities are available for both Windows and Linux operating systems.
+This document provides instructions for backing up and restoring your Atlas CMMS system using the provided utility script. The utility is a Bash script for Linux. On Windows, run the same script from a WSL 2 Linux distribution (for example Ubuntu) with Docker Desktop WSL integration enabled, following the Linux instructions.
 
 ## Prerequisites
 
 - Docker and Docker Compose installed and running
 - Atlas CMMS system up and running
 - Administrative access to your system
-
-## Windows Instructions
-
-### Setup
-
-1. Save the [atlas-backup.ps1](../scripts/backup/atlas-backup.ps1) script to your Atlas CMMS project directory
-2. Open PowerShell as Administrator
-3. Navigate to your Atlas CMMS project directory:
-   ```powershell
-   cd C:\path\to\your\atlas\project
-   ```
-4. Ensure script execution is allowed:
-   ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
-   ```
-
-### Creating a Backup
-
-To create a complete backup of your Atlas CMMS system:
-
-```powershell
-.\atlas-backup.ps1 backup
-```
-
-The script will:
-1. Check if Docker is running
-2. Back up the PostgreSQL database
-3. Back up the MinIO file storage
-4. Create a ZIP archive in the `atlas_backups` directory
-
-#### Optional Parameters
-
-To skip backing up the database:
-```powershell
-.\atlas-backup.ps1 backup -SkipDb
-```
-
-To skip backing up the files:
-```powershell
-.\atlas-backup.ps1 backup -SkipFiles
-```
-
-### Restoring from a Backup
-Ensure the backend container is stopped.
-To restore your Atlas CMMS system from a backup:
-
-```powershell
-.\atlas-backup.ps1 restore .\atlas_backups\atlas_backup_YYYYMMDD_HHMMSS.zip
-```
-
-Replace `YYYYMMDD_HHMMSS` with the timestamp of your backup file.
-
-#### Optional Parameters
-
-To skip restoring the database:
-```powershell
-.\atlas-backup.ps1 restore .\atlas_backups\atlas_backup_YYYYMMDD_HHMMSS.zip -SkipDb
-```
-
-To skip restoring the files:
-```powershell
-.\atlas-backup.ps1 restore .\atlas_backups\atlas_backup_YYYYMMDD_HHMMSS.zip -SkipFiles
-```
 
 ## Linux Instructions
 
@@ -136,7 +73,7 @@ To skip restoring the files:
 
 ## Environment Configuration
 
-Both scripts automatically read credentials from a `.env` file in the same directory. If your Atlas CMMS uses custom credentials, make sure your `.env` file contains the following variables:
+The script automatically reads credentials from a `.env` file in the same directory. If your Atlas CMMS uses custom credentials, make sure your `.env` file contains the following variables:
 
 ```
 POSTGRES_USER=your_postgres_username
@@ -145,17 +82,19 @@ MINIO_USER=your_minio_username
 MINIO_PASSWORD=your_minio_password
 ```
 
-If the `.env` file is not present, the scripts will use default credentials:
+If the `.env` file is not present, the script will use default credentials:
 
 ## Important Notes
 
-1. **Database Restoration**: When restoring a database, the script renames your current database to `atlas_old` before creating a new `atlas` database with the backup data. This allows for recovery if the restore process fails.
+1. **Database Restoration**: When restoring a database, the script renames your current database to `atlas_old` before creating a new `atlas` database with the backup data. The data is loaded in a single transaction that stops at the first error. If the archive cannot be extracted, nothing is restored; if loading fails, the script puts `atlas_old` back as `atlas`, skips the file restore and exits with a non-zero code. Any `atlas_old` left by a previous restore is dropped when a new restore starts.
 
 2. **Confirmation Prompts**: The restore operation will prompt for confirmation before overwriting your database or files.
 
 3. **Backup Directory**: All backups are stored in an `atlas_backups` directory created in the same location as the script.
 
-4. **Network Configuration**: The scripts assume your Docker Compose network is named `atlas-cmms_default`. If your setup uses a different network name, you'll need to modify the scripts accordingly.
+4. **Network Configuration**: The script assumes your Docker Compose network is named `atlas-cmms_default`. If your setup uses a different network name, you'll need to modify the script accordingly.
+
+5. **MinIO Client**: The script runs the MinIO Client (`mc`) bundled in the `minio/minio` image pinned in `docker-compose.yml`; nothing is downloaded from the Internet at run time. If you change the MinIO image tag in `docker-compose.yml`, update it in the script too.
 
 ## Troubleshooting
 
@@ -191,4 +130,4 @@ If the script cannot connect to containers, verify your Docker network configura
 docker network ls
 ```
 
-If your Atlas CMMS network is not named `atlas-cmms_default`, you'll need to update the network name in the scripts.
+If your Atlas CMMS network is not named `atlas-cmms_default`, you'll need to update the network name in the script.
