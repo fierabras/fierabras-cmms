@@ -188,6 +188,9 @@ echo "MinIO backup complete."
         }
     }
 
+    # Keep the MinIO credentials out of the archive
+    Remove-Item -Path (Join-Path $TEMP_DIR "minio_backup.sh") -Force -ErrorAction SilentlyContinue
+
     # Create backup archive
     Write-Host "Creating backup archive..."
     $backupPath = Join-Path $BACKUP_DIR $BACKUP_FILENAME

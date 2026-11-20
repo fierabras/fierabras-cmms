@@ -156,6 +156,9 @@ EOL
     # Create backup directory if it doesn't exist
     mkdir -p "$BACKUP_DIR"
 
+    # Keep the MinIO credentials out of the archive
+    rm -f "$TEMP_DIR/minio_backup.sh"
+
     # Create backup archive
     echo "Creating backup archive..."
     tar -czf "$BACKUP_DIR/$BACKUP_FILENAME" -C "$TEMP_DIR" .
