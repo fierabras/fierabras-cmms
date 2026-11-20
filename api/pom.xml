@@ -294,9 +294,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-Duser.timezone=UTC</argLine>
 <!--                    <argLine>-Xmx2048m -XX:MaxMetaspaceSize=512m</argLine>-->
-                    <argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+                    <argLine>-Duser.timezone=UTC --add-opens java.base/java.lang=ALL-UNNAMED</argLine>
                     <properties>
                         <configurationParameters>
                             junit.jupiter.execution.parallel.enabled = ${junit.parallel}
