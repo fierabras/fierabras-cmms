@@ -130,8 +130,6 @@ backup_atlas_cmms() {
         cat > "$TEMP_DIR/minio_backup.sh" << EOL
 #!/bin/sh
 set -e
-wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/bin/mc
-chmod +x /usr/bin/mc
 mc alias set atlas-minio http://minio:9000 "$MINIO_USER" "$MINIO_PASSWORD" --api S3v4
 mc mirror atlas-minio/atlas-bucket /backup_data
 echo "MinIO backup complete."
@@ -146,7 +144,7 @@ EOL
             --network atlas-cmms_default \
             -v "$TEMP_DIR/minio_backup.sh:/minio_backup.sh" \
             -v "$TEMP_DIR/minio_data:/backup_data" \
-            alpine:latest /bin/sh /minio_backup.sh
+            --entrypoint /bin/sh minio/minio:RELEASE.2025-04-22T22-12-26Z /minio_backup.sh
 
         if [ $? -ne 0 ]; then
             echo "Error: MinIO backup failed."
@@ -254,8 +252,6 @@ restore_atlas_cmms() {
             cat > "$TEMP_DIR/minio_restore.sh" << EOL
 #!/bin/sh
 set -e
-wget -q https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/bin/mc
-chmod +x /usr/bin/mc
 mc alias set atlas-minio http://minio:9000 "$MINIO_USER" "$MINIO_PASSWORD" --api S3v4
 mc mirror /backup_data atlas-minio/atlas-bucket --overwrite
 echo "MinIO restore complete."
@@ -270,7 +266,7 @@ EOL
                 --network atlas-cmms_default \
                 -v "$TEMP_DIR/minio_restore.sh:/minio_restore.sh" \
                 -v "$TEMP_DIR/minio_data:/backup_data" \
-                alpine:latest /bin/sh /minio_restore.sh
+                --entrypoint /bin/sh minio/minio:RELEASE.2025-04-22T22-12-26Z /minio_restore.sh
 
             if [ $? -ne 0 ]; then
                 echo "Error: MinIO restore failed."

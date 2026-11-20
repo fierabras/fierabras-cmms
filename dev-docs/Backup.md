@@ -157,6 +157,8 @@ If the `.env` file is not present, the scripts will use default credentials:
 
 4. **Network Configuration**: The scripts assume your Docker Compose network is named `atlas-cmms_default`. If your setup uses a different network name, you'll need to modify the scripts accordingly.
 
+5. **MinIO Client**: The scripts run the MinIO Client (`mc`) bundled in the `minio/minio` image pinned in `docker-compose.yml`; nothing is downloaded from the Internet at run time. If you change the MinIO image tag in `docker-compose.yml`, update it in both scripts too.
+
 ## Troubleshooting
 
 ### Docker Not Running
