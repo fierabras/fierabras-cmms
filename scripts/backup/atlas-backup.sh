@@ -141,6 +141,7 @@ EOL
         echo "Running MinIO backup..."
 
         docker run --rm \
+            --user "$(id -u):$(id -g)" \
             --network atlas-cmms_default \
             -v "$TEMP_DIR/minio_backup.sh:/minio_backup.sh" \
             -v "$TEMP_DIR/minio_data:/backup_data" \
