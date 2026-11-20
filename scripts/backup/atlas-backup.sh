@@ -195,7 +195,11 @@ restore_atlas_cmms() {
     # Extract the backup
     echo "Extracting backup archive..."
     mkdir -p "$TEMP_DIR"
-    tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+    if ! tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"; then
+        echo "Error: Could not extract the backup archive. Nothing was restored."
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
 
     # Restore Postgres database
     if [ "$SKIP_DB" != "true" ] && [ -f "$TEMP_DIR/atlas_db.sql" ]; then
@@ -215,18 +219,26 @@ restore_atlas_cmms() {
             docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'DROP DATABASE IF EXISTS atlas_old;'"
 
             # Rename current "atlas" to "atlas_old"
-            docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'ALTER DATABASE atlas RENAME TO atlas_old;'"
+            if ! docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'ALTER DATABASE atlas RENAME TO atlas_old;'"; then
+                echo "Error: Could not rename the current database. Make sure the backend container is stopped. Nothing was restored."
+                rm -rf "$TEMP_DIR"
+                exit 1
+            fi
 
-            # Create new "atlas" database
-            docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'CREATE DATABASE atlas;'"
-
-            # Restore from backup
-            docker exec -i atlas_db psql -U "$POSTGRES_USER" -d atlas --set client_encoding=UTF8 < "$TEMP_DIR/atlas_db.sql"
-
-            if [ $? -eq 0 ]; then
+            # Create new "atlas" database and restore from backup in a single
+            # transaction, stopping at the first error
+            if docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'CREATE DATABASE atlas;'" &&
+                docker exec -i atlas_db psql -U "$POSTGRES_USER" -d atlas --set client_encoding=UTF8 -v ON_ERROR_STOP=1 --single-transaction < "$TEMP_DIR/atlas_db.sql"; then
                 echo "Database restore complete."
             else
-                echo "Error: Database restore failed."
+                echo "Error: Database restore failed. Rolling back to the previous database..."
+                docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'DROP DATABASE IF EXISTS atlas;'"
+                if docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'ALTER DATABASE atlas_old RENAME TO atlas;'"; then
+                    echo "The previous database was put back. Files were not restored."
+                else
+                    echo "Error: Rollback failed. The previous database is in atlas_old."
+                fi
+                rm -rf "$TEMP_DIR"
                 exit 1
             fi
         else

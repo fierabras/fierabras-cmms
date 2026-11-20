@@ -229,7 +229,14 @@ function Restore-AtlasCMMS {
 
     # Extract the backup
     Write-Host "Extracting backup archive..."
-    Expand-Archive -Path $BackupFile -DestinationPath $TEMP_DIR -Force
+    try {
+        Expand-Archive -Path $BackupFile -DestinationPath $TEMP_DIR -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Error: Could not extract the backup archive. Nothing was restored." -ForegroundColor Red
+        Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
 
     # Restore Postgres database
     if ((-not $SkipDb) -and (Test-Path (Join-Path $TEMP_DIR "atlas_db.sql"))) {
@@ -251,17 +258,33 @@ function Restore-AtlasCMMS {
 
             # Rename current "atlas" to "atlas_old"
             docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'ALTER DATABASE atlas RENAME TO atlas_old;'"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Error: Could not rename the current database. Make sure the backend container is stopped. Nothing was restored." -ForegroundColor Red
+                Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
 
-            # Create new "atlas" database
+            # Create new "atlas" database and restore from backup in a single
+            # transaction, stopping at the first error
             docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'CREATE DATABASE atlas;'"
-
-            Get-Content $dbBackupPath | docker exec -i atlas_db bash -c "export PGCLIENTENCODING='UTF8'; psql -U $POSTGRES_USER -d atlas"
+            if ($LASTEXITCODE -eq 0) {
+                Get-Content $dbBackupPath | docker exec -i atlas_db bash -c "export PGCLIENTENCODING='UTF8'; psql -U $POSTGRES_USER -d atlas -v ON_ERROR_STOP=1 --single-transaction"
+            }
 
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "Database restore complete." -ForegroundColor Green
             }
             else {
-                Write-Host "Error: Database restore failed." -ForegroundColor Red
+                Write-Host "Error: Database restore failed. Rolling back to the previous database..." -ForegroundColor Red
+                docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'DROP DATABASE IF EXISTS atlas;'"
+                docker exec atlas_db bash -c "PGPASSWORD=$POSTGRES_PWD psql -U $POSTGRES_USER -d postgres -c 'ALTER DATABASE atlas_old RENAME TO atlas;'"
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "The previous database was put back. Files were not restored." -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "Error: Rollback failed. The previous database is in atlas_old." -ForegroundColor Red
+                }
+                Remove-Item -Path $TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue
                 exit 1
             }
         }

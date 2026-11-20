@@ -149,7 +149,7 @@ If the `.env` file is not present, the scripts will use default credentials:
 
 ## Important Notes
 
-1. **Database Restoration**: When restoring a database, the script renames your current database to `atlas_old` before creating a new `atlas` database with the backup data. This allows for recovery if the restore process fails.
+1. **Database Restoration**: When restoring a database, the script renames your current database to `atlas_old` before creating a new `atlas` database with the backup data. The data is loaded in a single transaction that stops at the first error. If the archive cannot be extracted, nothing is restored; if loading fails, the script puts `atlas_old` back as `atlas`, skips the file restore and exits with a non-zero code. Any `atlas_old` left by a previous restore is dropped when a new restore starts.
 
 2. **Confirmation Prompts**: The restore operation will prompt for confirmation before overwriting your database or files.
 
