@@ -13,9 +13,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -54,9 +56,18 @@ class UserIntegrationTest extends AbstractIntegrationTest {
     private Role technicianRole;
     private Location location;
 
+    // P-00 (TD-INC06-04): other classes share the database, so this class counts relative to what it finds and
+    // deletes only what it creates. The default roles and plans must survive it.
+    private long usersBefore;
+    private final List<Long> createdCompanyIds = new ArrayList<>();
+    private final List<Long> createdSubscriptionIds = new ArrayList<>();
+    private final List<Long> createdPlanIds = new ArrayList<>();
+    private final List<Long> createdGlobalRoleIds = new ArrayList<>();
+
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
+        usersBefore = userRepository.count();
 
         SubscriptionPlan plan = SubscriptionPlan.builder()
                 .name("Test Plan")
@@ -65,15 +76,18 @@ class UserIntegrationTest extends AbstractIntegrationTest {
                 .features(new java.util.HashSet<>())
                 .build();
         plan = subscriptionPlanRepository.save(plan);
+        createdPlanIds.add(plan.getId());
 
         Subscription subscription = Subscription.builder()
                 .usersCount(10)
                 .subscriptionPlan(plan)
                 .build();
         subscription = subscriptionRepository.save(subscription);
+        createdSubscriptionIds.add(subscription.getId());
 
         company = new Company("TestCompany", 10, subscription);
         company = companyRepository.save(company);
+        createdCompanyIds.add(company.getId());
 
         CompanySettings settings = company.getCompanySettings();
         settings.setCompany(company);
@@ -142,16 +156,14 @@ class UserIntegrationTest extends AbstractIntegrationTest {
     }
 
     @AfterEach
-    void tearDown() {
-        userRepository.deleteAll();
-        locationRepository.deleteAll();
-        roleRepository.deleteAll();
-        generalPreferencesRepository.deleteAll();
-        companySettingsRepository.deleteAll();
-        companyRepository.deleteAll();
-        subscriptionRepository.deleteAll();
-        subscriptionPlanRepository.deleteAll();
+    void tearDown(@Autowired JdbcTemplate jdbcTemplate) {
+        // ON DELETE CASCADE from company removes its settings, preferences, roles, locations and users.
+        createdCompanyIds.forEach(id -> jdbcTemplate.update("DELETE FROM company WHERE id = ?", id));
+        createdGlobalRoleIds.forEach(id -> jdbcTemplate.update("DELETE FROM role WHERE id = ?", id));
+        createdSubscriptionIds.forEach(id -> jdbcTemplate.update("DELETE FROM subscription WHERE id = ?", id));
+        createdPlanIds.forEach(id -> jdbcTemplate.update("DELETE FROM subscription_plan WHERE id = ?", id));
         SecurityContextHolder.clearContext();
+        assertEquals(usersBefore, userRepository.count(), "cleanup left users");
     }
 
     // ===== FindTests =====
@@ -221,6 +233,7 @@ class UserIntegrationTest extends AbstractIntegrationTest {
         Subscription sub = subscriptionRepository.save(
                 Subscription.builder().usersCount(5).subscriptionPlan(
                         subscriptionPlanRepository.findAll().get(0)).build());
+        createdSubscriptionIds.add(sub.getId());
         Company emptyCompany = new Company("Empty", 0, sub);
         CompanySettings settings = emptyCompany.getCompanySettings();
         GeneralPreferences gp = settings.getGeneralPreferences();
@@ -228,6 +241,7 @@ class UserIntegrationTest extends AbstractIntegrationTest {
         gp.setDateFormat(com.grash.model.enums.DateFormat.MMDDYY);
         gp.setTimeZone("UTC");
         emptyCompany = companyRepository.save(emptyCompany);
+        createdCompanyIds.add(emptyCompany.getId());
 
         Collection<User> users = userService.findByCompany(emptyCompany.getId());
 
@@ -242,6 +256,7 @@ class UserIntegrationTest extends AbstractIntegrationTest {
                 .code(RoleCode.REQUESTER)
                 .build();
         requesterRole = roleRepository.save(requesterRole);
+        createdGlobalRoleIds.add(requesterRole.getId());
 
         User requester = new User();
         requester.setFirstName("Req");
@@ -292,12 +307,12 @@ class UserIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void getAll_returnsAllUsers() {
-        assertEquals(2, userService.getAll().size());
+        assertEquals(usersBefore + 2, userService.getAll().size());
     }
 
     @Test
     void count_returnsCorrectCount() {
-        assertEquals(2, userService.count());
+        assertEquals(usersBefore + 2, userService.count());
     }
 
     @Test
@@ -356,7 +371,7 @@ class UserIntegrationTest extends AbstractIntegrationTest {
         Collection<User> saved = userService.saveAll(List.of(u1, u2));
 
         assertEquals(2, saved.size());
-        assertEquals(4, userRepository.count());
+        assertEquals(usersBefore + 4, userRepository.count());
     }
 
     // ===== UpdateTests =====
@@ -531,7 +546,8 @@ class UserIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void hasMorePaidUsersThan_returnsFalse_whenWithinLimit() {
-        boolean exceeded = userRepository.hasMorePaidUsersThan(5);
+        // Paid users never outnumber all users, whatever other classes left in the database.
+        boolean exceeded = userRepository.hasMorePaidUsersThan((int) userRepository.count());
 
         assertFalse(exceeded);
     }
