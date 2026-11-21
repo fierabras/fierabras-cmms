@@ -46,6 +46,7 @@ import { SearchCriteria, SortDirection } from '../../../models/owns/page';
 import { onSearchQueryChange } from '../../../utils/overall';
 import SearchInput from '../components/SearchInput';
 import { getUserUrl } from '../../../utils/urlPaths';
+import { conflictMessage } from '../../../utils/conflicts';
 
 interface PropsType {
   values?: any;
@@ -137,7 +138,7 @@ const Teams = ({ openModal, handleCloseModal }: PropsType) => {
     showSnackBar(t('team_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('team_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('team_delete_failure')), 'error');
   let fields: Array<IField> = [
     {
       name: 'name',

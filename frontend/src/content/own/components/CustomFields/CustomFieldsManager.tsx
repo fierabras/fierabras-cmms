@@ -58,6 +58,7 @@ import {
   DropResult
 } from 'react-beautiful-dnd';
 import DeleteTwoToneIcon from '@mui/icons-material/DeleteTwoTone';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 const IconButtonWrapper = styled(IconButton)(
   ({ theme }) => `
@@ -127,7 +128,7 @@ function CustomFieldsManager({ entityType }: CustomFieldsManagerProps) {
   };
 
   const onDeleteFailure = (err) => {
-    showSnackBar(t('something_went_wrong'), 'error');
+    showSnackBar(conflictMessage(err, t, t('something_went_wrong')), 'error');
   };
 
   const onCreateSuccess = () => {

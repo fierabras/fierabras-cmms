@@ -1971,9 +1971,34 @@ const locale = {
   entity_type_ROLE: 'Role',
   entity_type_WORK_ORDER: 'Work order',
   entity_type_USER: 'User',
+  entity_type_ADDITIONAL_COST: 'Additional cost',
+  entity_type_COMMENT: 'Comment',
+  entity_type_CURRENCY: 'Currency',
+  entity_type_CUSTOM_FIELD: 'Custom field',
+  entity_type_CUSTOM_FIELD_VALUE: 'Custom field value',
+  entity_type_CUSTOMER: 'Customer',
+  entity_type_GENERAL_PREFERENCES: 'General preferences',
+  entity_type_LABOR: 'Labor',
+  entity_type_PREVENTIVE_MAINTENANCE: 'Preventive maintenance',
+  entity_type_REQUEST: 'Request',
+  entity_type_TASK_BASE: 'Task',
+  entity_type_TEAM: 'Team',
+  entity_type_WORK_ORDER_HISTORY: 'Work order history',
+  entity_type_WORK_ORDER_METER_TRIGGER: 'Meter trigger',
+  entity_type_WORKFLOW_ACTION: 'Workflow action',
+  entity_type_WORKFLOW_CONDITION: 'Workflow condition',
   asset_in_use:
     'This asset is in use and cannot be deleted. Archive it instead.',
   record_in_use: 'This record is used by other records and cannot be deleted.',
+  owner_account:
+    'The owner of the organization cannot delete or disable their own account.',
+  user_retired: 'This user is disabled and cannot be assigned.',
+  user_in_use:
+    'This user is in use and cannot be deleted. Disable the user instead.',
+  team_in_use: 'This team is in use and cannot be deleted.',
+  custom_field_in_use:
+    'This custom field has values in other records and cannot be deleted.',
+  currency_in_use: 'This currency is in use and cannot be deleted.',
   in_use_blocked_by: 'It is used by: {{types}}.'
 };
 
