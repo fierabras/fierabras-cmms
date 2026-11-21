@@ -36,6 +36,7 @@ import DeleteTwoToneIcon from '@mui/icons-material/DeleteTwoTone';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import AssetMeters from './AssetMeters';
 import { handleFileUpload } from '../../../../utils/overall';
+import { conflictMessage } from '../../../../utils/conflicts';
 import AssetDowntimes from './AssetDowntimes';
 import AssetAnalytics from './AssetAnalytics';
 import { getCustomFields } from '../../../../slices/customField';
@@ -178,7 +179,7 @@ const ShowAsset = ({}: PropsType) => {
     navigate('/app/assets');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('asset_remove_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('asset_remove_failure')), 'error');
   const defaultFields: Array<IField> = [
     {
       name: 'assetInfo',

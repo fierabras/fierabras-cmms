@@ -17,7 +17,8 @@ function SettingsLayout() {
     { value: 'features', label: t('features') },
     { value: 'roles', label: t('roles') },
     { value: 'checklists', label: t('checklists') },
-    { value: 'integrations', label: t('integrations') }
+    { value: 'integrations', label: t('integrations') },
+    { value: 'audit-log', label: t('audit_log') }
   ];
 
   // Determine the current tab index based on the URL path

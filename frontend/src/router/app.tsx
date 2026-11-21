@@ -99,6 +99,9 @@ const WebhooksPage = Loader(
 const Connectors = Loader(
   lazy(() => import('../content/own/Settings/Integrations/Connectors'))
 );
+const AuditLogSettings = Loader(
+  lazy(() => import('../content/own/Settings/AuditLog'))
+);
 
 const UserProfile = Loader(lazy(() => import('../content/own/UserProfile')));
 const CompanyProfile = Loader(
@@ -254,6 +257,10 @@ const appRoutes = [
           { path: 'api-keys', element: <ApiKeysPage /> },
           { path: 'webhooks', element: <WebhooksPage /> }
         ]
+      },
+      {
+        path: 'audit-log',
+        element: <AuditLogSettings />
       }
     ]
   },
