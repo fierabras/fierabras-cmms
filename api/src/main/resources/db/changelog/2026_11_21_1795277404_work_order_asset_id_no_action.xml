@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-10 (PPB-02, PPB-21, PPB-22): a work order keeps its asset. Replaces the ON DELETE SET NULL of
+         2024_03_01_1709243481_set_null_and_cascade_from_script (left untouched) with NO ACTION, so that deleting
+         an asset cited by a work order is rejected; the service answers 409 ASSET_IN_USE first. NO ACTION, not
+         RESTRICT, keeps the deletion of a whole company working: both rows go in the same statement. -->
+    <changeSet id="2026_11_21_1795277404_work_order_asset_id_no_action" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkp4hbmaa9hcp6myymsfyxg6fo2"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="work_order"
+                                 constraintName="fkp4hbmaa9hcp6myymsfyxg6fo2" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkp4hbmaa9hcp6myymsfyxg6fo2"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="work_order"
+                                     constraintName="fkp4hbmaa9hcp6myymsfyxg6fo2" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

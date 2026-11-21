@@ -5,6 +5,7 @@ import com.grash.factory.StorageServiceFactory;
 import com.grash.integration.support.MailDouble;
 import com.grash.integration.support.StorageDouble;
 import com.grash.integration.support.TestOrganizations;
+import com.grash.integration.support.TestRecords;
 import com.grash.integration.support.WebhookDouble;
 import com.grash.service.*;
 import org.junit.jupiter.api.AfterEach;
@@ -26,7 +27,7 @@ import static org.mockito.Mockito.when;
  * failure. See {@code dev-docs/Run tests.md}.
  */
 @SpringBootTest
-@Import(TestOrganizations.class)
+@Import({TestOrganizations.class, TestRecords.class})
 public abstract class AbstractIntegrationTest extends AbstractTestContainer {
 
     @MockBean
