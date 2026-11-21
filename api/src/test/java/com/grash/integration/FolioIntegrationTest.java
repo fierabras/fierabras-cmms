@@ -9,11 +9,16 @@ import com.grash.integration.support.TestApi.Response;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
+import com.grash.dto.imports.AssetImportDTO;
+import com.grash.dto.imports.LocationImportDTO;
+import com.grash.dto.imports.PreventiveMaintenanceImportDTO;
+import com.grash.dto.imports.WorkOrderImportDTO;
 import com.grash.job.WorkOrderCreationJob;
 import com.grash.model.Company;
 import com.grash.model.PreventiveMaintenance;
 import com.grash.repository.PreventiveMaintenanceRepository;
 import com.grash.service.CustomSequenceService;
+import com.grash.service.ImportService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -115,6 +120,7 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
     private final WorkOrderCreationJob workOrderCreationJob;
     private final CustomSequenceService customSequenceService;
     private final TransactionTemplate transactionTemplate;
+    private final ImportService importService;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -122,7 +128,7 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
                          ObjectMapper objectMapper, JdbcTemplate jdbcTemplate,
                          PreventiveMaintenanceRepository preventiveMaintenanceRepository,
                          WorkOrderCreationJob workOrderCreationJob, CustomSequenceService customSequenceService,
-                         TransactionTemplate transactionTemplate) {
+                         TransactionTemplate transactionTemplate, ImportService importService) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -132,6 +138,7 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         this.workOrderCreationJob = workOrderCreationJob;
         this.customSequenceService = customSequenceService;
         this.transactionTemplate = transactionTemplate;
+        this.importService = importService;
     }
 
     @AfterEach
@@ -456,7 +463,7 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
     private static final List<String> INTERNALS = List.of("sql", "constraint", "uq_", "violates", "duplicate key",
             "custom_id", "exception", "at com.");
 
-    private long assetId(Response created) {
+    private long idOf(Response created) {
         try {
             return objectMapper.readTree(created.body()).get("id").asLong();
         } catch (Exception e) {
@@ -492,7 +499,7 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         Company company = data.o1().company();
         String token = api.login(data.o1().admin());
         assertTrue(create(Type.ASSET, "P-20 asset 1", token).is2xx());
-        long second = assetId(create(Type.ASSET, "P-20 asset 2", token));
+        long second = idOf(create(Type.ASSET, "P-20 asset 2", token));
         Map<String, Object> before = assetRow(second);
 
         Response response = patchAsset(second, "P-20 renamed", "A000001", token);
@@ -511,8 +518,8 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         // two people: one user in two threads would also hit C-11
         List<String> tokens = List.of(api.login(data.o1().owner()), api.login(data.o1().admin()));
         for (int round = 0; round < ROUNDS; round++) {
-            List<Long> assets = List.of(assetId(create(Type.ASSET, "P-20 race a " + round, tokens.get(0))),
-                    assetId(create(Type.ASSET, "P-20 race b " + round, tokens.get(0))));
+            List<Long> assets = List.of(idOf(create(Type.ASSET, "P-20 race a " + round, tokens.get(0))),
+                    idOf(create(Type.ASSET, "P-20 race b " + round, tokens.get(0))));
             String folio = "P-20 HAND " + round;
 
             List<Response> responses = valuesOfOverlapping(Concurrently.run(2, i -> timed(
@@ -530,15 +537,74 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         CommonData data = newOrganizations();
         Company company = data.o1().company();
         String token = api.login(data.o1().admin());
-        long first = assetId(create(Type.ASSET, "P-20 asset 1", token));
+        long first = idOf(create(Type.ASSET, "P-20 asset 1", token));
         // the counter would hand out A000002 next
         assertTrue(patchAsset(first, "P-20 asset 1", "A000002", token).is2xx());
 
         Response created = create(Type.ASSET, "P-20 asset 2", token);
 
         assertTrue(created.is2xx(), created.toString());
-        assertEquals("A000003", assetRow(assetId(created)).get("custom_id"));
+        assertEquals("A000003", assetRow(idOf(created)).get("custom_id"));
         assertEquals(List.of(), repeated(folios(Type.ASSET, company)));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // CA-P20-10: an import that updates a record keeps its folio
+    // ---------------------------------------------------------------------------------------------------------
+
+    /**
+     * Creates a record through the API, runs {@code update} (an import of that record) and checks that the record
+     * keeps its folio and that the counter of the company does not move.
+     */
+    private void assertImportKeepsFolio(Type type, java.util.function.BiConsumer<Long, CommonData> update) {
+        CommonData data = newOrganizations();
+        Company company = data.o1().company();
+        String token = api.login(data.o1().admin());
+        assertTrue(create(type, "P-20 other " + type, token).is2xx());
+        long id = idOf(create(type, "P-20 imported " + type, token));
+        String folio = folioOf(type, id);
+        long counter = counter(type, company);
+        SecurityContextHolder.clearContext();
+
+        update.accept(id, data);
+
+        assertEquals(folio, folioOf(type, id), "the folio of the updated " + type);
+        assertEquals(counter, counter(type, company), "the " + type + " counter");
+        assertEquals(List.of(), repeated(folios(type, company)));
+    }
+
+    @Test
+    @DisplayName("CA-P20-10: a work order updated by an import keeps its folio and the counter does not move")
+    void workOrderImportUpdate_keepsFolio() {
+        assertImportKeepsFolio(Type.WORK_ORDER, (id, data) -> importService.importWorkOrders(List.of(
+                        WorkOrderImportDTO.builder().id(id).title("P-20 imported again").status("Open").build()),
+                data.o1().company(), data.o1().admin()));
+    }
+
+    @Test
+    @DisplayName("CA-P20-10: an asset updated by an import keeps its folio and the counter does not move")
+    void assetImportUpdate_keepsFolio() {
+        assertImportKeepsFolio(Type.ASSET, (id, data) -> importService.importAssets(List.of(
+                AssetImportDTO.builder().id(id).name("P-20 imported again").build()), data.o1().company()));
+    }
+
+    @Test
+    @DisplayName("CA-P20-10: a location updated by an import keeps its folio and the counter does not move")
+    void locationImportUpdate_keepsFolio() {
+        assertImportKeepsFolio(Type.LOCATION, (id, data) -> importService.importLocations(List.of(
+                LocationImportDTO.builder().id(id).name("P-20 imported again").build()), data.o1().company()));
+    }
+
+    @Test
+    @DisplayName("CA-P20-10: a preventive maintenance updated by an import keeps its folio and the counter does not "
+            + "move")
+    void preventiveMaintenanceImportUpdate_keepsFolio() {
+        assertImportKeepsFolio(Type.PREVENTIVE_MAINTENANCE, (id, data) ->
+                importService.importPreventiveMaintenances(List.of(PreventiveMaintenanceImportDTO.builder().id(id)
+                        .name("P-20 imported again").title("P-20 imported again").frequency(1)
+                        .recurrenceType("DAILY").recurrenceBasedOn("SCHEDULED_DATE")
+                        // 2099-12-31 as an Excel date: the scheduler must not fire it during the test
+                        .startsOn(73050.0).build()), data.o1().company()));
     }
 
     private static JobExecutionContext jobContext(long scheduleId) {

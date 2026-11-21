@@ -211,7 +211,8 @@ public class LocationService {
             optionalTeam.ifPresent(teams::add);
         });
         location.setTeams(teams);
-        location.setCustomId(getLocationNumber(company));
+        // P-20 (CA-P20-10): a location updated by the import keeps its folio
+        if (location.getCustomId() == null) location.setCustomId(getLocationNumber(company));
         List<Customer> customers = new ArrayList<>();
         dto.getCustomersNames().forEach(name -> {
             Optional<Customer> optionalCustomer = customerService.findByNameIgnoreCaseAndCompany(name, companyId);

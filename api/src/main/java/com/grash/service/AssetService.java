@@ -372,7 +372,8 @@ public class AssetService {
         asset.setDescription(dto.getDescription());
         asset.setModel(dto.getModel());
         asset.setPower(dto.getPower());
-        asset.setCustomId(getAssetNumber(company));
+        // P-20 (CA-P20-10): an asset updated by the import keeps its folio
+        if (asset.getCustomId() == null) asset.setCustomId(getAssetNumber(company));
         asset.setManufacturer(dto.getManufacturer());
         Optional<Location> optionalLocation = locationService.findByNameIgnoreCaseAndCompany(dto.getLocationName(),
                 companyId).stream().findFirst();

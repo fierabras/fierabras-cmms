@@ -553,7 +553,8 @@ public class WorkOrderService {
                 assetService, workOrderCategoryService);
         workOrder.setCompany(company);
         workOrder.setDueDate(Helper.getDateFromExcelDate(dto.getDueDate()));
-        workOrder.setCustomId(getWorkOrderNumber(company));
+        // P-20 (CA-P20-10): a work order updated by the import keeps its folio
+        if (workOrder.getCustomId() == null) workOrder.setCustomId(getWorkOrderNumber(company));
 
         workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
         Status status = Status.getStatusFromString(dto.getStatus());

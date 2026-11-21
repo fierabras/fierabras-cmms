@@ -306,8 +306,10 @@ public class PreventiveMaintenanceService {
                 "\\s+", "_").toUpperCase()));
         schedule.setDaysOfWeek(pmImportDTO.getDaysOfWeek().stream().map(this::getDayOfWeekNumber).collect(Collectors.toList()));
 
-        preventiveMaintenance.setCustomId("PM" + String.format("%06d",
-                customSequenceService.getNextPreventiveMaintenanceSequence(company)));
+        // P-20 (CA-P20-10): a preventive maintenance updated by the import keeps its folio
+        if (preventiveMaintenance.getCustomId() == null)
+            preventiveMaintenance.setCustomId("PM" + String.format("%06d",
+                    customSequenceService.getNextPreventiveMaintenanceSequence(company)));
 
         PreventiveMaintenance savedPM = preventiveMaintenanceRepository.save(preventiveMaintenance);
         scheduleService.reScheduleWorkOrder(savedPM.getSchedule());
