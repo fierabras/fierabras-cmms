@@ -8,6 +8,8 @@ import com.grash.mapper.RelationMapper;
 import com.grash.model.User;
 import com.grash.model.Relation;
 import com.grash.model.WorkOrder;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.RelationType;
 import com.grash.model.enums.RelationTypeInternal;
 import com.grash.repository.RelationRepository;
@@ -33,6 +35,7 @@ public class RelationService {
     private final RelationMapper relationMapper;
     private final EntityManager em;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
 
     public Relation create(Relation relation) {
         Relation savedRelation = relationRepository.saveAndFlush(relation);
@@ -60,6 +63,14 @@ public class RelationService {
         relationRepository.deleteById(id);
     }
 
+    /**
+     * P-12 (E-6, PPB-23): removes a relation of an open work order and records it, in one transaction.
+     */
+    public void delete(Relation relation, User actor) {
+        deletionService.delete(AuditTarget.childOf(EntityType.RELATION, relation.getId(), null, relation.getParent()),
+                actor, AuditSource.API, null, () -> relationRepository.deleteById(relation.getId()));
+    }
+
     public Optional<Relation> findById(Long id) {
         return relationRepository.findById(id);
     }
@@ -83,6 +94,11 @@ public class RelationService {
             child = parent;
             parent = intermediate;
         }
+        // P-12 (E-4, D-P12-3): the relation belongs to its parent, which must admit the change; the child is a
+        // reference and may be closed
+        WorkOrder owner = workOrderService.findById(parent.getId())
+                .orElseThrow(() -> new CustomException("Work order not found", HttpStatus.NOT_FOUND));
+        WorkOrderStateGuard.check(owner, WorkOrderStateGuard.Change.CHILD);
         Relation relation = Relation.builder()
                 .parent(parent)
                 .child(child)

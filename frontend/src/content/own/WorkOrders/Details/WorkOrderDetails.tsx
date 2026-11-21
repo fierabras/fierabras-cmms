@@ -42,6 +42,7 @@ import TimeSection from './TimeSection';
 import CostSection from './CostSection';
 import LinkTwoToneIcon from '@mui/icons-material/LinkTwoTone';
 import ArchiveTwoToneIcon from '@mui/icons-material/ArchiveTwoTone';
+import UnarchiveTwoToneIcon from '@mui/icons-material/UnarchiveTwoTone';
 import PictureAsPdfTwoToneIcon from '@mui/icons-material/PictureAsPdfTwoTone';
 import PriorityWrapper from '../../components/PriorityWrapper';
 import TimerTwoToneIcon from '@mui/icons-material/TimerTwoTone';
@@ -92,6 +93,7 @@ import CommentsSection from './CommentsSection';
 import { useLicenseEntitlement } from '../../../../hooks/useLicenseEntitlement';
 import { getCustomFieldValuesForDetails } from '../../type';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { getCommentsCountByWorkOrder } from '../../../../slices/comment';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CloseIcon from '@mui/icons-material/Close';
@@ -113,14 +115,13 @@ const LabelWrapper = styled(Box)(
 interface WorkOrderDetailsProps {
   workOrder: WorkOrder;
   onEdit: (id: number) => void;
-  onDelete: (id: number) => void;
   onCopy: (workOrder: WorkOrder) => void;
   tasks: Task[];
   onClose: () => void;
 }
 
 export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
-  const { workOrder, onEdit, tasks, onDelete, onCopy, onClose } = props;
+  const { workOrder, onEdit, tasks, onCopy, onClose } = props;
   const theme = useTheme();
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const { getFormattedDate, getUserNameById, getFormattedCurrency } =
@@ -129,7 +130,6 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
   const {
     user,
     hasEditPermission,
-    hasDeletePermission,
     hasCreatePermission,
     hasViewPermission,
     hasViewOtherPermission
@@ -227,13 +227,26 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
     showSnackBar(t('wo_archive_success'), 'success');
   };
   const onArchiveFailure = (err) =>
-    showSnackBar(t('wo_archive_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('wo_archive_failure')), 'error');
   const onArchive = () => {
     handleCloseMenu();
     if (window.confirm(t('wo_archive_confirm') + workOrder.title + ' ?')) {
       dispatch(editWorkOrder(workOrder?.id, { ...workOrder, archived: true }))
         .then(onArchiveSuccess)
         .catch(onArchiveFailure);
+    }
+  };
+  const onRestore = () => {
+    handleCloseMenu();
+    if (window.confirm(t('wo_restore_confirm') + workOrder.title + ' ?')) {
+      dispatch(editWorkOrder(workOrder?.id, { ...workOrder, archived: false }))
+        .then(() => showSnackBar(t('wo_restore_success'), 'success'))
+        .catch((err) =>
+          showSnackBar(
+            conflictMessage(err, t, t('wo_restore_failure')),
+            'error'
+          )
+        );
     }
   };
   const onGenerateReport = () => {
@@ -319,7 +332,12 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
       editPartQuantity(workOrder.id, partQuantity.id, Number(value), false)
     )
       .then(() => showSnackBar(t('quantity_change_success'), 'success'))
-      .catch((err) => showSnackBar(t('quantity_change_failure'), 'error'));
+      .catch((err) =>
+        showSnackBar(
+          conflictMessage(err, t, t('quantity_change_failure')),
+          'error'
+        )
+      );
   };
   const debouncedPartQuantityChange = useMemo(
     () => debounce(onPartQuantityChange, 1500),
@@ -573,14 +591,6 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
               <EditTwoToneIcon color="primary" />
             </IconButton>
           )}
-          {hasDeletePermission(PermissionEntity.WORK_ORDERS, workOrder) && (
-            <IconButton>
-              <DeleteTwoToneIcon
-                color="error"
-                onClick={() => onDelete(workOrder.id)}
-              />
-            </IconButton>
-          )}
         </Box>
       </Grid>
       <Divider />
@@ -653,7 +663,14 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                           changeWorkOrderStatus(workOrder?.id, {
                             status: event.target.value
                           })
-                        ).finally(() => setChangingStatus(false));
+                        )
+                          .catch((err) =>
+                            showSnackBar(
+                              conflictMessage(err, t, getErrorMessage(err)),
+                              'error'
+                            )
+                          )
+                          .finally(() => setChangingStatus(false));
                       }}
                       disabled={
                         !hasEditPermission(
@@ -708,7 +725,10 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                       setControllingTime(true);
                       dispatch(controlTimer(!runningTimer, workOrder.id))
                         .catch((err) =>
-                          showSnackBar(getErrorMessage(err), 'error')
+                          showSnackBar(
+                            conflictMessage(err, t, getErrorMessage(err)),
+                            'error'
+                          )
                         )
                         .finally(() => setControllingTime(false));
                     }}
@@ -1056,7 +1076,10 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                             selectedParts.map((part) => part.id)
                           )
                         ).catch((error) =>
-                          showSnackBar(t('not_enough_part'), 'error')
+                          showSnackBar(
+                            conflictMessage(error, t, t('not_enough_part')),
+                            'error'
+                          )
                         );
                       }}
                     />
@@ -1106,6 +1129,15 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                                           deleteRelation(
                                             workOrder.id,
                                             relation.id
+                                          )
+                                        ).catch((err) =>
+                                          showSnackBar(
+                                            conflictMessage(
+                                              err,
+                                              t,
+                                              getErrorMessage(err)
+                                            ),
+                                            'error'
                                           )
                                         )
                                       }
@@ -1191,7 +1223,13 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
                   }
                   files={workOrder.files}
                   onRemove={(id: number) => {
-                    dispatch(removeFileFromWorkOrder(workOrder.id, id));
+                    dispatch(removeFileFromWorkOrder(workOrder.id, id)).catch(
+                      (err) =>
+                        showSnackBar(
+                          conflictMessage(err, t, getErrorMessage(err)),
+                          'error'
+                        )
+                    );
                   }}
                 />
               ) : (
@@ -1308,12 +1346,21 @@ export default function WorkOrderDetails(props: WorkOrderDetailsProps) {
             </Stack>
           </MenuItem>
         )}
-        <MenuItem onClick={onArchive}>
-          <Stack spacing={2} direction="row">
-            <ArchiveTwoToneIcon />
-            <Typography variant="h6">{t('archive')}</Typography>
-          </Stack>
-        </MenuItem>
+        {workOrder.archived ? (
+          <MenuItem onClick={onRestore}>
+            <Stack spacing={2} direction="row">
+              <UnarchiveTwoToneIcon />
+              <Typography variant="h6">{t('restore')}</Typography>
+            </Stack>
+          </MenuItem>
+        ) : (
+          <MenuItem onClick={onArchive}>
+            <Stack spacing={2} direction="row">
+              <ArchiveTwoToneIcon />
+              <Typography variant="h6">{t('archive')}</Typography>
+            </Stack>
+          </MenuItem>
+        )}
       </Menu>
     </Grid>
   );

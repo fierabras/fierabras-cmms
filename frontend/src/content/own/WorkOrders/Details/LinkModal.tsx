@@ -28,6 +28,7 @@ import { SearchCriteria } from '../../../../models/owns/page';
 import { getWorkOrders, getWorkOrdersMini } from '../../../../slices/workOrder';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 interface LinkModalProps {
   open: boolean;
@@ -88,7 +89,12 @@ export default function LinkModal({
         ) => {
           setSubmitting(true);
           dispatch(createRelation(workOrderId, _values))
-            .catch((err) => showSnackBar(getErrorMessage(err), 'error'))
+            .catch((err) =>
+              showSnackBar(
+                conflictMessage(err, t, getErrorMessage(err)),
+                'error'
+              )
+            )
             .finally(() => {
               setSubmitting(false);
               onClose();

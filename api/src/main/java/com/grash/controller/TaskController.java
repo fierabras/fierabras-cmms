@@ -107,18 +107,28 @@ public class TaskController {
                                          PreventiveMaintenance preventiveMaintenance, WorkOrder workOrder) {
         List<Task> resultTasks = new ArrayList<>();
         List<Task> matchedTasks = new ArrayList<>();
-
-        // Process each incoming task
+        // P-12 (E-4, D-P12-2): match every incoming task first (null: a new one), so that a work order is checked
+        // only when the replacement adds or removes a task
+        List<Task> matches = new ArrayList<>();
         for (TaskBaseDTO reqTaskBase : incomingTasks) {
             // Find matching existing task by comparing task base properties
             Task matchedTask = savedTasks.stream()
                     .filter(task -> !matchedTasks.contains(task) && tasksMatch(task.getTaskBase(), reqTaskBase))
                     .findFirst()
                     .orElse(null);
+            if (matchedTask != null) matchedTasks.add(matchedTask);
+            matches.add(matchedTask);
+        }
+        if (workOrder != null && (matches.contains(null) || matchedTasks.size() < savedTasks.size()))
+            WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
+
+        // Process each incoming task
+        for (int i = 0; i < incomingTasks.size(); i++) {
+            TaskBaseDTO reqTaskBase = incomingTasks.get(i);
+            Task matchedTask = matches.get(i);
 
             if (matchedTask != null) {
                 // Task already exists - preserve it with all its data (notes, images, value)
-                matchedTasks.add(matchedTask);
                 resultTasks.add(matchedTask);
             } else {
                 // New task - create it
@@ -138,7 +148,7 @@ public class TaskController {
         // Delete tasks that are no longer in the incoming request
         savedTasks.forEach(task -> {
             if (!matchedTasks.contains(task)) {
-                taskService.delete(task.getId());
+                taskService.delete(task, user);
             }
         });
         return resultTasks;
@@ -217,6 +227,7 @@ public class TaskController {
 
         if (optionalTask.isPresent()) {
             checkAccessToTask(optionalTask.get(), user, false);
+            checkWorkOrderOfTask(optionalTask.get());
             Task patchedTask = taskService.update(id, task);
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.TASK_UPDATED,
@@ -233,10 +244,19 @@ public class TaskController {
         Optional<Task> optionalTask = taskService.findById(id);
         if (optionalTask.isPresent()) {
             checkAccessToTask(optionalTask.get(), user, false);
-            taskService.delete(id);
+            checkWorkOrderOfTask(optionalTask.get());
+            taskService.delete(optionalTask.get(), user);
             return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Task not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-12 (E-3, E-4): a task of a closed or archived work order does not change.
+     */
+    private static void checkWorkOrderOfTask(Task task) {
+        if (task.getWorkOrder() != null)
+            WorkOrderStateGuard.check(task.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
     }
 
     private void checkAccessToTask(Task task, User user, boolean view) {

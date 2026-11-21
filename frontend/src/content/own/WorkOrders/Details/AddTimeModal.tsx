@@ -13,6 +13,7 @@ import useAuth from '../../../../hooks/useAuth';
 import FeatureErrorMessage from '../../components/FeatureErrorMessage';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { useContext } from 'react';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import Labor from '../../../../models/owns/labor';
@@ -151,11 +152,21 @@ export default function AddTimeModal({
                 return dispatch(
                   editLabor(labor.id, workOrderId, formattedValues as any)
                 )
-                  .catch((err) => showSnackBar(getErrorMessage(err), 'error'))
+                  .catch((err) =>
+                    showSnackBar(
+                      conflictMessage(err, t, getErrorMessage(err)),
+                      'error'
+                    )
+                  )
                   .then(() => onClose());
               } else
                 return dispatch(createLabor(workOrderId, formattedValues))
-                  .catch((err) => showSnackBar(getErrorMessage(err), 'error'))
+                  .catch((err) =>
+                    showSnackBar(
+                      conflictMessage(err, t, getErrorMessage(err)),
+                      'error'
+                    )
+                  )
                   .then(() => onClose());
             }}
           />

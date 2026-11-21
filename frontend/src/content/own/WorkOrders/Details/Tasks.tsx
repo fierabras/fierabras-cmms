@@ -17,6 +17,7 @@ import { Task } from '../../../../models/owns/tasks';
 import { getTasksByWorkOrder, patchTask } from '../../../../slices/task';
 import { useDispatch } from '../../../../store';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
+import { conflictMessage } from '../../../../utils/conflicts';
 import Form from '../../components/form';
 import * as Yup from 'yup';
 import { addFiles } from '../../../../slices/file';
@@ -55,7 +56,9 @@ export default function Tasks({
     const task = tasks.find((task) => task.id === id);
     dispatch(patchTask(workOrderId, id, { ...task, value }))
       .then(() => showSnackBar(t('task_update_success'), 'success'))
-      .catch(() => showSnackBar(t('task_update_failure'), 'error'));
+      .catch((err) =>
+        showSnackBar(conflictMessage(err, t, t('task_update_failure')), 'error')
+      );
 
     const newTasks = tasks.map((task) => {
       if (task.id === id) {

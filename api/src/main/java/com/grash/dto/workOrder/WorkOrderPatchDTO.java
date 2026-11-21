@@ -20,7 +20,8 @@ public class WorkOrderPatchDTO extends WorkOrderBasePatchDTO {
     private User completedBy;
     @Schema(description = "Date and time when the work order was completed")
     private Date completedOn;
-    @Schema(description = "Whether the work order is archived")
-    private boolean archived;
+    // P-12 (E-2): null keeps the current value; true archives an active work order, false restores an archived one
+    @Schema(description = "true archives the work order, false restores it; omitted, it does not change")
+    private Boolean archived;
     private List<CustomFieldValuePostDTO> customFields = new ArrayList<>();
 }

@@ -5,6 +5,9 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.exception.CustomException;
 import com.grash.mapper.AdditionalCostMapper;
 import com.grash.model.AdditionalCost;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.AdditionalCostRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -26,6 +29,7 @@ public class AdditionalCostService {
 
     private final AdditionalCostMapper additionalCostMapper;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
 
     @Transactional
     public AdditionalCost create(AdditionalCost additionalCost) {
@@ -53,6 +57,16 @@ public class AdditionalCostService {
 
     public void delete(Long id) {
         additionalCostRepository.deleteById(id);
+    }
+
+    /**
+     * P-12 (E-6, PPB-23): removes a cost of an open work order and records it, in one transaction.
+     */
+    @Transactional
+    public void delete(AdditionalCost additionalCost, User actor) {
+        deletionService.delete(AuditTarget.childOf(EntityType.ADDITIONAL_COST, additionalCost.getId(),
+                        additionalCost.getDescription(), additionalCost.getWorkOrder()), actor, AuditSource.API, null,
+                () -> additionalCostRepository.deleteById(additionalCost.getId()));
     }
 
     public Optional<AdditionalCost> findById(Long id) {

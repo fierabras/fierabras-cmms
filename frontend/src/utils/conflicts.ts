@@ -7,7 +7,10 @@ const conflictKeys: Record<string, string> = {
   USER_IN_USE: 'user_in_use',
   TEAM_IN_USE: 'team_in_use',
   CUSTOM_FIELD_IN_USE: 'custom_field_in_use',
-  CURRENCY_IN_USE: 'currency_in_use'
+  CURRENCY_IN_USE: 'currency_in_use',
+  WORK_ORDER_NOT_DELETABLE: 'work_order_not_deletable',
+  WORK_ORDER_CLOSED: 'work_order_closed',
+  WORK_ORDER_RETIRED: 'work_order_retired'
 };
 
 /**

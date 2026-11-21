@@ -11,6 +11,7 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.dto.workOrder.WorkOrderPatchDTO;
 import com.grash.dto.workOrder.WorkOrderPostDTO;
 import com.grash.dto.imports.WorkOrderImportDTO;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.factory.MailServiceFactory;
 import com.grash.mapper.PreventiveMaintenanceMapper;
@@ -92,6 +93,9 @@ class WorkOrderServiceTest {
     private CompanyService companyService;
     @Mock
     private WebhookDispatchService webhookDispatchService;
+    // P-12: archiving, restoring and reopening are recorded in the audit log
+    @Mock
+    private AuditLogService auditLogService;
     @Mock
     private CustomFieldValueService customFieldValueService;
     @Mock
@@ -1708,30 +1712,31 @@ class WorkOrderServiceTest {
             assertEquals(HttpStatus.NOT_FOUND, ex.getHttpStatus());
         }
 
+        // P-12 (E-1, PPB-06): replaced creatorCanDelete and deleteOtherPermission_allowsDelete. A work order is
+        // never deleted: the creator and a user with deleteOther get 409 WORK_ORDER_NOT_DELETABLE.
         @Test
-        void creatorCanDelete() {
+        void creator_notDeletable() {
             WorkOrder wo = buildWorkOrder(1L);
             wo.setCreatedBy(user.getId());
             when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
-            when(userService.findByCompany(anyLong())).thenReturn(Collections.emptyList());
-            when(messageSource.getMessage(anyString(), any(), any())).thenReturn("deleted");
-            when(mailServiceFactory.getMailService()).thenReturn(mailService);
 
-            assertDoesNotThrow(() -> workOrderService.deleteByIdAndUser(1L, user));
-            verify(workOrderRepository).deleteById(1L);
+            ConflictException ex = assertThrows(ConflictException.class,
+                    () -> workOrderService.deleteByIdAndUser(1L, user));
+            assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            assertEquals("WORK_ORDER_NOT_DELETABLE", ex.getCode());
+            verify(workOrderRepository, never()).deleteById(anyLong());
         }
 
         @Test
-        void deleteOtherPermission_allowsDelete() {
+        void deleteOtherPermission_notDeletable() {
             WorkOrder wo = buildWorkOrder(1L);
             wo.setCreatedBy(99L);
             when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
-            when(userService.findByCompany(anyLong())).thenReturn(Collections.emptyList());
-            when(messageSource.getMessage(anyString(), any(), any())).thenReturn("deleted");
-            when(mailServiceFactory.getMailService()).thenReturn(mailService);
 
-            assertDoesNotThrow(() -> workOrderService.deleteByIdAndUser(1L, user));
-            verify(workOrderRepository).deleteById(1L);
+            ConflictException ex = assertThrows(ConflictException.class,
+                    () -> workOrderService.deleteByIdAndUser(1L, user));
+            assertEquals("WORK_ORDER_NOT_DELETABLE", ex.getCode());
+            verify(workOrderRepository, never()).deleteById(anyLong());
         }
 
         @Test
@@ -1747,42 +1752,17 @@ class WorkOrderServiceTest {
             verify(workOrderRepository, never()).deleteById(anyLong());
         }
 
+        // P-12 (E-1, CA-PPB-021): replaced sendsDeletionEmailToSettingsAdmins and dispatchesDeleteWebhook. The
+        // rejection sends no mail and dispatches no webhook.
         @Test
-        void sendsDeletionEmailToSettingsAdmins() {
+        void rejection_sendsNoMailNorWebhook() {
             WorkOrder wo = buildWorkOrder(1L);
             wo.setCreatedBy(user.getId());
             when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
-            when(messageSource.getMessage(anyString(), any(), any())).thenReturn("deleted");
 
-            User admin = buildUser(2L);
-            admin.getRole().getViewPermissions().add(PermissionEntity.SETTINGS);
-            admin.getUserSettings().setEmailNotified(true);
-            admin.setEnabled(true);
-            when(userService.findByCompany(anyLong())).thenReturn(List.of(admin));
-            when(mailServiceFactory.getMailService()).thenReturn(mailService);
+            assertThrows(ConflictException.class, () -> workOrderService.deleteByIdAndUser(1L, user));
 
-            workOrderService.deleteByIdAndUser(1L, user);
-
-            verify(mailService).sendMessageUsingThymeleafTemplate(
-                    eq(new String[]{admin.getEmail()}),
-                    eq("deleted"), anyMap(), eq("deleted-work-order.html"), any(), isNull());
-        }
-
-        @Test
-        void dispatchesDeleteWebhook() {
-            WorkOrder wo = buildWorkOrder(1L);
-            wo.setCreatedBy(user.getId());
-            when(workOrderRepository.findById(1L)).thenReturn(Optional.of(wo));
-            when(userService.findByCompany(anyLong())).thenReturn(Collections.emptyList());
-            when(messageSource.getMessage(anyString(), any(), any())).thenReturn("deleted");
-            when(mailServiceFactory.getMailService()).thenReturn(mailService);
-            when(workOrderMapper.toShowDto(any())).thenReturn(new com.grash.dto.workOrder.WorkOrderShowDTO());
-
-            workOrderService.deleteByIdAndUser(1L, user);
-
-            verify(webhookDispatchService).dispatchWebhook(
-                    eq(company), eq(WebhookEvent.WORK_ORDER_DELETE),
-                    anyMap(), eq("deleteWorkOrder"), any(), isNull(), isNull(), isNull(), isNull(), isNull());
+            verifyNoInteractions(mailServiceFactory, webhookDispatchService);
         }
     }
 
@@ -2725,9 +2705,14 @@ class WorkOrderServiceTest {
             when(workflowService.findByMainConditionAndCompany(any(), anyLong()))
                     .thenReturn(List.of(new Workflow()));
 
-            workOrderService.patch(1L, new WorkOrderPatchDTO(), user);
+            // P-12 (E-2): only an explicit archived = true archives; the archiving is recorded
+            WorkOrderPatchDTO archive = new WorkOrderPatchDTO();
+            archive.setArchived(true);
+            workOrderService.patch(1L, archive, user);
 
             verify(workflowService).runWorkOrder(any(Workflow.class), any(WorkOrder.class));
+            verify(auditLogService).record(any(), eq(user), eq(AuditAction.RETIRE), eq(AuditSource.API), anyMap(),
+                    eq(0));
         }
     }
 

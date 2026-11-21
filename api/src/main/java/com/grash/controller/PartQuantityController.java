@@ -78,14 +78,18 @@ public class PartQuantityController {
 
         if (optionalWorkOrder.isPresent()) {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
-            if (savedWorkOrder.getFirstTimeToReact() == null) {
-                savedWorkOrder.setFirstTimeToReact(new Date());
-                workOrderService.save(savedWorkOrder);
-            }
             if (savedWorkOrder.canBeEditedBy(user)) {
                 Collection<PartQuantity> partQuantities = partQuantityService.findByWorkOrder(id);
                 Collection<Long> partQuantityMappedPartIds = partQuantities.stream().map
                         (partQuantity -> partQuantity.getPart().getId()).collect(Collectors.toList());
+                // P-12 (E-4, D-P12-2): a closed or archived work order is checked only when a line is added or
+                // removed, and before anything is written
+                if (!partQuantityMappedPartIds.containsAll(parts) || !parts.containsAll(partQuantityMappedPartIds))
+                    WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.CHILD);
+                if (savedWorkOrder.getFirstTimeToReact() == null) {
+                    savedWorkOrder.setFirstTimeToReact(new Date());
+                    workOrderService.save(savedWorkOrder);
+                }
                 parts.forEach(partId -> {
                     if (!partQuantityMappedPartIds.contains(partId)) {
                         Optional<Part> optionalPart = partService.findById(partId);
@@ -100,7 +104,7 @@ public class PartQuantityController {
                 partQuantityMappedPartIds.forEach(partId -> {
                     if (!parts.contains(partId)) {
                         partQuantityService.delete(partQuantities.stream().filter(partQuantity ->
-                                partQuantity.getPart().getId().equals(partId)).findFirst().get().getId());
+                                partQuantity.getPart().getId().equals(partId)).findFirst().get(), user);
                     }
                 });
                 return partQuantityService.findByWorkOrder(id).stream().map(partQuantityMapper::toShowDto).collect(Collectors.toList());
@@ -173,6 +177,11 @@ public class PartQuantityController {
                                HttpServletRequest req) {
         User user = userService.whoami(req);
         //TODO check access
+        // P-12 (E-4): a consumption is not added to a closed or archived work order
+        if (partQuantityReq.getWorkOrder() != null)
+            WorkOrderStateGuard.check(workOrderService.findById(partQuantityReq.getWorkOrder().getId())
+                            .orElseThrow(() -> new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND)),
+                    WorkOrderStateGuard.Change.CHILD);
         PartQuantity savedPartQuantity = partQuantityService.create(partQuantityReq);
         return partQuantityMapper.toShowDto(savedPartQuantity);
     }
@@ -190,6 +199,8 @@ public class PartQuantityController {
                 partQuantity.setQuantity((int) partQuantity.getQuantity());
             }
             if (savedPartQuantity.getWorkOrder() != null) {
+                // P-12 (E-4): the consumption of a closed or archived work order does not change
+                WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                 partService.consumePart(savedPartQuantity.getPart().getId(),
                         partQuantity.getQuantity() - savedPartQuantity.getQuantity(),
                         savedPartQuantity.getWorkOrder(), Helper.getLocale(user), false);
@@ -212,11 +223,13 @@ public class PartQuantityController {
             (user.getId().equals(savedPartQuantity.getCreatedBy())
                     || (isWorkOrderPartQuantity && savedPartQuantity.getWorkOrder().canBeEditedBy(user)) || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PURCHASE_ORDERS)) {
                 if (isWorkOrderPartQuantity) {
+                    // P-12 (E-4): the consumption of a closed or archived work order is not removed
+                    WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                     partService.consumePart(savedPartQuantity.getPart().getId(),
                             -savedPartQuantity.getQuantity(),
                             savedPartQuantity.getWorkOrder(), Helper.getLocale(user), true);
                 }
-                partQuantityService.delete(id);
+                partQuantityService.delete(savedPartQuantity, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

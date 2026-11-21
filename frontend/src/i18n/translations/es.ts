@@ -2115,6 +2115,9 @@ const esJSON = {
   entity_type_WORK_ORDER_METER_TRIGGER: 'Disparador de medidor',
   entity_type_WORKFLOW_ACTION: 'Acción de flujo de trabajo',
   entity_type_WORKFLOW_CONDITION: 'Condición de flujo de trabajo',
+  entity_type_TASK: 'Tarea',
+  entity_type_PART_QUANTITY: 'Consumo de repuesto',
+  entity_type_RELATION: 'Vínculo entre órdenes de trabajo',
   asset_in_use:
     'Este activo está en uso y no se puede eliminar. Archívelo en su lugar.',
   record_in_use: 'Otros registros usan este registro y no se puede eliminar.',
@@ -2127,7 +2130,17 @@ const esJSON = {
   custom_field_in_use:
     'Este campo personalizado tiene valores en otros registros y no se puede eliminar.',
   currency_in_use: 'Esta moneda está en uso y no se puede eliminar.',
-  in_use_blocked_by: 'Lo usan: {{types}}.'
+  in_use_blocked_by: 'Lo usan: {{types}}.',
+  work_order_not_deletable:
+    'Las órdenes de trabajo no se eliminan. Archive la orden de trabajo en su lugar.',
+  work_order_closed:
+    'Esta orden de trabajo está completada: su mano de obra, costos, tareas, repuestos, vínculos, archivos, asignados y campos personalizados no pueden cambiar. Reábrala primero.',
+  work_order_retired:
+    'Esta orden de trabajo está archivada y no puede cambiar. Restáurela primero.',
+  restore: 'Restaurar',
+  wo_restore_confirm: '¿Está seguro de que desea restaurar esta orden de trabajo ',
+  wo_restore_success: 'La orden de trabajo ha sido restaurada.',
+  wo_restore_failure: 'La orden de trabajo no pudo ser restaurada.'
 };
 
 export default esJSON;

@@ -4,10 +4,14 @@ import com.grash.dto.PartQuantityPatchDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.PartQuantityMapper;
 import com.grash.model.PartQuantity;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.PartQuantityRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -21,6 +25,7 @@ public class PartQuantityService {
     private final PurchaseOrderService purchaseOrderService;
     private final WorkOrderService workOrderService;
     private final PartQuantityMapper partQuantityMapper;
+    private final DeletionService deletionService;
 
     public PartQuantity create(PartQuantity PartQuantity) {
         return partQuantityRepository.save(PartQuantity);
@@ -39,6 +44,21 @@ public class PartQuantityService {
 
     public void delete(Long id) {
         partQuantityRepository.deleteById(id);
+    }
+
+    /**
+     * P-12 (E-6, PPB-23): removes a part consumption of an open work order and records it, in one transaction. The
+     * stock is handled by the caller, as before (P-16). A line of a purchase order is removed as before.
+     */
+    @Transactional
+    public void delete(PartQuantity partQuantity, User actor) {
+        if (partQuantity.getWorkOrder() == null) {
+            delete(partQuantity.getId());
+            return;
+        }
+        deletionService.delete(AuditTarget.childOf(EntityType.PART_QUANTITY, partQuantity.getId(),
+                        partQuantity.getPart().getName(), partQuantity.getWorkOrder()), actor, AuditSource.API, null,
+                () -> partQuantityRepository.deleteById(partQuantity.getId()));
     }
 
     public Optional<PartQuantity> findById(Long id) {

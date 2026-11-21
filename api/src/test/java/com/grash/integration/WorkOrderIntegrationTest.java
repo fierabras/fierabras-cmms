@@ -7,6 +7,7 @@ import com.grash.dto.WorkOrderChangeStatusDTO;
 import com.grash.dto.license.LicenseEntitlement;
 import com.grash.dto.workOrder.WorkOrderPostDTO;
 import com.grash.dto.workOrder.WorkOrderSendReportDTO;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.WorkOrderMapper;
 import com.grash.model.*;
@@ -638,20 +639,29 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
             return workOrderRepository.saveAndFlush(wo);
         }
 
-        @Test
-        void deleteByIdAndUser_removesFromDB() {
-            WorkOrder wo = createDeletableWO();
-            Long id = wo.getId();
-
-            workOrderService.deleteByIdAndUser(id, user);
-
-            em.flush();
-            em.clear();
-            assertFalse(workOrderRepository.findById(id).isPresent());
+        // P-12 (E-1, PPB-06): these four tests fixed the deletion of a work order (removed from the database, its
+        // labor and costs in cascade, a mail to the administrators). A work order is never deleted now: each one
+        // asserts the 409 and that nothing changed.
+        private void assertNotDeletable(Long id) {
+            ConflictException ex = assertThrows(ConflictException.class,
+                    () -> workOrderService.deleteByIdAndUser(id, user));
+            assertEquals("WORK_ORDER_NOT_DELETABLE", ex.getCode());
         }
 
         @Test
-        void deleteByIdAndUser_cascadesLabor() {
+        void deleteByIdAndUser_rejected_keepsWorkOrder() {
+            WorkOrder wo = createDeletableWO();
+            Long id = wo.getId();
+
+            assertNotDeletable(id);
+
+            em.flush();
+            em.clear();
+            assertTrue(workOrderRepository.findById(id).isPresent());
+        }
+
+        @Test
+        void deleteByIdAndUser_rejected_keepsLabor() {
             WorkOrder wo = createDeletableWO();
 
             Labor labor = new Labor();
@@ -663,15 +673,15 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
             laborRepository.saveAndFlush(labor);
 
             Long woId = wo.getId();
-            workOrderService.deleteByIdAndUser(woId, user);
+            assertNotDeletable(woId);
 
             em.flush();
             em.clear();
-            assertTrue(laborRepository.findByWorkOrder_Id(woId).isEmpty());
+            assertEquals(1, laborRepository.findByWorkOrder_Id(woId).size());
         }
 
         @Test
-        void deleteByIdAndUser_cascadesAdditionalCost() {
+        void deleteByIdAndUser_rejected_keepsAdditionalCost() {
             WorkOrder wo = createDeletableWO();
 
             AdditionalCost cost = new AdditionalCost();
@@ -681,15 +691,15 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
             additionalCostRepository.saveAndFlush(cost);
 
             Long woId = wo.getId();
-            workOrderService.deleteByIdAndUser(woId, user);
+            assertNotDeletable(woId);
 
             em.flush();
             em.clear();
-            assertTrue(additionalCostRepository.findByWorkOrder_Id(woId).isEmpty());
+            assertEquals(1, additionalCostRepository.findByWorkOrder_Id(woId).size());
         }
 
         @Test
-        void deleteByIdAndUser_sendsEmailToSettingsAdmins() {
+        void deleteByIdAndUser_rejected_sendsNoMail() {
             adminRole.getViewPermissions().add(PermissionEntity.SETTINGS);
             roleRepository.save(adminRole);
             user.setRole(adminRole);
@@ -697,15 +707,9 @@ class WorkOrderIntegrationTest extends AbstractIntegrationTest {
 
             WorkOrder wo = createDeletableWO();
 
-            workOrderService.deleteByIdAndUser(wo.getId(), user);
+            assertNotDeletable(wo.getId());
 
-            verify(mailService).sendMessageUsingThymeleafTemplate(
-                    eq(new String[]{user.getEmail()}),
-                    anyString(),
-                    anyMap(),
-                    eq("deleted-work-order.html"),
-                    any(java.util.Locale.class),
-                    isNull());
+            verify(mailService, never()).sendMessageUsingThymeleafTemplate(any(), any(), any(), any(), any(), any());
         }
 
         @Test

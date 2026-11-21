@@ -21,6 +21,7 @@ import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContex
 import useAuth from '../../../../hooks/useAuth';
 import { PermissionEntity } from '../../../../models/owns/role';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import WorkOrder from '../../../../models/owns/workOrder';
 import AdditionalCost from '../../../../models/owns/additionalCost';
 import AddCostModal from './AddCostModal';
@@ -62,7 +63,8 @@ export default function CostSection({
   const confirmDelete = () => {
     if (costToDelete) {
       dispatch(deleteAdditionalCost(workOrder.id, costToDelete.id)).catch(
-        (err) => showSnackBar(getErrorMessage(err), 'error')
+        (err) =>
+          showSnackBar(conflictMessage(err, t, getErrorMessage(err)), 'error')
       );
     }
     setOpenDeleteConfirm(false);
