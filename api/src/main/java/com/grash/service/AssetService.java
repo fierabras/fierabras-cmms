@@ -111,9 +111,19 @@ public class AssetService {
         return savedAsset;
     }
 
+    /**
+     * P-20 (E-5): the folio of an asset can be written by hand, so a number already used is skipped.
+     */
     private String getAssetNumber(Company company) {
-        Long nextSequence = customSequenceService.getNextAssetSequence(company);
-        return "A" + String.format("%06d", nextSequence);
+        String folio;
+        do {
+            folio = "A" + String.format("%06d", customSequenceService.getNextAssetSequence(company));
+        } while (assetRepository.existsByCompany_IdAndCustomId(company.getId(), folio));
+        return folio;
+    }
+
+    public boolean existsByCustomIdAndCompany(String customId, Long companyId) {
+        return assetRepository.existsByCompany_IdAndCustomId(companyId, customId);
     }
 
     private void setAssetCustomFields(Asset asset, List<CustomFieldValuePostDTO> customFieldValuePostDTOS,
@@ -362,7 +372,8 @@ public class AssetService {
         asset.setDescription(dto.getDescription());
         asset.setModel(dto.getModel());
         asset.setPower(dto.getPower());
-        asset.setCustomId(getAssetNumber(company));
+        // P-20 (CA-P20-10): an asset updated by the import keeps its folio
+        if (asset.getCustomId() == null) asset.setCustomId(getAssetNumber(company));
         asset.setManufacturer(dto.getManufacturer());
         Optional<Location> optionalLocation = locationService.findByNameIgnoreCaseAndCompany(dto.getLocationName(),
                 companyId).stream().findFirst();

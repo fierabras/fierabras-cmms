@@ -75,19 +75,32 @@ public class GlobalExceptionHandlerController {
     }
 
     /**
+     * P-20: the unique folio of an asset, which a user can write by hand.
+     */
+    private static final String ASSET_FOLIO_CONSTRAINT = "uq_asset_company_custom_id";
+
+    /**
      * Any other failure answers 500, except a foreign key that rejects a deletion (PPB-26): that is a 409
      * {@code RECORD_IN_USE} without SQL or constraint names. Deletions with a rule answer their own code before
-     * reaching here ({@code DeletionService}).
+     * reaching here ({@code DeletionService}). An asset folio already taken (P-20) is a 409
+     * {@code ASSET_FOLIO_TAKEN}: the controller checks it first; this covers two simultaneous requests.
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<SuccessResponse> handleException(HttpServletResponse res, Exception ex) {
         ex.printStackTrace();
         if (isDeletion() && ForeignKeyViolation.in(ex).isPresent()) {
-            ConflictException conflict = ConflictException.recordInUse();
-            return new ResponseEntity<>(new ConflictResponse(conflict.getMessage(), conflict.getCode(), null),
-                    HttpStatus.CONFLICT);
+            return conflict(ConflictException.recordInUse());
+        }
+        if (UniqueViolation.in(ex).filter(violation -> ASSET_FOLIO_CONSTRAINT.equals(violation.constraint()))
+                .isPresent()) {
+            return conflict(ConflictException.assetFolioTaken());
         }
         return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    private static ResponseEntity<SuccessResponse> conflict(ConflictException conflict) {
+        return new ResponseEntity<>(new ConflictResponse(conflict.getMessage(), conflict.getCode(), null),
+                HttpStatus.CONFLICT);
     }
 
     private static boolean isDeletion() {

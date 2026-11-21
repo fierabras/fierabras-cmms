@@ -40,6 +40,8 @@ public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecific
 
     Optional<Asset> findByBarCodeAndCompany_Id(String data, Long id);
 
+    boolean existsByCompany_IdAndCustomId(Long companyId, String customId);
+
     @Query("SELECT a FROM Asset a " +
             "LEFT JOIN FETCH a.location " +
             "LEFT JOIN FETCH a.parentAsset " +

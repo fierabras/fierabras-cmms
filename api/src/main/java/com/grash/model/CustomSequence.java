@@ -36,26 +36,6 @@ public class CustomSequence {
     public CustomSequence(Company company) {
         this.company = company;
     }
-
-    // Methods to get and increment counters
-    public Long getAndIncrementWorkOrderSequence() {
-        return workOrderSequence++;
-    }
-
-    public Long getAndIncrementAssetSequence() {
-        return assetSequence++;
-    }
-
-    public Long getAndIncrementPreventiveMaintenanceSequence() {
-        return preventiveMaintenanceSequence++;
-    }
-
-    public Long getAndIncrementLocationSequence() {
-        return locationSequence++;
-    }
-
-    public Long getAndIncrementRequestSequence() {
-        return requestSequence++;
-    }
+    // P-20: the counters are only incremented in the database, by CustomSequenceService
 }
 
