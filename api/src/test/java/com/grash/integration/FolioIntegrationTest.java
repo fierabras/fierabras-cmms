@@ -16,9 +16,13 @@ import com.grash.dto.imports.WorkOrderImportDTO;
 import com.grash.job.WorkOrderCreationJob;
 import com.grash.model.Company;
 import com.grash.model.PreventiveMaintenance;
+import com.grash.model.Subscription;
+import com.grash.repository.CompanyRepository;
 import com.grash.repository.PreventiveMaintenanceRepository;
+import com.grash.repository.SubscriptionRepository;
 import com.grash.service.CustomSequenceService;
 import com.grash.service.ImportService;
+import com.grash.service.SubscriptionPlanService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -121,6 +126,9 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
     private final CustomSequenceService customSequenceService;
     private final TransactionTemplate transactionTemplate;
     private final ImportService importService;
+    private final CompanyRepository companyRepository;
+    private final SubscriptionRepository subscriptionRepository;
+    private final SubscriptionPlanService subscriptionPlanService;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -128,7 +136,9 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
                          ObjectMapper objectMapper, JdbcTemplate jdbcTemplate,
                          PreventiveMaintenanceRepository preventiveMaintenanceRepository,
                          WorkOrderCreationJob workOrderCreationJob, CustomSequenceService customSequenceService,
-                         TransactionTemplate transactionTemplate, ImportService importService) {
+                         TransactionTemplate transactionTemplate, ImportService importService,
+                         CompanyRepository companyRepository, SubscriptionRepository subscriptionRepository,
+                         SubscriptionPlanService subscriptionPlanService) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -139,6 +149,9 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         this.customSequenceService = customSequenceService;
         this.transactionTemplate = transactionTemplate;
         this.importService = importService;
+        this.companyRepository = companyRepository;
+        this.subscriptionRepository = subscriptionRepository;
+        this.subscriptionPlanService = subscriptionPlanService;
     }
 
     @AfterEach
@@ -605,6 +618,31 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
                         .recurrenceType("DAILY").recurrenceBasedOn("SCHEDULED_DATE")
                         // 2099-12-31 as an Excel date: the scheduler must not fire it during the test
                         .startsOn(73050.0).build()), data.o1().company()));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // A folio asked for in the transaction that creates the company
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("P-20: a folio can be taken for a company that is created in the same transaction and not yet "
+            + "written to the database")
+    void folioOfCompanyNotYetWritten_isTaken() {
+        transactionTemplate.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            Subscription subscription = subscriptionRepository.save(Subscription.builder().usersCount(1)
+                    .monthly(false).startsOn(new Date())
+                    .subscriptionPlan(subscriptionPlanService.findByCode("BUSINESS").orElseThrow()).build());
+            Company company = companyRepository.save(new Company(TestRecords.unique("P-20 unwritten"), 1,
+                    subscription));
+            assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM company WHERE id = ?", Long.class,
+                    company.getId()), "the company is not written to the database yet");
+
+            assertEquals(1L, customSequenceService.getNextWorkOrderSequence(company));
+            assertEquals(2L, customSequenceService.getNextWorkOrderSequence(company));
+            assertEquals(1L, customSequenceService.getNextAssetSequence(company));
+            assertEquals(1, counterRows(company));
+        });
     }
 
     private static JobExecutionContext jobContext(long scheduleId) {

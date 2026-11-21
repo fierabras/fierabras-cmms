@@ -1,6 +1,7 @@
 package com.grash.service;
 
 import com.grash.model.Company;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class CustomSequenceService {
     }
 
     private final JdbcTemplate jdbcTemplate;
+    private final EntityManager entityManager;
 
     @Transactional
     public Long getNextWorkOrderSequence(Company company) {
@@ -68,6 +70,9 @@ public class CustomSequenceService {
     }
 
     private Long next(Counter counter, Company company) {
+        // The statement bypasses Hibernate: pending changes, such as a company created in this transaction, are
+        // written first, as Hibernate did when the counter was an entity
+        entityManager.flush();
         return jdbcTemplate.queryForObject(counter.nextNumberSql, Long.class, company.getId());
     }
 }
