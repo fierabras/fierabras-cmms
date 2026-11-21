@@ -231,4 +231,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_18_1795021887_role_version.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795277403_create_audit_log.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

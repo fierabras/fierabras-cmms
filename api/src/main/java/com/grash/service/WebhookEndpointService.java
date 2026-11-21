@@ -6,6 +6,8 @@ import com.grash.dto.webhookEndpoint.WebhookEndpointPostDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.WebhookEndpointMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PlanFeatures;
 import com.grash.repository.WebhookEndpointRepository;
@@ -28,6 +30,7 @@ public class WebhookEndpointService {
     private final WebhookEndpointRepository webhookEndpointRepository;
     private final WebhookEndpointMapper webhookEndpointMapper;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
 
     public WebhookEndpoint create(WebhookEndpointPostDTO webhookEndpointReq, User user) {
         if (!(licenseService.hasEntitlement(LicenseEntitlement.WEBHOOK)
@@ -57,8 +60,14 @@ public class WebhookEndpointService {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
-    public void delete(Long id) {
-        webhookEndpointRepository.deleteById(id);
+    /**
+     * Deletes the endpoint and records it in the audit log by its event: the URL may carry tokens, so it is never
+     * recorded (P-10, D-P10-6).
+     */
+    public void delete(WebhookEndpoint endpoint, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.WEBHOOK_ENDPOINT, endpoint.getId(), null,
+                        endpoint.getEvent().name(), endpoint.getCompany().getId()),
+                actor, AuditSource.API, null, () -> webhookEndpointRepository.deleteById(endpoint.getId()));
     }
 
 

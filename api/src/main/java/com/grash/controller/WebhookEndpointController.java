@@ -178,7 +178,7 @@ public class WebhookEndpointController {
             @PathVariable Long id) {
         Optional<WebhookEndpoint> optionalWebhookEndpoint = webhookEndpointService.findById(id);
         if (optionalWebhookEndpoint.isPresent()) {
-            webhookEndpointService.delete(id);
+            webhookEndpointService.delete(optionalWebhookEndpoint.get(), user);
             return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Webhook endpoint not found", HttpStatus.NOT_FOUND);

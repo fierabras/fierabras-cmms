@@ -70,7 +70,7 @@ public class ApiKeyController {
         ApiKey savedApiKey =
                 apiKeyService.findById(id).orElseThrow(() -> new CustomException("Not found",
                         HttpStatus.NOT_FOUND));
-        apiKeyService.delete(id);
+        apiKeyService.delete(savedApiKey, user);
         return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"), HttpStatus.OK);
     }
 }

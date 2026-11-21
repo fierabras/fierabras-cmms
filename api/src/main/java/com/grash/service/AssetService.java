@@ -12,7 +12,9 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.AssetMapper;
 import com.grash.model.*;
 import com.grash.model.enums.AssetStatus;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.AssetRepository;
@@ -60,6 +62,7 @@ public class AssetService {
     private WorkOrderService workOrderService;
     private final MessageSource messageSource;
     private final CustomSequenceService customSequenceService;
+    private final DeletionService deletionService;
     private final LicenseService licenseService;
     private WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
@@ -162,8 +165,14 @@ public class AssetService {
         return assetRepository.findAll();
     }
 
-    public void delete(Long id) {
-        assetRepository.deleteById(id);
+    /**
+     * Deletes the asset and records it in the audit log, in one transaction (P-10).
+     */
+    @Transactional
+    public void delete(Asset asset, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.ASSET, asset.getId(), asset.getCustomId(), asset.getName(),
+                        asset.getCompany().getId()), actor, AuditSource.API, null,
+                () -> assetRepository.deleteById(asset.getId()));
     }
 
     public Optional<Asset> findById(Long id) {

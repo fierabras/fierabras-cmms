@@ -291,7 +291,7 @@ public class AssetController {
             Asset savedAsset = optionalAsset.get();
             if (user.getId().equals(savedAsset.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.ASSETS)) {
-                assetService.delete(id);
+                assetService.delete(savedAsset, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
