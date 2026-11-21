@@ -828,6 +828,49 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // INV-10 · Another organization never learns the state of a work order of O1
+    // =====================================================================================================
+
+    @Nested
+    class Isolation {
+
+        @Test
+        void inv10_otherOrganization_closedAndArchived_403or404_never409_noChanges() {
+            CommonData data = data();
+            User a = data.o1().admin();
+            Fixture closed = workOrders.create(a, data.o1().technician(), Status.COMPLETE, false);
+            Fixture archived = workOrders.create(a, data.o1().technician(), Status.IN_PROGRESS, true);
+            Map<String, Object> closedBefore = snapshot(closed.id(), closed.part());
+            Map<String, Object> archivedBefore = snapshot(archived.id(), archived.part());
+            String o2 = api.login(data.o2().admin());
+            long now = System.currentTimeMillis();
+
+            for (Fixture f : List.of(closed, archived)) {
+                Map<String, Response> responses = new LinkedHashMap<>();
+                responses.put("part quantity", call(post("/part-quantities"), o2, Map.of("workOrder",
+                        Map.of("id", f.id()), "part", Map.of("id", f.part()), "quantity", 1)));
+                responses.put("labor", call(post("/labors"), o2, Map.of("workOrder", Map.of("id", f.id()),
+                        "duration", 60, "startedAt", now)));
+                responses.put("additional cost", call(post("/additional-costs"), o2, Map.of("workOrder",
+                        Map.of("id", f.id()), "description", "c", "cost", 1)));
+                responses.put("comment", call(post("/comments"), o2, Map.of("workOrder", Map.of("id", f.id()),
+                        "content", "from O2")));
+                responses.forEach((name, response) -> {
+                    assertTrue(response.status() == 403 || response.status() == 404, name + " on " + f.id()
+                            + ": " + response);
+                    assertFalse(response.body().contains(CLOSED) || response.body().contains(RETIRED),
+                            name + " on " + f.id() + ": " + response);
+                });
+            }
+
+            assertEquals(closedBefore, snapshot(closed.id(), closed.part()));
+            assertEquals(archivedBefore, snapshot(archived.id(), archived.part()));
+            assertEquals(0, auditRecords(data));
+            assertEquals(0, count("audit_log", "company_id", data.o2().company().getId()));
+        }
+    }
+
+    // =====================================================================================================
     // E-10 · Foreign keys
     // =====================================================================================================
 
