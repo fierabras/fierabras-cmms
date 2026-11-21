@@ -40,11 +40,18 @@ public final class TestApi {
      * Signs in a user created by {@link TestOrganizations} and returns the access token.
      */
     public String login(User user) {
+        return login(user, "CLIENT");
+    }
+
+    /**
+     * Signs in as {@code type} ({@code CLIENT}, or {@code SUPER_ADMIN} for {@link TestOrganizations#superAdmin()}).
+     */
+    public String login(User user, String type) {
         Response response;
         try {
             response = call(post("/auth/signin").contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(
-                            Map.of("email", user.getEmail(), "password", TestOrganizations.PASSWORD))), null);
+                    .content(objectMapper.writeValueAsString(Map.of("email", user.getEmail(), "password",
+                            TestOrganizations.PASSWORD, "type", type))), null);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }

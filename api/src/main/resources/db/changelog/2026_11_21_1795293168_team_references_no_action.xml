@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-11 (PPB-21, PPB-22): a team that other records cite is not deleted; the team service answers 409 TEAM_IN_USE first. Each foreign key gets its target rule and an index on its child
+         column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same
+         statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795293168_preventive_maintenance_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkcp1qytc19odw5ngu7y4lx79me"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="preventive_maintenance"
+                                 constraintName="fkcp1qytc19odw5ngu7y4lx79me" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_team_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkcp1qytc19odw5ngu7y4lx79me"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="preventive_maintenance"
+                                     constraintName="fkcp1qytc19odw5ngu7y4lx79me" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_request_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fktb79vm0l79yhsnqtllqgf97nl"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="request"
+                                 constraintName="fktb79vm0l79yhsnqtllqgf97nl" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_team_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fktb79vm0l79yhsnqtllqgf97nl"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="request"
+                                     constraintName="fktb79vm0l79yhsnqtllqgf97nl" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_work_order_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkauql9ts1kbmwftgtrjbdys6a3"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order"
+                                 constraintName="fkauql9ts1kbmwftgtrjbdys6a3" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_team_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkauql9ts1kbmwftgtrjbdys6a3"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order"
+                                     constraintName="fkauql9ts1kbmwftgtrjbdys6a3" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_work_order_aud_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_team_id"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_team_id" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_team_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_team_id"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_team_id" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_work_order_meter_trigger_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fk8ldob1vt7bg8dexi3p6x86sfo"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fk8ldob1vt7bg8dexi3p6x86sfo" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_team_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fk8ldob1vt7bg8dexi3p6x86sfo"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fk8ldob1vt7bg8dexi3p6x86sfo" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_workflow_action_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fksc5wshd9hdy2gdfrgnh73r9n2"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="workflow_action"
+                                 constraintName="fksc5wshd9hdy2gdfrgnh73r9n2" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_team_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fksc5wshd9hdy2gdfrgnh73r9n2"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="workflow_action"
+                                     constraintName="fksc5wshd9hdy2gdfrgnh73r9n2" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293168_workflow_condition_team_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fk7mrdl03tbxy73louegqmtff5y"/>
+        <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="workflow_condition"
+                                 constraintName="fk7mrdl03tbxy73louegqmtff5y" referencedColumnNames="id"
+                                 referencedTableName="team" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_team_id">
+            <column name="team_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_team_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fk7mrdl03tbxy73louegqmtff5y"/>
+            <addForeignKeyConstraint baseColumnNames="team_id" baseTableName="workflow_condition"
+                                     constraintName="fk7mrdl03tbxy73louegqmtff5y" referencedColumnNames="id"
+                                     referencedTableName="team" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
