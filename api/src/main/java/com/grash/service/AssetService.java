@@ -111,9 +111,19 @@ public class AssetService {
         return savedAsset;
     }
 
+    /**
+     * P-20 (E-5): the folio of an asset can be written by hand, so a number already used is skipped.
+     */
     private String getAssetNumber(Company company) {
-        Long nextSequence = customSequenceService.getNextAssetSequence(company);
-        return "A" + String.format("%06d", nextSequence);
+        String folio;
+        do {
+            folio = "A" + String.format("%06d", customSequenceService.getNextAssetSequence(company));
+        } while (assetRepository.existsByCompany_IdAndCustomId(company.getId(), folio));
+        return folio;
+    }
+
+    public boolean existsByCustomIdAndCompany(String customId, Long companyId) {
+        return assetRepository.existsByCompany_IdAndCustomId(companyId, customId);
     }
 
     private void setAssetCustomFields(Asset asset, List<CustomFieldValuePostDTO> customFieldValuePostDTOS,

@@ -7,6 +7,7 @@ import com.grash.dto.AssetPostDTO;
 import com.grash.dto.AssetShowDTO;
 import com.grash.dto.SuccessResponse;
 import com.grash.dto.license.LicenseEntitlement;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.AssetMapper;
 import com.grash.model.*;
@@ -217,6 +218,11 @@ public class AssetController {
             em.detach(savedAsset);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.ASSETS) || user.getId().equals(savedAsset.getCreatedBy())
             ) {
+                // P-20 (E-5): checked before any change, the downtime ones included
+                if (asset.getCustomId() != null && !asset.getCustomId().equals(savedAsset.getCustomId())
+                        && assetService.existsByCustomIdAndCompany(asset.getCustomId(), user.getCompany().getId())) {
+                    throw ConflictException.assetFolioTaken();
+                }
                 if (!asset.getStatus().isReallyDown() && savedAsset.getStatus().isReallyDown()) {
                     assetService.stopDownTime(savedAsset.getId(), Helper.getLocale(user));
                 } else if (asset.getStatus().isReallyDown() && !savedAsset.getStatus().isReallyDown()) {

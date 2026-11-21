@@ -41,6 +41,7 @@ import java.util.concurrent.Callable;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
@@ -442,6 +443,102 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // CA-P20-07 and 08: the asset folio written by hand
+    // ---------------------------------------------------------------------------------------------------------
+
+    private static final String ASSET_FOLIO_TAKEN = "ASSET_FOLIO_TAKEN";
+    /**
+     * Fragments that reveal SQL, constraints or stack traces; none may appear in a rejection.
+     */
+    private static final List<String> INTERNALS = List.of("sql", "constraint", "uq_", "violates", "duplicate key",
+            "custom_id", "exception", "at com.");
+
+    private long assetId(Response created) {
+        try {
+            return objectMapper.readTree(created.body()).get("id").asLong();
+        } catch (Exception e) {
+            throw new AssertionError("not JSON: " + created, e);
+        }
+    }
+
+    private Response patchAsset(long id, String name, String folio, String token) {
+        ObjectNode body = objectMapper.createObjectNode().put("name", name).put("status", "OPERATIONAL")
+                .put("customId", folio);
+        return api.call(patch("/assets/" + id).contentType(MediaType.APPLICATION_JSON).content(body.toString()),
+                token);
+    }
+
+    private Map<String, Object> assetRow(long id) {
+        return jdbcTemplate.queryForMap("SELECT name, custom_id, status FROM asset WHERE id = ?", id);
+    }
+
+    private void assertFolioTaken(Response response) {
+        String lowerBody = response.body().toLowerCase(java.util.Locale.ROOT);
+        assertAll(
+                () -> assertEquals(409, response.status(), response.toString()),
+                () -> assertTrue(response.body().contains("\"code\":\"" + ASSET_FOLIO_TAKEN + "\""), response.body()),
+                () -> assertTrue(response.body().contains("\"success\":false"), response.body()),
+                () -> INTERNALS.forEach(fragment -> assertFalse(lowerBody.contains(fragment),
+                        "the body reveals '" + fragment + "': " + response)));
+    }
+
+    @Test
+    @DisplayName("CA-P20-07: giving an asset the folio of another asset answers 409 ASSET_FOLIO_TAKEN and changes nothing")
+    void assetPatch_folioOfAnotherAsset_conflict() {
+        CommonData data = newOrganizations();
+        Company company = data.o1().company();
+        String token = api.login(data.o1().admin());
+        assertTrue(create(Type.ASSET, "P-20 asset 1", token).is2xx());
+        long second = assetId(create(Type.ASSET, "P-20 asset 2", token));
+        Map<String, Object> before = assetRow(second);
+
+        Response response = patchAsset(second, "P-20 renamed", "A000001", token);
+
+        assertFolioTaken(response);
+        assertEquals(before, assetRow(second), "nothing changed");
+        assertEquals(List.of(), repeated(folios(Type.ASSET, company)));
+    }
+
+    @Test
+    @DisplayName("CA-P20-07: two simultaneous edits that give the same new folio to two assets: one succeeds, the other "
+            + "answers 409, never 500")
+    void simultaneousAssetPatches_sameNewFolio_oneConflict() {
+        CommonData data = newOrganizations();
+        Company company = data.o1().company();
+        // two people: one user in two threads would also hit C-11
+        List<String> tokens = List.of(api.login(data.o1().owner()), api.login(data.o1().admin()));
+        for (int round = 0; round < ROUNDS; round++) {
+            List<Long> assets = List.of(assetId(create(Type.ASSET, "P-20 race a " + round, tokens.get(0))),
+                    assetId(create(Type.ASSET, "P-20 race b " + round, tokens.get(0))));
+            String folio = "P-20 HAND " + round;
+
+            List<Response> responses = valuesOfOverlapping(Concurrently.run(2, i -> timed(
+                    () -> patchAsset(assets.get(i), "P-20 race " + i, folio, tokens.get(i)))));
+
+            assertEquals(1, responses.stream().filter(Response::is2xx).count(), responses.toString());
+            assertFolioTaken(responses.stream().filter(response -> !response.is2xx()).findFirst().orElseThrow());
+            assertEquals(List.of(), repeated(folios(Type.ASSET, company)));
+        }
+    }
+
+    @Test
+    @DisplayName("CA-P20-08: a new asset never takes a folio written by hand on another asset")
+    void assetCreation_skipsFolioWrittenByHand() {
+        CommonData data = newOrganizations();
+        Company company = data.o1().company();
+        String token = api.login(data.o1().admin());
+        long first = assetId(create(Type.ASSET, "P-20 asset 1", token));
+        // the counter would hand out A000002 next
+        assertTrue(patchAsset(first, "P-20 asset 1", "A000002", token).is2xx());
+
+        Response created = create(Type.ASSET, "P-20 asset 2", token);
+
+        assertTrue(created.is2xx(), created.toString());
+        assertEquals("A000003", assetRow(assetId(created)).get("custom_id"));
+        assertEquals(List.of(), repeated(folios(Type.ASSET, company)));
     }
 
     private static JobExecutionContext jobContext(long scheduleId) {

@@ -23,6 +23,12 @@ public class ConflictException extends CustomException {
     private static final String RECORD_IN_USE_MESSAGE = "This record is used by other records and cannot be deleted";
 
     /**
+     * P-20: an asset was given, by hand, a folio that another asset of the company already has.
+     */
+    public static final String ASSET_FOLIO_TAKEN = "ASSET_FOLIO_TAKEN";
+    private static final String ASSET_FOLIO_TAKEN_MESSAGE = "Another asset already uses this folio";
+
+    /**
      * Names of the blocking types, sorted; {@code null} when there are none.
      */
     private final List<String> blockingTypes;
@@ -46,6 +52,10 @@ public class ConflictException extends CustomException {
 
     public static ConflictException recordInUse() {
         return new ConflictException(RECORD_IN_USE, RECORD_IN_USE_MESSAGE);
+    }
+
+    public static ConflictException assetFolioTaken() {
+        return new ConflictException(ASSET_FOLIO_TAKEN, ASSET_FOLIO_TAKEN_MESSAGE);
     }
 
     public List<String> getBlockingTypes() {
