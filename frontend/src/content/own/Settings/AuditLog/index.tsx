@@ -5,7 +5,6 @@ import {
   Button,
   Grid,
   MenuItem,
-  Stack,
   TextField,
   Typography
 } from '@mui/material';
@@ -194,11 +193,14 @@ function AuditLog() {
     <Grid item xs={12}>
       <Box p={4}>
         {form && (
-          <Stack
-            direction={{ xs: 'column', md: 'row' }}
-            spacing={2}
-            alignItems={{ md: 'center' }}
-            mb={3}
+          <Box
+            sx={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 2,
+              alignItems: 'center',
+              mb: 3
+            }}
           >
             <DatePicker
               label={t('audit_from')}
@@ -264,7 +266,7 @@ function AuditLog() {
             <Button onClick={() => load(null, 0, 0)} disabled={loading}>
               {t('audit_reset')}
             </Button>
-          </Stack>
+          </Box>
         )}
         <CustomDatagrid2
           columns={columns}
