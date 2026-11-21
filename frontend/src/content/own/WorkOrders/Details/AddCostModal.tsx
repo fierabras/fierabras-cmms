@@ -13,6 +13,7 @@ import useAuth from '../../../../hooks/useAuth';
 import FeatureErrorMessage from '../../components/FeatureErrorMessage';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { useContext } from 'react';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import AdditionalCost from '../../../../models/owns/additionalCost';
@@ -138,13 +139,23 @@ export default function AddCostModal({
                   )
                 )
                   .then(() => onClose())
-                  .catch((err) => showSnackBar(getErrorMessage(err), 'error'));
+                  .catch((err) =>
+                    showSnackBar(
+                      conflictMessage(err, t, getErrorMessage(err)),
+                      'error'
+                    )
+                  );
               } else
                 return dispatch(
                   createAdditionalCost(workOrderId, formattedValues)
                 )
                   .then(() => onClose())
-                  .catch((err) => showSnackBar(getErrorMessage(err), 'error'));
+                  .catch((err) =>
+                    showSnackBar(
+                      conflictMessage(err, t, getErrorMessage(err)),
+                      'error'
+                    )
+                  );
             }}
           />
         ) : (

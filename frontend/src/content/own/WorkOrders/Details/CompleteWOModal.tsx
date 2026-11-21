@@ -7,6 +7,7 @@ import { useContext } from 'react';
 import { CompanySettingsContext } from '../../../../contexts/CompanySettingsContext';
 import { StoreReturnType } from '../../../../store';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 
 interface SignatureProps {
@@ -80,7 +81,12 @@ export default function CompleteWOModal({
           onSubmit={async (values) => {
             return onComplete(values.signature, values.feedback)
               .then(onClose)
-              .catch((err) => showSnackBar(getErrorMessage(err), 'error'));
+              .catch((err) =>
+                showSnackBar(
+                  conflictMessage(err, t, getErrorMessage(err)),
+                  'error'
+                )
+              );
           }}
         />
       </DialogContent>

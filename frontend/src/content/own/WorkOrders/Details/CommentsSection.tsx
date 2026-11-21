@@ -10,6 +10,9 @@ import {
 } from '@mui/material';
 import { useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
+import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { useDispatch, useSelector } from '../../../../store';
 import {
   createComment,
@@ -34,6 +37,7 @@ interface CommentsSectionProps {
 export default function CommentsSection(props: CommentsSectionProps) {
   const { workOrderId, commentId, disabled } = props;
   const { t } = useTranslation();
+  const { showSnackBar } = useContext(CustomSnackBarContext);
   const dispatch = useDispatch();
   const { uploadFiles } = useContext(CompanySettingsContext);
   const { commentsByWorkOrder, loadingComments, loadingCreate } = useSelector(
@@ -68,6 +72,9 @@ export default function CommentsSection(props: CommentsSectionProps) {
           content: content.trim(),
           files: fileIds
         })
+      ).catch((err) =>
+        // P-12 (E-13): an archived work order admits no new comment
+        showSnackBar(conflictMessage(err, t, getErrorMessage(err)), 'error')
       );
 
       setContent('');

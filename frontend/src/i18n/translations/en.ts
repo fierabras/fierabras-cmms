@@ -1987,6 +1987,9 @@ const locale = {
   entity_type_WORK_ORDER_METER_TRIGGER: 'Meter trigger',
   entity_type_WORKFLOW_ACTION: 'Workflow action',
   entity_type_WORKFLOW_CONDITION: 'Workflow condition',
+  entity_type_TASK: 'Task',
+  entity_type_PART_QUANTITY: 'Part consumption',
+  entity_type_RELATION: 'Work order relation',
   asset_in_use:
     'This asset is in use and cannot be deleted. Archive it instead.',
   record_in_use: 'This record is used by other records and cannot be deleted.',
@@ -1999,7 +2002,17 @@ const locale = {
   custom_field_in_use:
     'This custom field has values in other records and cannot be deleted.',
   currency_in_use: 'This currency is in use and cannot be deleted.',
-  in_use_blocked_by: 'It is used by: {{types}}.'
+  in_use_blocked_by: 'It is used by: {{types}}.',
+  work_order_not_deletable:
+    'Work orders cannot be deleted. Archive the work order instead.',
+  work_order_closed:
+    'This work order is complete: its labor, costs, tasks, parts, links, files, assignees and custom fields cannot change. Reopen it first.',
+  work_order_retired:
+    'This work order is archived and cannot change. Restore it first.',
+  restore: 'Restore',
+  wo_restore_confirm: 'Are you sure you want to restore this Work Order ',
+  wo_restore_success: 'The Work Order has been restored',
+  wo_restore_failure: "The Work Order couldn't be restored"
 };
 
 export default locale;

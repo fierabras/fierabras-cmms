@@ -24,6 +24,7 @@ import { PermissionEntity } from '../../../../models/owns/role';
 import { getHoursAndMinutesAndSeconds } from '../../../../utils/formatters';
 import { getUserUrl } from '../../../../utils/urlPaths';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import WorkOrder from '../../../../models/owns/workOrder';
 import Labor from '../../../../models/owns/labor';
 import { useBrand } from '../../../../hooks/useBrand';
@@ -71,7 +72,7 @@ export default function TimeSection({
   const confirmDelete = () => {
     if (laborToDelete) {
       dispatch(deleteLabor(workOrder.id, laborToDelete.id)).catch((err) =>
-        showSnackBar(getErrorMessage(err), 'error')
+        showSnackBar(conflictMessage(err, t, getErrorMessage(err)), 'error')
       );
     }
     setOpenDeleteConfirm(false);

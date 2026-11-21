@@ -54,7 +54,6 @@ import {
 } from '../../../utils/formatters';
 import {
   addWorkOrder,
-  deleteWorkOrder,
   editWorkOrder,
   getSingleWorkOrder,
   getWorkOrders
@@ -96,6 +95,7 @@ import SearchInput from '../components/SearchInput';
 import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import { getPreventiveMaintenanceUrl } from 'src/utils/urlPaths';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import SplitButton from '../components/SplitButton';
 import useTableState from '../../../hooks/useTableState';
 import { assetStatuses } from '../../../models/owns/asset';
@@ -245,7 +245,6 @@ function WorkOrders() {
   const { workOrderId } = useParams();
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const [currentWorkOrder, setCurrentWorkOrder] = useState<WorkOrder>();
-  const [openDelete, setOpenDelete] = useState<boolean>(false);
   const { tasksByWorkOrder } = useSelector((state) => state.tasks);
   const { locations, locationsHierarchy } = useSelector(
     (state) => state.locations
@@ -311,10 +310,6 @@ function WorkOrders() {
   const handleCloseMenu = () => {
     setAnchorEl(null);
   };
-  const handleDelete = (id: number) => {
-    dispatch(deleteWorkOrder(id)).then(onDeleteSuccess).catch(onDeleteFailure);
-    setOpenDelete(false);
-  };
   const handleCopyWorkOrder = (workOrder: WorkOrder) => {
     setCopyWorkOrderData(workOrder);
     setOpenAddModal(true);
@@ -327,15 +322,6 @@ function WorkOrders() {
       );
     }
     setOpenUpdateModal(true);
-  };
-  const handleOpenDelete = (id: number) => {
-    if (currentWorkOrder.id !== id) {
-      setCurrentWorkOrder(
-        workOrders.content.find((workOrder) => workOrder.id === id)
-      );
-    }
-    setOpenDelete(true);
-    setOpenDrawer(false);
   };
   const handleOpenDrawer = (workOrder: WorkOrder) => {
     setCurrentWorkOrder(workOrder);
@@ -474,12 +460,8 @@ function WorkOrders() {
     setOpenUpdateModal(false);
     showSnackBar(t('changes_saved_success'), 'success');
   };
-  const onEditFailure = (err) => showSnackBar(t('wo_update_failure'), 'error');
-  const onDeleteSuccess = () => {
-    showSnackBar(t('wo_delete_success'), 'success');
-  };
-  const onDeleteFailure = (err) =>
-    showSnackBar(t('wo_delete_failure'), 'error');
+  const onEditFailure = (err) =>
+    showSnackBar(conflictMessage(err, t, t('wo_update_failure')), 'error');
 
   const criteriaRef = useRef(criteria);
   criteriaRef.current = criteria;
@@ -1228,7 +1210,6 @@ function WorkOrders() {
           workOrder={currentWorkOrder}
           onEdit={handleOpenUpdate}
           tasks={tasks}
-          onDelete={handleOpenDelete}
           onCopy={handleCopyWorkOrder}
           onClose={handleCloseDetails}
         />
@@ -1251,16 +1232,6 @@ function WorkOrders() {
           }}
         />
       </Drawer>
-      <ConfirmDialog
-        open={openDelete}
-        onCancel={() => {
-          setOpenDelete(false);
-          setOpenDrawer(true);
-        }}
-        onConfirm={() => handleDelete(currentWorkOrder?.id)}
-        confirmText={t('to_delete')}
-        question={t('confirm_delete_wo')}
-      />
       {renderMenu()}
     </>
   );

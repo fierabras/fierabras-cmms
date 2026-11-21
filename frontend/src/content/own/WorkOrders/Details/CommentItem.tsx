@@ -28,6 +28,9 @@ import mime from 'mime';
 import { InsertDriveFile } from '@mui/icons-material';
 import { getUserUrl } from '../../../../utils/urlPaths';
 import { useNavigate } from 'react-router-dom';
+import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
+import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 const CommentWrapper = styled(Box)<{ highlighted?: boolean }>(
   ({ theme, highlighted }) => `
@@ -59,6 +62,10 @@ const isImage = (file: File) => mime.getType(file.name)?.startsWith('image/');
 export default function CommentItem(props: CommentItemProps) {
   const { comment, workOrderId, highlighted = false } = props;
   const { t } = useTranslation();
+  const { showSnackBar } = useContext(CustomSnackBarContext);
+  // P-12 (E-13): a comment of a closed or archived work order is not edited nor removed
+  const onFailure = (err) =>
+    showSnackBar(conflictMessage(err, t, getErrorMessage(err)), 'error');
   const { getFormattedDate } = useContext(CompanySettingsContext);
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -96,7 +103,7 @@ export default function CommentItem(props: CommentItemProps) {
 
   const handleDelete = () => {
     if (window.confirm(t('confirm_delete_comment'))) {
-      dispatch(deleteComment(comment.id, workOrderId));
+      dispatch(deleteComment(comment.id, workOrderId)).catch(onFailure);
     }
   };
 
@@ -111,7 +118,9 @@ export default function CommentItem(props: CommentItemProps) {
           },
           workOrderId
         )
-      ).then(() => setIsEditing(false));
+      )
+        .then(() => setIsEditing(false))
+        .catch(onFailure);
     }
   };
 
