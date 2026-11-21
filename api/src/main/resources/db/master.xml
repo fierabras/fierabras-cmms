@@ -235,4 +235,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_21_1795277404_work_order_asset_id_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795285030_unique_folios.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-20 (C-08): one folio counter row per company, guaranteed by the database. CustomSequenceService takes
+         each folio with one INSERT ... ON CONFLICT (company_id) statement, which needs this constraint. Repeated
+         rows are merged first (sql/..._merge_counter_rows.sql); that data correction cannot be undone, so the
+         rollback only removes the constraint. -->
+    <changeSet id="2026_11_21_1795285030_unique_folios-counter_rows" author="fierabras">
+        <sqlFile path="sql/2026_11_21_1795285030_merge_counter_rows.sql" relativeToChangelogFile="true"
+                 splitStatements="false"/>
+        <addUniqueConstraint tableName="custom_sequence" columnNames="company_id"
+                             constraintName="uq_custom_sequence_company"/>
+        <rollback>
+            <dropUniqueConstraint tableName="custom_sequence" constraintName="uq_custom_sequence_company"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

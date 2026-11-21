@@ -1,77 +1,73 @@
 package com.grash.service;
 
 import com.grash.model.Company;
-import com.grash.model.CustomSequence;
-import com.grash.repository.CustomSequenceRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import jakarta.transaction.Transactional;
 
+/**
+ * Hands out the folio numbers of a company: one counter per folio type, all in the single {@code custom_sequence}
+ * row of the company (P-20).
+ * <p>
+ * Each number is taken with one statement that creates the row on first use ({@code company_id} is unique) and
+ * otherwise increments only its own counter. The row stays locked until the transaction of the creation ends, so
+ * two creations of a company never get the same number, and a creation that fails gives its number back.
+ */
 @Service
 @RequiredArgsConstructor
 public class CustomSequenceService {
-    private final CustomSequenceRepository customSequenceRepository;
 
-    public CustomSequence findByCompanyId(Long companyId) {
-        return customSequenceRepository.findByCompanyId(companyId)
-                .orElse(null);
-    }
+    private enum Counter {
+        WORK_ORDER("work_order_sequence"),
+        ASSET("asset_sequence"),
+        PREVENTIVE_MAINTENANCE("preventive_maintenance_sequence"),
+        LOCATION("location_sequence"),
+        REQUEST("request_sequence");
 
-    @Transactional
-    public CustomSequence createCustomSequence(Company company) {
-        CustomSequence customSequence = new CustomSequence(company);
-        return customSequenceRepository.save(customSequence);
-    }
+        /**
+         * A counter holds the next number to hand out (1 in a new row). A new row starts this counter at 2 and
+         * returns 1. The id comes from the sequence that Hibernate used for this table.
+         */
+        private final String nextNumberSql;
 
-    @Transactional
-    public CustomSequence getOrCreateCustomSequence(Company company) {
-        CustomSequence customSequence = findByCompanyId(company.getId());
-        if (customSequence == null) {
-            customSequence = createCustomSequence(company);
+        Counter(String column) {
+            this.nextNumberSql = "INSERT INTO custom_sequence (id, company_id, " + column + ") "
+                    + "VALUES (nextval('custom_sequence_seq'), ?, 2) "
+                    + "ON CONFLICT (company_id) DO UPDATE SET " + column + " = custom_sequence." + column + " + 1 "
+                    + "RETURNING " + column + " - 1";
         }
-        return customSequence;
     }
+
+    private final JdbcTemplate jdbcTemplate;
 
     @Transactional
     public Long getNextWorkOrderSequence(Company company) {
-        CustomSequence customSequence = getOrCreateCustomSequence(company);
-        Long nextSequence = customSequence.getAndIncrementWorkOrderSequence();
-        customSequenceRepository.save(customSequence);
-        return nextSequence;
+        return next(Counter.WORK_ORDER, company);
     }
-
 
     @Transactional
     public Long getNextAssetSequence(Company company) {
-        CustomSequence customSequence = getOrCreateCustomSequence(company);
-        Long nextSequence = customSequence.getAndIncrementAssetSequence();
-        customSequenceRepository.save(customSequence);
-        return nextSequence;
+        return next(Counter.ASSET, company);
     }
 
     @Transactional
     public Long getNextPreventiveMaintenanceSequence(Company company) {
-        CustomSequence customSequence = getOrCreateCustomSequence(company);
-        Long nextSequence = customSequence.getAndIncrementPreventiveMaintenanceSequence();
-        customSequenceRepository.save(customSequence);
-        return nextSequence;
+        return next(Counter.PREVENTIVE_MAINTENANCE, company);
     }
 
     @Transactional
     public Long getNextLocationSequence(Company company) {
-        CustomSequence customSequence = getOrCreateCustomSequence(company);
-        Long nextSequence = customSequence.getAndIncrementLocationSequence();
-        customSequenceRepository.save(customSequence);
-        return nextSequence;
+        return next(Counter.LOCATION, company);
     }
 
     @Transactional
     public Long getNextRequestSequence(Company company) {
-        CustomSequence customSequence = getOrCreateCustomSequence(company);
-        Long nextSequence = customSequence.getAndIncrementRequestSequence();
-        customSequenceRepository.save(customSequence);
-        return nextSequence;
+        return next(Counter.REQUEST, company);
     }
 
+    private Long next(Counter counter, Company company) {
+        return jdbcTemplate.queryForObject(counter.nextNumberSql, Long.class, company.getId());
+    }
 }
