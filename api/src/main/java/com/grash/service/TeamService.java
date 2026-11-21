@@ -9,6 +9,8 @@ import com.grash.mapper.TeamMapper;
 import com.grash.model.Notification;
 import com.grash.model.User;
 import com.grash.model.Team;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.repository.TeamRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +35,11 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class TeamService {
+    public static final String TEAM_IN_USE = "TEAM_IN_USE";
+    private static final String TEAM_IN_USE_MESSAGE = "This team is used by other records and cannot be deleted";
+
     private final TeamRepository teamRepository;
+    private final DeletionService deletionService;
     private final CompanyService companyService;
     private final TeamMapper teamMapper;
     private final NotificationService notificationService;
@@ -71,8 +77,29 @@ public class TeamService {
         return teamRepository.findAll();
     }
 
-    public void delete(Long id) {
-        teamRepository.deleteById(id);
+    /**
+     * P-11 (PPB-02, PPB-23): deletes a team that no other record cites, with its memberships, and records it;
+     * otherwise 409 TEAM_IN_USE with the blocking types.
+     */
+    @Transactional
+    public void delete(Team team, User actor) {
+        Long id = team.getId();
+        deletionService.delete(new AuditTarget(EntityType.TEAM, id, null, team.getName(), team.getCompany().getId()),
+                actor, AuditSource.API,
+                DeletionRule.inUse(TEAM_IN_USE, TEAM_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.PREVENTIVE_MAINTENANCE,
+                                () -> deletionService.isCited("preventive_maintenance", "team_id", id))
+                        .blockedBy(EntityType.REQUEST, () -> deletionService.isCited("request", "team_id", id))
+                        .blockedBy(EntityType.WORK_ORDER, () -> deletionService.isCited("work_order", "team_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCited("work_order_aud", "team_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_METER_TRIGGER,
+                                () -> deletionService.isCited("work_order_meter_trigger", "team_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "team_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "team_id", id)),
+                () -> teamRepository.deleteById(id));
     }
 
     public Optional<Team> findById(Long id) {

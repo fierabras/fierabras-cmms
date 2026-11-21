@@ -123,7 +123,7 @@ public class TeamController {
         if (optionalTeam.isPresent()) {
             Team savedTeam = optionalTeam.get();
             if (user.getId().equals(savedTeam.getCreatedBy()) || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
-                teamService.delete(id);
+                teamService.delete(savedTeam, user);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

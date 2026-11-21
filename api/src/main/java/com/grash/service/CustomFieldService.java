@@ -6,7 +6,10 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.CustomFieldMapper;
 import com.grash.model.CustomField;
 import com.grash.model.CompanySettings;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldType;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.CustomFieldRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -22,8 +25,13 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class CustomFieldService {
+    public static final String CUSTOM_FIELD_IN_USE = "CUSTOM_FIELD_IN_USE";
+    private static final String CUSTOM_FIELD_IN_USE_MESSAGE = "This custom field has values in other records and "
+            + "cannot be deleted";
+
     private final CustomFieldRepository customFieldRepository;
     private final CustomFieldMapper customFieldMapper;
+    private final DeletionService deletionService;
 
     public CustomField create(CustomField customField) {
         return customFieldRepository.save(customField);
@@ -53,8 +61,19 @@ public class CustomFieldService {
     }
 
 
-    public void delete(Long id) {
-        customFieldRepository.deleteById(id);
+    /**
+     * P-11 (PPB-02, PPB-23): deletes a custom field without captured values and records it; otherwise 409
+     * CUSTOM_FIELD_IN_USE.
+     */
+    @Transactional
+    public void delete(CustomField field, User actor) {
+        Long id = field.getId();
+        deletionService.delete(new AuditTarget(EntityType.CUSTOM_FIELD, id, null, field.getLabel(),
+                        field.getCompanySettings().getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(CUSTOM_FIELD_IN_USE, CUSTOM_FIELD_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.CUSTOM_FIELD_VALUE,
+                                () -> deletionService.isCited("custom_field_value", "custom_field_id", id)),
+                () -> customFieldRepository.deleteById(id));
     }
 
     public Optional<CustomField> findById(Long id) {

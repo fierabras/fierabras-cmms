@@ -81,7 +81,7 @@ public class CurrencyController {
         Optional<Currency> optionalCurrency = currencyService.findById(id);
         if (optionalCurrency.isPresent()) {
             if (user.getRole().getRoleType().equals(RoleType.ROLE_SUPER_ADMIN)) {
-                currencyService.delete(id);
+                currencyService.delete(optionalCurrency.get(), user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
