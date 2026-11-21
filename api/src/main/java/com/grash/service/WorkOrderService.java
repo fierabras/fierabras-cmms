@@ -102,6 +102,7 @@ public class WorkOrderService {
     private final ReviewEligibilityService reviewEligibilityService;
     private final BrandingService brandingService;
     private final WorkOrderHistoryService workOrderHistoryService;
+    private final AuditLogService auditLogService;
     private final SpringTemplateEngine thymeleafTemplateEngine;
     private final StorageServiceFactory storageServiceFactory;
     private final Environment environment;
@@ -210,6 +211,8 @@ public class WorkOrderService {
                     null;
 
             WorkOrder newWorkOrder = workOrderMapper.updateWorkOrder(savedWorkOrder, workOrder);
+            // P-12 (E-2): only an explicit true archives; restoring is handled by patch
+            if (Boolean.TRUE.equals(workOrder.getArchived())) newWorkOrder.setArchived(true);
             if (!workOrder.getCustomFields().isEmpty()) {
                 setWOCustomFields(newWorkOrder, workOrder.getCustomFields(), user.getCompany());
             }
@@ -249,6 +252,21 @@ public class WorkOrderService {
         if (optionalWorkOrder.isPresent()) {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
             if (savedWorkOrder.canBeEditedBy(user)) {
+                // P-12 (E-2, E-3): an archived work order only admits its restoration, which changes nothing else
+                if (savedWorkOrder.isArchived()) {
+                    if (!Boolean.FALSE.equals(workOrder.getArchived()))
+                        WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.WORK_ORDER);
+                    savedWorkOrder.setArchived(false);
+                    WorkOrder restoredWorkOrder = workOrderRepository.saveAndFlush(savedWorkOrder);
+                    auditLogService.record(auditTarget(restoredWorkOrder), user, AuditAction.RESTORE,
+                            AuditSource.API, Map.of(), 0);
+                    return restoredWorkOrder;
+                }
+                // P-12 (E-4, PPB-15): on a closed work order, its associations and custom field values do not change
+                if (changesChildren(savedWorkOrder, workOrder))
+                    WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.CHILD);
+                else if (savedWorkOrder.getStatus() == Status.COMPLETE)
+                    workOrder.setCustomFields(new ArrayList<>());
                 // P-11 (PPB-08): a disabled user is not assigned anew; those already assigned are kept
                 userService.rejectRetired(assignedUsers(savedWorkOrder.getPrimaryUser(),
                         savedWorkOrder.getAssignedTo()), assignedUsers(workOrder.getPrimaryUser(),
@@ -257,6 +275,9 @@ public class WorkOrderService {
                 WorkOrder patchedWorkOrder = update(id, workOrder, user);
 
                 if (patchedWorkOrder.isArchived() && !savedWorkOrder.isArchived()) {
+                    // P-12 (E-2, PPB-23): archiving is recorded in the same transaction
+                    auditLogService.record(auditTarget(patchedWorkOrder), user, AuditAction.RETIRE,
+                            AuditSource.API, Map.of(), 0);
                     Collection<Workflow> workflows =
                             workflowService.findByMainConditionAndCompany(WFMainCondition.WORK_ORDER_ARCHIVED,
                                     user.getCompany().getId());
@@ -282,19 +303,41 @@ public class WorkOrderService {
         return users;
     }
 
-    public Collection<WorkOrder> getAll() {
-        return workOrderRepository.findAll();
+    /**
+     * P-12: the work order in the audit log, as it is now (PPB-23).
+     */
+    private static AuditTarget auditTarget(WorkOrder workOrder) {
+        return new AuditTarget(EntityType.WORK_ORDER, workOrder.getId(), workOrder.getCustomId(),
+                workOrder.getTitle(), workOrder.getCompany().getId());
     }
 
-    @Transactional
-    protected void delete(WorkOrder workOrder, Company company) {
-        Map<String, Object> webhookPayload = new HashMap<>();
-        webhookPayload.put("workOrderId", workOrder.getId());
-        webhookPayload.put("workOrderTitle", workOrder.getTitle());
-        Object serializedWorkOrder = workOrderMapper.toShowDto(workOrder);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.WORK_ORDER_DELETE, webhookPayload,
-                "deleteWorkOrder", serializedWorkOrder, null, null, null, null, null);
-        workOrderRepository.deleteById(workOrder.getId());
+    /**
+     * P-12 (E-4): whether a patch changes the files, assignees, customers or custom field values of the work order.
+     * An omitted collection empties it (WorkOrderMapper); omitted custom field values are left as they are, and a
+     * blank value counts as no value.
+     */
+    private static boolean changesChildren(WorkOrder saved, WorkOrderPatchDTO patch) {
+        if (!ids(saved.getFiles(), File::getId).equals(ids(patch.getFiles(), File::getId))
+                || !ids(saved.getAssignedTo(), User::getId).equals(ids(patch.getAssignedTo(), User::getId))
+                || !ids(saved.getCustomers(), Customer::getId).equals(ids(patch.getCustomers(), Customer::getId)))
+            return true;
+        if (patch.getCustomFields() == null || patch.getCustomFields().isEmpty()) return false;
+        Map<Long, String> savedValues = new HashMap<>();
+        saved.getCustomFieldValues().stream().filter(value -> value.getValue() != null && !value.getValue().isBlank())
+                .forEach(value -> savedValues.put(value.getCustomField().getId(), value.getValue()));
+        Map<Long, String> patchValues = new HashMap<>();
+        patch.getCustomFields().stream().filter(value -> value.getValue() != null && !value.getValue().isBlank())
+                .forEach(value -> patchValues.put(value.getId(), value.getValue()));
+        return !savedValues.equals(patchValues);
+    }
+
+    private static <T> Set<Long> ids(Collection<T> entities, Function<T, Long> id) {
+        if (entities == null) return Set.of();
+        return entities.stream().filter(Objects::nonNull).map(id).collect(Collectors.toSet());
+    }
+
+    public Collection<WorkOrder> getAll() {
+        return workOrderRepository.findAll();
     }
 
     public Optional<WorkOrder> findById(Long id) {
@@ -869,8 +912,9 @@ public class WorkOrderService {
 
     @Transactional
     public WorkOrder changeStatus(WorkOrderChangeStatusDTO dto, Long id, User user, String platform) {
-        Optional<WorkOrder> optionalWorkOrder = findById(id);
-        WorkOrder savedWorkOrder = optionalWorkOrder.get();
+        // P-12 (D-P12-4): a missing work order answers 404, not 500
+        WorkOrder savedWorkOrder = findById(id).orElseThrow(() -> new CustomException("WorkOrder not found",
+                HttpStatus.NOT_FOUND));
         em.detach(savedWorkOrder); // detach FIRST
         WorkOrder originalWorkOrder = savedWorkOrder;
         WorkOrder mutableWO = findById(id).get(); // fresh managed copy
@@ -892,6 +936,8 @@ public class WorkOrderService {
         }
         if (mutableWO.canBeEditedBy(user) && (dto.getSignature() == null ||
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.SIGNATURE))) {
+            // P-12 (PPB-32): an archived work order is restored before it is reopened
+            WorkOrderStateGuard.check(mutableWO, WorkOrderStateGuard.Change.WORK_ORDER);
             // INC-02 (D-22): only the effective transition into COMPLETE records the closing data and runs its effects
             boolean closes = dto.getStatus() == Status.COMPLETE
                     && complete(mutableWO, savedWorkOrderStatusBefore, dto.getSignature(), user, null);
@@ -912,6 +958,10 @@ public class WorkOrderService {
             }
             WorkOrder patchedWorkOrder = saveAndFlushWithWebhook(mutableWO, user.getCompany(),
                     originalWorkOrder);
+            // P-12 (E-7, PPB-32): leaving COMPLETE is a reopening, recorded in the same transaction
+            if (savedWorkOrderStatusBefore == Status.COMPLETE && patchedWorkOrder.getStatus() != Status.COMPLETE)
+                auditLogService.record(auditTarget(patchedWorkOrder), user, AuditAction.REOPEN, AuditSource.API,
+                        Map.of(), 0);
 
             if (closes) {
                 List<User> admins =
@@ -1158,23 +1208,9 @@ public class WorkOrderService {
             if (
                     user.getId().equals(savedWorkOrder.getCreatedBy()) ||
                             user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.WORK_ORDERS)) {
-                Map<String, Object> mailVariables = new HashMap<String, Object>() {{
-                    put("workOrdersLink", frontendUrl + "/app/work-orders");
-                    put("workOrderTitle", savedWorkOrder.getTitle());
-                    put("deleter", user.getFullName());
-                }};
-                String title = messageSource.getMessage("deleted_wo", null, Helper.getLocale(user));
-
-                List<User> usersToMail =
-                        userService.findByCompany(user.getCompany().getId()).stream().filter(user1 -> user1.getRole()
-                                        .getViewPermissions().contains(PermissionEntity.SETTINGS))
-                                .filter(user1 -> user1.isEnabled() && user1.getUserSettings().isEmailNotified()).toList();
-
-                mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail)
-                                .toArray(String[]::new), title, mailVariables, "deleted-work-order.html",
-                        Helper.getLocale(user), null);
-
-                delete(savedWorkOrder, user.getCompany());
+                // P-12 (E-1, PPB-06): a work order is never deleted, in any status; it is archived instead. Nothing
+                // is sent.
+                throw WorkOrderStateGuard.notDeletable();
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
     }
@@ -1339,6 +1375,7 @@ public class WorkOrderService {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
             if (!savedWorkOrder.canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.CHILD);
             savedWorkOrder.getFiles().addAll(files);
             save(savedWorkOrder);
             return savedWorkOrder.getFiles();
@@ -1351,6 +1388,7 @@ public class WorkOrderService {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
             if (!savedWorkOrder.canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.CHILD);
             savedWorkOrder.getFiles().removeIf(file -> file.getId().equals(fileId));
             save(savedWorkOrder);
             return savedWorkOrder.getFiles();

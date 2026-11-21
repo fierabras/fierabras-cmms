@@ -12,6 +12,7 @@ import com.grash.model.enums.TimeStatus;
 import com.grash.service.LaborService;
 import com.grash.service.UserService;
 import com.grash.service.WorkOrderService;
+import com.grash.service.WorkOrderStateGuard;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +24,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Optional;
 
@@ -70,6 +72,9 @@ public class LaborController {
         User user = userService.whoami(req);
         Optional<WorkOrder> optionalWorkOrder = workOrderService.findById(id);
         if (optionalWorkOrder.isPresent() && optionalWorkOrder.get().canBeEditedBy(user)) {
+            // P-12 (E-3, E-8, PPB-33, PPB-34): the timer of a closed or archived work order does not move, and does
+            // not reopen it
+            WorkOrderStateGuard.check(optionalWorkOrder.get(), WorkOrderStateGuard.Change.CHILD);
             Optional<Labor> optionalLabor =
                     laborService.findByWorkOrder(id).stream().filter(labor -> labor.isLogged() && labor.getAssignedTo().getId().equals(user.getId())).findFirst();
             if (start) {
@@ -115,6 +120,9 @@ public class LaborController {
         if (user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.ADDITIONAL_TIME)) {
             WorkOrder workOrder = workOrderService.findById(laborReq.getWorkOrder().getId()).get();
             if (!workOrder.canBeEditedBy(user)) throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
+            // P-12 (E-11, PPB-08): a disabled user is not assigned anew
+            userService.rejectRetired(null, Collections.singletonList(laborReq.getAssignedTo()));
             if (workOrder.getFirstTimeToReact() == null) {
                 workOrder.setFirstTimeToReact(new Date());
                 workOrderService.save(workOrder);
@@ -135,6 +143,10 @@ public class LaborController {
             Labor savedLabor = optionalLabor.get();
             if (!savedLabor.getWorkOrder().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            WorkOrderStateGuard.check(savedLabor.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
+            // P-12 (E-11, PPB-08): a disabled user is not assigned anew; the one already assigned is kept
+            userService.rejectRetired(Collections.singletonList(savedLabor.getAssignedTo()),
+                    Collections.singletonList(labor.getAssignedTo()));
             return laborService.update(id, labor);
         } else throw new CustomException("Labor not found", HttpStatus.NOT_FOUND);
     }
@@ -149,7 +161,8 @@ public class LaborController {
             Labor savedLabor = optionalLabor.get();
             if (!savedLabor.getWorkOrder().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            laborService.delete(id);
+            WorkOrderStateGuard.check(savedLabor.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
+            laborService.delete(savedLabor, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Labor not found", HttpStatus.NOT_FOUND);

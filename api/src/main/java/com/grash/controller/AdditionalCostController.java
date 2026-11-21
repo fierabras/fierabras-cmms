@@ -11,6 +11,7 @@ import com.grash.model.enums.PlanFeatures;
 import com.grash.service.AdditionalCostService;
 import com.grash.service.UserService;
 import com.grash.service.WorkOrderService;
+import com.grash.service.WorkOrderStateGuard;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Optional;
 
@@ -70,6 +72,9 @@ public class AdditionalCostController {
         if (user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.ADDITIONAL_COST)) {
             WorkOrder workOrder = workOrderService.findById(additionalCostReq.getWorkOrder().getId()).get();
             checkAccessToWorkOrder(workOrder, user, false);
+            WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
+            // P-12 (E-11, PPB-08): a disabled user is not assigned anew
+            userService.rejectRetired(null, Collections.singletonList(additionalCostReq.getAssignedTo()));
             if (workOrder.getFirstTimeToReact() == null) {
                 workOrder.setFirstTimeToReact(new Date());
                 workOrderService.save(workOrder);
@@ -88,6 +93,10 @@ public class AdditionalCostController {
         if (optionalAdditionalCost.isPresent()) {
             AdditionalCost savedAdditionalCost = optionalAdditionalCost.get();
             checkAccessToAdditionalCost(savedAdditionalCost, user, false);
+            WorkOrderStateGuard.check(savedAdditionalCost.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
+            // P-12 (E-11, PPB-08): a disabled user is not assigned anew; the one already assigned is kept
+            userService.rejectRetired(Collections.singletonList(savedAdditionalCost.getAssignedTo()),
+                    Collections.singletonList(additionalCost.getAssignedTo()));
             return additionalCostService.update(id, additionalCost);
         } else throw new CustomException("AdditionalCost not found", HttpStatus.NOT_FOUND);
     }
@@ -101,7 +110,8 @@ public class AdditionalCostController {
         if (optionalAdditionalCost.isPresent()) {
             AdditionalCost savedAdditionalCost = optionalAdditionalCost.get();
             checkAccessToAdditionalCost(savedAdditionalCost, user, false);
-            additionalCostService.delete(id);
+            WorkOrderStateGuard.check(savedAdditionalCost.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
+            additionalCostService.delete(savedAdditionalCost, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("AdditionalCost not found", HttpStatus.NOT_FOUND);

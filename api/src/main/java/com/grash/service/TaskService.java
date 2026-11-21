@@ -4,6 +4,9 @@ import com.grash.dto.TaskPatchDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.TaskMapper;
 import com.grash.model.Task;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.TaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +27,7 @@ public class TaskService {
     private final FileService fileService;
     private final TaskMapper taskMapper;
     private final EntityManager em;
+    private final DeletionService deletionService;
 
     @Transactional
     public Task create(Task Task) {
@@ -48,6 +52,20 @@ public class TaskService {
 
     public void delete(Long id) {
         taskRepository.deleteById(id);
+    }
+
+    /**
+     * P-12 (E-6, PPB-23): removes a task of an open work order and records it, in one transaction. A task of a
+     * preventive maintenance is removed as before (P-15).
+     */
+    @Transactional
+    public void delete(Task task, User actor) {
+        if (task.getWorkOrder() == null) {
+            delete(task.getId());
+            return;
+        }
+        deletionService.delete(AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(),
+                task.getWorkOrder()), actor, AuditSource.API, null, () -> taskRepository.deleteById(task.getId()));
     }
 
     public Optional<Task> findById(Long id) {

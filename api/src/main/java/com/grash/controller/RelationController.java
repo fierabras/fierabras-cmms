@@ -13,6 +13,7 @@ import com.grash.model.enums.PermissionEntity;
 import com.grash.service.RelationService;
 import com.grash.service.UserService;
 import com.grash.service.WorkOrderService;
+import com.grash.service.WorkOrderStateGuard;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
@@ -83,6 +84,8 @@ public class RelationController {
         if (optionalRelation.isPresent()) {
             if (!optionalRelation.get().getParent().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+            // P-12 (E-4): the relations of a closed or archived work order do not change
+            WorkOrderStateGuard.check(optionalRelation.get().getParent(), WorkOrderStateGuard.Change.CHILD);
             return relationMapper.toShowDto(relationService.update(id, relation));
         } else {
             return null;
@@ -97,7 +100,9 @@ public class RelationController {
         if (optionalRelation.isPresent()) {
             if (!optionalRelation.get().getParent().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            relationService.delete(id);
+            // P-12 (E-4, CA-PPB-118): the relations of a closed or archived work order are not removed
+            WorkOrderStateGuard.check(optionalRelation.get().getParent(), WorkOrderStateGuard.Change.CHILD);
+            relationService.delete(optionalRelation.get(), user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Relation not found", HttpStatus.NOT_FOUND);

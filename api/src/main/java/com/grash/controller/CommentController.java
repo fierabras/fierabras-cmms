@@ -106,7 +106,7 @@ public class CommentController {
                         HttpStatus.NOT_FOUND));
         if (!savedComment.getUser().getId().equals(user.getId()))
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-        commentService.delete(id);
+        commentService.delete(savedComment, user);
         return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"), HttpStatus.OK);
     }
 

@@ -7,6 +7,8 @@ import com.grash.exception.CustomException;
 import com.grash.factory.MailServiceFactory;
 import com.grash.mapper.CommentMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.repository.CommentRepository;
 import com.grash.repository.UserRepository;
@@ -41,6 +43,7 @@ public class CommentService {
     private final NotificationService notificationService;
     private final MessageSource messageSource;
     private final MailServiceFactory mailServiceFactory;
+    private final DeletionService deletionService;
 
     @Value("${frontend.url}")
     private String frontendUrl;
@@ -48,6 +51,8 @@ public class CommentService {
     public Comment create(@Valid CommentPostDTO commentReq, User user) {
         Comment comment = commentMapper.fromPostDto(commentReq);
         WorkOrder workOrder = workOrderService.checkAccessToWorkOrderId(commentReq.getWorkOrder().getId(), user);
+        // P-12 (E-5, PPB-31): a closed work order admits new comments; an archived one does not
+        WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.NEW_COMMENT);
 
         comment.setUser(user);
         Comment savedComment = commentRepository.saveAndFlush(comment);
@@ -68,6 +73,16 @@ public class CommentService {
         commentRepository.deleteById(id);
     }
 
+    /**
+     * P-12 (E-5, E-6, PPB-23): removes a comment of an open work order and records it, in one transaction. The
+     * caller checks that the actor is its author.
+     */
+    public void delete(Comment comment, User actor) {
+        WorkOrderStateGuard.check(comment.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
+        deletionService.delete(AuditTarget.childOf(EntityType.COMMENT, comment.getId(), null, comment.getWorkOrder()),
+                actor, AuditSource.API, null, () -> commentRepository.deleteById(comment.getId()));
+    }
+
     public Optional<Comment> findById(Long id) {
         return commentRepository.findById(id);
     }
@@ -80,6 +95,8 @@ public class CommentService {
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
 
         WorkOrder workOrder = savedComment.getWorkOrder();
+        // P-12 (E-5): a comment of a closed or archived work order is not edited
+        WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
 
         Comment updatedComment = commentRepository.saveAndFlush(commentMapper.updateComment(savedComment,
                 commentPatchDTO));
