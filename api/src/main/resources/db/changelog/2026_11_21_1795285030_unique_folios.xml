@@ -19,4 +19,31 @@
         </rollback>
     </changeSet>
 
+    <!-- P-20 (C-08): a folio is unique per company and type. Repeated folios are corrected first
+         (sql/..._renumber_repeated_folios.sql): the oldest record keeps the folio, the others take new ones from
+         the counter, and every counter goes above the highest folio. That data correction cannot be undone, so
+         the rollback only removes the constraints. Null folios do not collide (NULLS DISTINCT). -->
+    <changeSet id="2026_11_21_1795285030_unique_folios-folios" author="fierabras">
+        <sqlFile path="sql/2026_11_21_1795285030_renumber_repeated_folios.sql" relativeToChangelogFile="true"
+                 splitStatements="false"/>
+        <addUniqueConstraint tableName="work_order" columnNames="company_id, custom_id"
+                             constraintName="uq_work_order_company_custom_id"/>
+        <addUniqueConstraint tableName="asset" columnNames="company_id, custom_id"
+                             constraintName="uq_asset_company_custom_id"/>
+        <addUniqueConstraint tableName="location" columnNames="company_id, custom_id"
+                             constraintName="uq_location_company_custom_id"/>
+        <addUniqueConstraint tableName="request" columnNames="company_id, custom_id"
+                             constraintName="uq_request_company_custom_id"/>
+        <addUniqueConstraint tableName="preventive_maintenance" columnNames="company_id, custom_id"
+                             constraintName="uq_preventive_maintenance_company_custom_id"/>
+        <rollback>
+            <dropUniqueConstraint tableName="preventive_maintenance"
+                                  constraintName="uq_preventive_maintenance_company_custom_id"/>
+            <dropUniqueConstraint tableName="request" constraintName="uq_request_company_custom_id"/>
+            <dropUniqueConstraint tableName="location" constraintName="uq_location_company_custom_id"/>
+            <dropUniqueConstraint tableName="asset" constraintName="uq_asset_company_custom_id"/>
+            <dropUniqueConstraint tableName="work_order" constraintName="uq_work_order_company_custom_id"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

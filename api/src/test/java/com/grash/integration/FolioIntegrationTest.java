@@ -8,10 +8,12 @@ import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestApi.Response;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
+import com.grash.integration.support.TestRecords;
 import com.grash.job.WorkOrderCreationJob;
 import com.grash.model.Company;
 import com.grash.model.PreventiveMaintenance;
 import com.grash.repository.PreventiveMaintenanceRepository;
+import com.grash.service.CustomSequenceService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,13 +21,19 @@ import org.quartz.JobDataMap;
 import org.quartz.JobExecutionContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -47,6 +55,27 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
 
     private static final int SIMULTANEOUS = 20;
     private static final int ROUNDS = 3;
+
+    /**
+     * The six unique constraints of P-20: name, then table and columns.
+     */
+    private static final Map<String, String> CONSTRAINTS = new LinkedHashMap<>();
+
+    static {
+        CONSTRAINTS.put("uq_custom_sequence_company", "custom_sequence(company_id)");
+        CONSTRAINTS.put("uq_work_order_company_custom_id", "work_order(company_id,custom_id)");
+        CONSTRAINTS.put("uq_asset_company_custom_id", "asset(company_id,custom_id)");
+        CONSTRAINTS.put("uq_location_company_custom_id", "location(company_id,custom_id)");
+        CONSTRAINTS.put("uq_request_company_custom_id", "request(company_id,custom_id)");
+        CONSTRAINTS.put("uq_preventive_maintenance_company_custom_id", "preventive_maintenance(company_id,custom_id)");
+    }
+
+    /**
+     * The data corrections of the P-20 changesets, in the order Liquibase runs them.
+     */
+    private static final List<String> CORRECTIONS = List.of(
+            "db/changelog/sql/2026_11_21_1795285030_merge_counter_rows.sql",
+            "db/changelog/sql/2026_11_21_1795285030_renumber_repeated_folios.sql");
 
     /**
      * Each folio type: its table, its counter column and how to create one record through the API.
@@ -77,23 +106,31 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
     }
 
     private final TestOrganizations organizations;
+    private final TestRecords records;
     private final TestApi api;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
     private final PreventiveMaintenanceRepository preventiveMaintenanceRepository;
     private final WorkOrderCreationJob workOrderCreationJob;
+    private final CustomSequenceService customSequenceService;
+    private final TransactionTemplate transactionTemplate;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
-    FolioIntegrationTest(TestOrganizations organizations, MockMvc mockMvc, ObjectMapper objectMapper,
-                         JdbcTemplate jdbcTemplate, PreventiveMaintenanceRepository preventiveMaintenanceRepository,
-                         WorkOrderCreationJob workOrderCreationJob) {
+    FolioIntegrationTest(TestOrganizations organizations, TestRecords records, MockMvc mockMvc,
+                         ObjectMapper objectMapper, JdbcTemplate jdbcTemplate,
+                         PreventiveMaintenanceRepository preventiveMaintenanceRepository,
+                         WorkOrderCreationJob workOrderCreationJob, CustomSequenceService customSequenceService,
+                         TransactionTemplate transactionTemplate) {
         this.organizations = organizations;
+        this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.preventiveMaintenanceRepository = preventiveMaintenanceRepository;
         this.workOrderCreationJob = workOrderCreationJob;
+        this.customSequenceService = customSequenceService;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @AfterEach
@@ -292,6 +329,119 @@ class FolioIntegrationTest extends AbstractIntegrationTest {
 
         assertEquals(List.of("WO000001"), folios(Type.WORK_ORDER, data.o1().company()));
         assertEquals(List.of("WO000001"), folios(Type.WORK_ORDER, data.o2().company()));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // CA-P20-05 and 06: what the database guarantees, and the correction of existing data
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("CA-P20-05: the migrated database has the six unique constraints")
+    void migratedDatabase_hasTheSixUniqueConstraints() {
+        Map<String, String> found = new HashMap<>();
+        jdbcTemplate.query("""
+                        SELECT c.conname, c.conrelid::regclass::text || '(' ||
+                               string_agg(a.attname, ',' ORDER BY k.position) || ')' AS definition
+                        FROM pg_constraint c
+                                 CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, position)
+                                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+                        WHERE c.contype = 'u' AND c.conname = ANY (?)
+                        GROUP BY c.conname, c.conrelid""",
+                row -> {
+                    found.put(row.getString(1), row.getString(2));
+                }, (Object) CONSTRAINTS.keySet().toArray(String[]::new));
+
+        assertEquals(new HashMap<>(CONSTRAINTS), found);
+    }
+
+    @Test
+    @DisplayName("CA-P20-06: the correction merges repeated counter rows and gives new folios to the newer records of "
+            + "a repeated folio, without deleting any record")
+    void correction_mergesCounterRowsAndRenumbersRepeatedFolios() {
+        CommonData data = newOrganizations();
+        Company company = data.o1().company();
+        String token = api.login(data.o1().admin());
+        for (int i = 0; i < 4; i++) assertTrue(create(Type.WORK_ORDER, "P-20 WO " + i, token).is2xx());
+        for (int i = 0; i < 3; i++) assertTrue(create(Type.ASSET, "P-20 asset " + i, token).is2xx());
+        records.asset(company);
+        records.asset(company);
+        long wo1 = idOf(Type.WORK_ORDER, company, "WO000001");
+        long wo2 = idOf(Type.WORK_ORDER, company, "WO000002");
+        long wo3 = idOf(Type.WORK_ORDER, company, "WO000003");
+        long wo4 = idOf(Type.WORK_ORDER, company, "WO000004");
+        long a1 = idOf(Type.ASSET, company, "A000001");
+        long a2 = idOf(Type.ASSET, company, "A000002");
+        long a3 = idOf(Type.ASSET, company, "A000003");
+
+        // DDL is transactional in PostgreSQL: everything below, constraints included, is rolled back
+        transactionTemplate.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            jdbcTemplate.execute("SET LOCAL lock_timeout = '30s'");
+            CONSTRAINTS.forEach((name, definition) -> jdbcTemplate.execute("ALTER TABLE " + table(definition)
+                    + " DROP CONSTRAINT " + name));
+            // a second counter row, with a lower work order counter and a higher asset counter
+            jdbcTemplate.update("INSERT INTO custom_sequence (id, company_id, work_order_sequence, asset_sequence) "
+                    + "VALUES (nextval('custom_sequence_seq'), ?, 2, 9)", company.getId());
+            // WO000002 and WO000003 repeat WO000001; the record of WO000003 is the oldest
+            jdbcTemplate.update("UPDATE work_order SET custom_id = 'WO000001' WHERE id IN (?, ?)", wo2, wo3);
+            jdbcTemplate.update("UPDATE work_order SET created_at = '2020-01-01' WHERE id = ?", wo3);
+            // A000002 repeats A000001; A000003 becomes a hand-written folio in the product format
+            jdbcTemplate.update("UPDATE asset SET custom_id = 'A000001' WHERE id = ?", a2);
+            jdbcTemplate.update("UPDATE asset SET custom_id = 'A000050' WHERE id = ?", a3);
+            assertEquals(2, counterRows(company));
+            int workOrders = folios(Type.WORK_ORDER, company).size();
+            int assets = folios(Type.ASSET, company).size();
+
+            CORRECTIONS.forEach(path -> jdbcTemplate.execute(sql(path)));
+            // fails if any company of the database still has a repeated folio or counter row
+            CONSTRAINTS.forEach((name, definition) -> jdbcTemplate.execute("ALTER TABLE " + table(definition)
+                    + " ADD CONSTRAINT " + name + " UNIQUE " + columns(definition)));
+
+            assertAll(
+                    () -> assertEquals(1, counterRows(company)),
+                    () -> assertEquals(workOrders, folios(Type.WORK_ORDER, company).size(), "no work order lost"),
+                    () -> assertEquals(assets, folios(Type.ASSET, company).size(), "no asset lost"),
+                    () -> assertEquals("WO000001", folioOf(Type.WORK_ORDER, wo3), "the oldest keeps the folio"),
+                    () -> assertEquals("WO000005", folioOf(Type.WORK_ORDER, wo1)),
+                    () -> assertEquals("WO000006", folioOf(Type.WORK_ORDER, wo2)),
+                    () -> assertEquals("WO000004", folioOf(Type.WORK_ORDER, wo4), "a folio not repeated is kept"),
+                    () -> assertEquals(7, counter(Type.WORK_ORDER, company)),
+                    () -> assertEquals("A000001", folioOf(Type.ASSET, a1), "the oldest keeps the folio"),
+                    () -> assertEquals("A000051", folioOf(Type.ASSET, a2), "above the highest folio"),
+                    () -> assertEquals("A000050", folioOf(Type.ASSET, a3), "a folio not repeated is kept"),
+                    () -> assertEquals(52, counter(Type.ASSET, company)),
+                    () -> assertEquals(2, folios(Type.ASSET, company).stream().filter(folio -> folio == null)
+                            .count(), "null folios stay null"));
+            String nextWorkOrder = String.format("WO%06d", customSequenceService.getNextWorkOrderSequence(company));
+            String nextAsset = String.format("A%06d", customSequenceService.getNextAssetSequence(company));
+            assertFalse(folios(Type.WORK_ORDER, company).contains(nextWorkOrder), nextWorkOrder + " exists");
+            assertFalse(folios(Type.ASSET, company).contains(nextAsset), nextAsset + " exists");
+        });
+    }
+
+    private long idOf(Type type, Company company, String folio) {
+        return jdbcTemplate.queryForObject("SELECT id FROM " + type.table + " WHERE company_id = ? AND custom_id = ?",
+                Long.class, company.getId(), folio);
+    }
+
+    private String folioOf(Type type, long id) {
+        return jdbcTemplate.queryForObject("SELECT custom_id FROM " + type.table + " WHERE id = ?", String.class, id);
+    }
+
+    private static String table(String definition) {
+        return definition.substring(0, definition.indexOf('('));
+    }
+
+    private static String columns(String definition) {
+        return definition.substring(definition.indexOf('('));
+    }
+
+    private static String sql(String path) {
+        try {
+            return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static JobExecutionContext jobContext(long scheduleId) {
