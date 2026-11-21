@@ -1,7 +1,13 @@
 // Stable codes of the 409 answers of the persistence rules (P-10, PPB-26) and the message of each one
 const conflictKeys: Record<string, string> = {
   ASSET_IN_USE: 'asset_in_use',
-  RECORD_IN_USE: 'record_in_use'
+  RECORD_IN_USE: 'record_in_use',
+  OWNER_ACCOUNT: 'owner_account',
+  USER_RETIRED: 'user_retired',
+  USER_IN_USE: 'user_in_use',
+  TEAM_IN_USE: 'team_in_use',
+  CUSTOM_FIELD_IN_USE: 'custom_field_in_use',
+  CURRENCY_IN_USE: 'currency_in_use'
 };
 
 /**

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-11 (PPB-21, PPB-22): a custom field with captured values is not deleted; the service answers 409 CUSTOM_FIELD_IN_USE first. Each foreign key gets its target rule and an index on its child
+         column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same
+         statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795293169_custom_field_value_custom_field_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="custom_field_value" constraintName="fk_custom_field_value_field"/>
+        <addForeignKeyConstraint baseColumnNames="custom_field_id" baseTableName="custom_field_value"
+                                 constraintName="fk_custom_field_value_field" referencedColumnNames="id"
+                                 referencedTableName="custom_field" onDelete="NO ACTION"/>
+        <createIndex tableName="custom_field_value" indexName="idx_custom_field_value_custom_field_id">
+            <column name="custom_field_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="custom_field_value" indexName="idx_custom_field_value_custom_field_id"/>
+            <dropForeignKeyConstraint baseTableName="custom_field_value" constraintName="fk_custom_field_value_field"/>
+            <addForeignKeyConstraint baseColumnNames="custom_field_id" baseTableName="custom_field_value"
+                                     constraintName="fk_custom_field_value_field" referencedColumnNames="id"
+                                     referencedTableName="custom_field" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

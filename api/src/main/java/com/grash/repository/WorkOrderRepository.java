@@ -38,6 +38,13 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
 
     boolean existsByAsset_Id(Long id);
 
+    /**
+     * P-11 (PPB §3.3 c): whether the user is assigned to a completed or archived work order.
+     */
+    @Query("SELECT COUNT(w) > 0 FROM WorkOrder w JOIN w.assignedTo u WHERE u.id = :userId "
+            + "AND (w.status = com.grash.model.enums.Status.COMPLETE OR w.archived = true)")
+    boolean isAssignedToClosedOrArchived(@Param("userId") Long userId);
+
     Collection<WorkOrder> findByLocation_Id(Long id);
 
     Page<WorkOrder> findByParentPreventiveMaintenance_Id(Long id, Pageable pageable);

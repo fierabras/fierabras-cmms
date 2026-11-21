@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-11 (PPB-21, PPB-22): a currency in use is not deleted; the service answers 409 CURRENCY_IN_USE first. Each foreign key gets its target rule and an index on its child
+         column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same
+         statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795293170_customer_billing_currency_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="customer" constraintName="fk86m32arbbnl01mtk7qjeqi0mu"/>
+        <addForeignKeyConstraint baseColumnNames="billing_currency_id" baseTableName="customer"
+                                 constraintName="fk86m32arbbnl01mtk7qjeqi0mu" referencedColumnNames="id"
+                                 referencedTableName="currency" onDelete="NO ACTION"/>
+        <createIndex tableName="customer" indexName="idx_customer_billing_currency_id">
+            <column name="billing_currency_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="customer" indexName="idx_customer_billing_currency_id"/>
+            <dropForeignKeyConstraint baseTableName="customer" constraintName="fk86m32arbbnl01mtk7qjeqi0mu"/>
+            <addForeignKeyConstraint baseColumnNames="billing_currency_id" baseTableName="customer"
+                                     constraintName="fk86m32arbbnl01mtk7qjeqi0mu" referencedColumnNames="id"
+                                     referencedTableName="currency" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293170_general_preferences_currency_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="general_preferences" constraintName="fkskbryn4bunuqp0op70ogiu4ow"/>
+        <addForeignKeyConstraint baseColumnNames="currency_id" baseTableName="general_preferences"
+                                 constraintName="fkskbryn4bunuqp0op70ogiu4ow" referencedColumnNames="id"
+                                 referencedTableName="currency" onDelete="NO ACTION"/>
+        <createIndex tableName="general_preferences" indexName="idx_general_preferences_currency_id">
+            <column name="currency_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="general_preferences" indexName="idx_general_preferences_currency_id"/>
+            <dropForeignKeyConstraint baseTableName="general_preferences" constraintName="fkskbryn4bunuqp0op70ogiu4ow"/>
+            <addForeignKeyConstraint baseColumnNames="currency_id" baseTableName="general_preferences"
+                                     constraintName="fkskbryn4bunuqp0op70ogiu4ow" referencedColumnNames="id"
+                                     referencedTableName="currency" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

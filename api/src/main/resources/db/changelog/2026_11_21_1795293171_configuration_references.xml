@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-11 (PPB-21, PPB-22): the configuration of an organization is never deleted by the application (PPB-10): references to it are protected, and the field configurations belong to their configuration. Each foreign key gets its target rule and an index on its child
+         column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same
+         statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795293171_company_company_settings_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company" constraintName="fkfv376ws8n2akfbxvagtxbkiu2"/>
+        <addForeignKeyConstraint baseColumnNames="company_settings_id" baseTableName="company"
+                                 constraintName="fkfv376ws8n2akfbxvagtxbkiu2" referencedColumnNames="id"
+                                 referencedTableName="company_settings" onDelete="NO ACTION"/>
+        <createIndex tableName="company" indexName="idx_company_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company" indexName="idx_company_company_settings_id"/>
+            <dropForeignKeyConstraint baseTableName="company" constraintName="fkfv376ws8n2akfbxvagtxbkiu2"/>
+            <addForeignKeyConstraint baseColumnNames="company_settings_id" baseTableName="company"
+                                     constraintName="fkfv376ws8n2akfbxvagtxbkiu2" referencedColumnNames="id"
+                                     referencedTableName="company_settings" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_company_settings_general_preferences_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk9lv45cb6urv0o8r8sq1exw2rt"/>
+        <addForeignKeyConstraint baseColumnNames="general_preferences_id" baseTableName="company_settings"
+                                 constraintName="fk9lv45cb6urv0o8r8sq1exw2rt" referencedColumnNames="id"
+                                 referencedTableName="general_preferences" onDelete="NO ACTION"/>
+        <createIndex tableName="company_settings" indexName="idx_company_settings_general_preferences_id">
+            <column name="general_preferences_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company_settings" indexName="idx_company_settings_general_preferences_id"/>
+            <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk9lv45cb6urv0o8r8sq1exw2rt"/>
+            <addForeignKeyConstraint baseColumnNames="general_preferences_id" baseTableName="company_settings"
+                                     constraintName="fk9lv45cb6urv0o8r8sq1exw2rt" referencedColumnNames="id"
+                                     referencedTableName="general_preferences" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_company_settings_ui_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk_company_settings_ui_configuration"/>
+        <addForeignKeyConstraint baseColumnNames="ui_configuration_id" baseTableName="company_settings"
+                                 constraintName="fk_company_settings_ui_configuration" referencedColumnNames="id"
+                                 referencedTableName="ui_configuration" onDelete="NO ACTION"/>
+        <createIndex tableName="company_settings" indexName="idx_company_settings_ui_configuration_id">
+            <column name="ui_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company_settings" indexName="idx_company_settings_ui_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk_company_settings_ui_configuration"/>
+            <addForeignKeyConstraint baseColumnNames="ui_configuration_id" baseTableName="company_settings"
+                                     constraintName="fk_company_settings_ui_configuration" referencedColumnNames="id"
+                                     referencedTableName="ui_configuration" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_company_settings_work_order_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fklr3cfk7ltvoc41wylou0p9llc"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_configuration_id" baseTableName="company_settings"
+                                 constraintName="fklr3cfk7ltvoc41wylou0p9llc" referencedColumnNames="id"
+                                 referencedTableName="work_order_configuration" onDelete="NO ACTION"/>
+        <createIndex tableName="company_settings" indexName="idx_company_settings_work_order_configuration_id">
+            <column name="work_order_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company_settings" indexName="idx_company_settings_work_order_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fklr3cfk7ltvoc41wylou0p9llc"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_configuration_id" baseTableName="company_settings"
+                                     constraintName="fklr3cfk7ltvoc41wylou0p9llc" referencedColumnNames="id"
+                                     referencedTableName="work_order_configuration" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_company_settings_work_order_request_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk5bl8j09pkd2jw3tpg4nlx8x9g"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_request_configuration_id" baseTableName="company_settings"
+                                 constraintName="fk5bl8j09pkd2jw3tpg4nlx8x9g" referencedColumnNames="id"
+                                 referencedTableName="work_order_request_configuration" onDelete="NO ACTION"/>
+        <createIndex tableName="company_settings" indexName="idx_company_settings_work_order_request_configuration_id">
+            <column name="work_order_request_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company_settings" indexName="idx_company_settings_work_order_request_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="company_settings" constraintName="fk5bl8j09pkd2jw3tpg4nlx8x9g"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_request_configuration_id" baseTableName="company_settings"
+                                     constraintName="fk5bl8j09pkd2jw3tpg4nlx8x9g" referencedColumnNames="id"
+                                     referencedTableName="work_order_request_configuration" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_own_user_shift_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="own_user" constraintName="fk_own_user_shift_config"/>
+        <addForeignKeyConstraint baseColumnNames="shift_configuration_id" baseTableName="own_user"
+                                 constraintName="fk_own_user_shift_config" referencedColumnNames="id"
+                                 referencedTableName="shift_configuration" onDelete="NO ACTION"/>
+        <createIndex tableName="own_user" indexName="idx_own_user_shift_configuration_id">
+            <column name="shift_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user" indexName="idx_own_user_shift_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="own_user" constraintName="fk_own_user_shift_config"/>
+            <addForeignKeyConstraint baseColumnNames="shift_configuration_id" baseTableName="own_user"
+                                     constraintName="fk_own_user_shift_config" referencedColumnNames="id"
+                                     referencedTableName="shift_configuration" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_own_user_user_settings_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkssx9vqtrk77wqmtsi1gokyi8l"/>
+        <addForeignKeyConstraint baseColumnNames="user_settings_id" baseTableName="own_user"
+                                 constraintName="fkssx9vqtrk77wqmtsi1gokyi8l" referencedColumnNames="id"
+                                 referencedTableName="user_settings" onDelete="NO ACTION"/>
+        <createIndex tableName="own_user" indexName="idx_own_user_user_settings_id">
+            <column name="user_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user" indexName="idx_own_user_user_settings_id"/>
+            <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkssx9vqtrk77wqmtsi1gokyi8l"/>
+            <addForeignKeyConstraint baseColumnNames="user_settings_id" baseTableName="own_user"
+                                     constraintName="fkssx9vqtrk77wqmtsi1gokyi8l" referencedColumnNames="id"
+                                     referencedTableName="user_settings" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_field_configuration_work_order_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="field_configuration" constraintName="fknm0jfo2of1li65idn1qvbbm00"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_configuration_id" baseTableName="field_configuration"
+                                 constraintName="fknm0jfo2of1li65idn1qvbbm00" referencedColumnNames="id"
+                                 referencedTableName="work_order_configuration" onDelete="CASCADE"/>
+        <createIndex tableName="field_configuration" indexName="idx_field_configuration_work_order_configuration_id">
+            <column name="work_order_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="field_configuration" indexName="idx_field_configuration_work_order_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="field_configuration" constraintName="fknm0jfo2of1li65idn1qvbbm00"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_configuration_id" baseTableName="field_configuration"
+                                     constraintName="fknm0jfo2of1li65idn1qvbbm00" referencedColumnNames="id"
+                                     referencedTableName="work_order_configuration" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293171_field_configuration_work_order_request_configuration_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="field_configuration" constraintName="fkqrsw1egn2l8w4ve311io2fa5e"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_request_configuration_id" baseTableName="field_configuration"
+                                 constraintName="fkqrsw1egn2l8w4ve311io2fa5e" referencedColumnNames="id"
+                                 referencedTableName="work_order_request_configuration" onDelete="CASCADE"/>
+        <createIndex tableName="field_configuration" indexName="idx_field_configuration_work_order_request_configuration_id">
+            <column name="work_order_request_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="field_configuration" indexName="idx_field_configuration_work_order_request_configuration_id"/>
+            <dropForeignKeyConstraint baseTableName="field_configuration" constraintName="fkqrsw1egn2l8w4ve311io2fa5e"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_request_configuration_id" baseTableName="field_configuration"
+                                     constraintName="fkqrsw1egn2l8w4ve311io2fa5e" referencedColumnNames="id"
+                                     referencedTableName="work_order_request_configuration" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -6,6 +6,7 @@ import com.grash.model.Subscription;
 import com.grash.model.User;
 import com.grash.model.UserSettings;
 import com.grash.model.enums.RoleCode;
+import com.grash.model.enums.RoleType;
 import com.grash.repository.UserRepository;
 import com.grash.service.CompanyService;
 import com.grash.service.CurrencyService;
@@ -104,10 +105,49 @@ public class TestOrganizations {
         for (Company company : List.of(data.o1().company(), data.o2().company())) {
             List<Long> subscriptionIds = jdbcTemplate.queryForList(
                     "SELECT subscription_id FROM company WHERE id = ?", Long.class, company.getId());
+            deleteWorkOrderRevisions(jdbcTemplate, company.getId());
             jdbcTemplate.update("DELETE FROM company WHERE id = ?", company.getId());
             subscriptionIds.stream().filter(Objects::nonNull)
                     .forEach(id -> jdbcTemplate.update("DELETE FROM subscription WHERE id = ?", id));
         }
+    }
+
+    /**
+     * P-11: the work order revisions ({@code work_order_aud}) have no company and are not removed in cascade, while
+     * their users and teams are protected references (NO ACTION). Deleting a company therefore needs its revisions
+     * deleted first: those of its work orders and those that cite its users or teams.
+     */
+    public static void deleteWorkOrderRevisions(JdbcTemplate jdbcTemplate, Long companyId) {
+        jdbcTemplate.update("DELETE FROM work_order_aud WHERE id IN (SELECT id FROM work_order WHERE company_id = ?) "
+                        + "OR primary_user_id IN (SELECT id FROM own_user WHERE company_id = ?) "
+                        + "OR completed_by_id IN (SELECT id FROM own_user WHERE company_id = ?) "
+                        + "OR team_id IN (SELECT id FROM team WHERE company_id = ?)",
+                companyId, companyId, companyId, companyId);
+    }
+
+    /**
+     * Creates and commits a super administrator, in the company of the default super administrator role. Sign in
+     * with {@code TestApi.login(user, "SUPER_ADMIN")}; delete it with {@link #deleteUser(User)}.
+     */
+    public User superAdmin() {
+        SecurityContextHolder.clearContext();
+        Role role = roleService.findByCodeAndRoleType(RoleCode.ADMIN, RoleType.ROLE_SUPER_ADMIN).stream()
+                .findFirst().orElseThrow(() -> new IllegalStateException("super admin role is missing"));
+        String unique = UUID.randomUUID().toString();
+        User user = new User();
+        user.setFirstName("P-11");
+        user.setLastName("ROOT");
+        user.setEmail("p11-root-" + unique + "@example.com");
+        user.setUsername(unique);
+        user.setPassword(passwordEncoder.encode(PASSWORD));
+        user.setRole(role);
+        user.setCompany(role.getCompanySettings().getCompany());
+        user.setEnabled(true);
+        return userRepository.saveAndFlush(user);
+    }
+
+    public void deleteUser(User user) {
+        jdbcTemplate.update("DELETE FROM own_user WHERE id = ?", user.getId());
     }
 
     private Company newCompany(String name) {

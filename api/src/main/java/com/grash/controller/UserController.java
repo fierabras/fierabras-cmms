@@ -149,7 +149,7 @@ public class UserController {
         User userToEnable = userService.findByIdAndCompany(id, requester.getCompany().getId()).get();
         // INC-02 (D-23): enabling a user is managing that user
         userService.assertCanManage(requester, userToEnable);
-        return userMapper.toResponseDto(userService.enableUser(userToEnable));
+        return userMapper.toResponseDto(userService.restoreUser(userToEnable, requester));
     }
 
     @PatchMapping("/soft-delete/{id}")

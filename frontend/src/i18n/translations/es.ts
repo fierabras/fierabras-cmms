@@ -2099,9 +2099,34 @@ const esJSON = {
   entity_type_ROLE: 'Rol',
   entity_type_WORK_ORDER: 'Orden de trabajo',
   entity_type_USER: 'Usuario',
+  entity_type_ADDITIONAL_COST: 'Costo adicional',
+  entity_type_COMMENT: 'Comentario',
+  entity_type_CURRENCY: 'Moneda',
+  entity_type_CUSTOM_FIELD: 'Campo personalizado',
+  entity_type_CUSTOM_FIELD_VALUE: 'Valor de campo personalizado',
+  entity_type_CUSTOMER: 'Contratista',
+  entity_type_GENERAL_PREFERENCES: 'Preferencias generales',
+  entity_type_LABOR: 'Mano de obra',
+  entity_type_PREVENTIVE_MAINTENANCE: 'Mantenimiento preventivo',
+  entity_type_REQUEST: 'Solicitud',
+  entity_type_TASK_BASE: 'Tarea',
+  entity_type_TEAM: 'Equipo',
+  entity_type_WORK_ORDER_HISTORY: 'Historial de la orden de trabajo',
+  entity_type_WORK_ORDER_METER_TRIGGER: 'Disparador de medidor',
+  entity_type_WORKFLOW_ACTION: 'Acción de flujo de trabajo',
+  entity_type_WORKFLOW_CONDITION: 'Condición de flujo de trabajo',
   asset_in_use:
     'Este activo está en uso y no se puede eliminar. Archívelo en su lugar.',
   record_in_use: 'Otros registros usan este registro y no se puede eliminar.',
+  owner_account:
+    'El propietario de la organización no puede eliminar ni desactivar su propia cuenta.',
+  user_retired: 'Este usuario está desactivado y no se puede asignar.',
+  user_in_use:
+    'Este usuario está en uso y no se puede eliminar. Desactívelo en su lugar.',
+  team_in_use: 'Este equipo está en uso y no se puede eliminar.',
+  custom_field_in_use:
+    'Este campo personalizado tiene valores en otros registros y no se puede eliminar.',
+  currency_in_use: 'Esta moneda está en uso y no se puede eliminar.',
   in_use_blocked_by: 'Lo usan: {{types}}.'
 };
 

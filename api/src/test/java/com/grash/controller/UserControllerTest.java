@@ -507,7 +507,7 @@ class UserControllerTest extends AbstractControllerTest {
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);
             when(userService.findByIdAndCompany(4L, 1L)).thenReturn(Optional.of(targetUser));
-            when(userService.enableUser(targetUser)).thenReturn(targetUser);
+            when(userService.restoreUser(targetUser, clientUser)).thenReturn(targetUser);
             when(userMapper.toResponseDto(targetUser)).thenReturn(userResponseDto);
 
             mockMvc.perform(patch("/users/4/enable"))

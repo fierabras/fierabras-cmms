@@ -127,7 +127,7 @@ public class CustomFieldController {
             CustomField field = optionalField.get();
             checkAccessToCompanySettings(field.getCompanySettings(), user);
 
-            customFieldService.delete(id);
+            customFieldService.delete(field, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"), HttpStatus.OK);
         } else throw new CustomException("Custom field not found", HttpStatus.NOT_FOUND);
     }

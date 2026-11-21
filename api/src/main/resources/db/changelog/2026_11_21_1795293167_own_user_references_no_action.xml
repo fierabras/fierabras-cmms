@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-11 (PPB-21, PPB-22): a user that other records cite is not deleted; the user service answers 409 USER_IN_USE first. Each foreign key gets its target rule and an index on its child
+         column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same
+         statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795293167_additional_cost_assigned_to_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="additional_cost" constraintName="fkov7r0agrfyv2u9v67rd4e4hxf"/>
+        <addForeignKeyConstraint baseColumnNames="assigned_to_id" baseTableName="additional_cost"
+                                 constraintName="fkov7r0agrfyv2u9v67rd4e4hxf" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="additional_cost" indexName="idx_additional_cost_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="additional_cost" indexName="idx_additional_cost_assigned_to_id"/>
+            <dropForeignKeyConstraint baseTableName="additional_cost" constraintName="fkov7r0agrfyv2u9v67rd4e4hxf"/>
+            <addForeignKeyConstraint baseColumnNames="assigned_to_id" baseTableName="additional_cost"
+                                     constraintName="fkov7r0agrfyv2u9v67rd4e4hxf" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_asset_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="asset" constraintName="fkmq4as1d1exvm4mg3ayokdan30"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="asset"
+                                 constraintName="fkmq4as1d1exvm4mg3ayokdan30" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="asset" indexName="idx_asset_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="asset" constraintName="fkmq4as1d1exvm4mg3ayokdan30"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="asset"
+                                     constraintName="fkmq4as1d1exvm4mg3ayokdan30" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_comment_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="comment" constraintName="fk_comment_user"/>
+        <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="comment"
+                                 constraintName="fk_comment_user" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="comment" indexName="idx_comment_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="comment" indexName="idx_comment_user_id"/>
+            <dropForeignKeyConstraint baseTableName="comment" constraintName="fk_comment_user"/>
+            <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="comment"
+                                     constraintName="fk_comment_user" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_labor_assigned_to_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="labor" constraintName="fkr5slomxbec1ob9k9npjcdad05"/>
+        <addForeignKeyConstraint baseColumnNames="assigned_to_id" baseTableName="labor"
+                                 constraintName="fkr5slomxbec1ob9k9npjcdad05" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="labor" indexName="idx_labor_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="labor" indexName="idx_labor_assigned_to_id"/>
+            <dropForeignKeyConstraint baseTableName="labor" constraintName="fkr5slomxbec1ob9k9npjcdad05"/>
+            <addForeignKeyConstraint baseColumnNames="assigned_to_id" baseTableName="labor"
+                                     constraintName="fkr5slomxbec1ob9k9npjcdad05" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_preventive_maintenance_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkt6xom1a5ksujm9l99daervnjw"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="preventive_maintenance"
+                                 constraintName="fkt6xom1a5ksujm9l99daervnjw" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkt6xom1a5ksujm9l99daervnjw"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="preventive_maintenance"
+                                     constraintName="fkt6xom1a5ksujm9l99daervnjw" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_request_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fkn6hy6udqudy40u4cgtwvwtp9l"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="request"
+                                 constraintName="fkn6hy6udqudy40u4cgtwvwtp9l" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fkn6hy6udqudy40u4cgtwvwtp9l"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="request"
+                                     constraintName="fkn6hy6udqudy40u4cgtwvwtp9l" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_task_base_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkjuw0e6wckoo1tqast1m6baj9f"/>
+        <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="task_base"
+                                 constraintName="fkjuw0e6wckoo1tqast1m6baj9f" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="task_base" indexName="idx_task_base_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task_base" indexName="idx_task_base_user_id"/>
+            <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkjuw0e6wckoo1tqast1m6baj9f"/>
+            <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="task_base"
+                                     constraintName="fkjuw0e6wckoo1tqast1m6baj9f" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_completed_by_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkac4vsg728gaycwq1w9o77uw3c"/>
+        <addForeignKeyConstraint baseColumnNames="completed_by_id" baseTableName="work_order"
+                                 constraintName="fkac4vsg728gaycwq1w9o77uw3c" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_completed_by_id">
+            <column name="completed_by_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_completed_by_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkac4vsg728gaycwq1w9o77uw3c"/>
+            <addForeignKeyConstraint baseColumnNames="completed_by_id" baseTableName="work_order"
+                                     constraintName="fkac4vsg728gaycwq1w9o77uw3c" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fknixhvhyqdk11xntyainal50tf"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order"
+                                 constraintName="fknixhvhyqdk11xntyainal50tf" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fknixhvhyqdk11xntyainal50tf"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order"
+                                     constraintName="fknixhvhyqdk11xntyainal50tf" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_aud_completed_by_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_completedBy_id"/>
+        <addForeignKeyConstraint baseColumnNames="completed_by_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_completedBy_id" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_completed_by_id">
+            <column name="completed_by_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_completed_by_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_completedBy_id"/>
+            <addForeignKeyConstraint baseColumnNames="completed_by_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_completedBy_id" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_aud_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_primaryUser_id"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_primaryUser_id" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_primaryUser_id"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_primaryUser_id" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_history_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_history" constraintName="fkggkgvrsfxoevabt4igrse99m3"/>
+        <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="work_order_history"
+                                 constraintName="fkggkgvrsfxoevabt4igrse99m3" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_history" indexName="idx_work_order_history_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_history" indexName="idx_work_order_history_user_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_history" constraintName="fkggkgvrsfxoevabt4igrse99m3"/>
+            <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="work_order_history"
+                                     constraintName="fkggkgvrsfxoevabt4igrse99m3" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_work_order_meter_trigger_primary_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkrle6bql4ubcd8vjmqb19aukwl"/>
+        <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fkrle6bql4ubcd8vjmqb19aukwl" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_primary_user_id">
+            <column name="primary_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_primary_user_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkrle6bql4ubcd8vjmqb19aukwl"/>
+            <addForeignKeyConstraint baseColumnNames="primary_user_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fkrle6bql4ubcd8vjmqb19aukwl" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_workflow_action_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fks2ytj9hm7fm8w9uekixsq2vip"/>
+        <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="workflow_action"
+                                 constraintName="fks2ytj9hm7fm8w9uekixsq2vip" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_user_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fks2ytj9hm7fm8w9uekixsq2vip"/>
+            <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="workflow_action"
+                                     constraintName="fks2ytj9hm7fm8w9uekixsq2vip" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795293167_workflow_condition_user_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fks9hh8bjsvrt9f5od4uyyw0j6c"/>
+        <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="workflow_condition"
+                                 constraintName="fks9hh8bjsvrt9f5od4uyyw0j6c" referencedColumnNames="id"
+                                 referencedTableName="own_user" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_user_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fks9hh8bjsvrt9f5od4uyyw0j6c"/>
+            <addForeignKeyConstraint baseColumnNames="user_id" baseTableName="workflow_condition"
+                                     constraintName="fks9hh8bjsvrt9f5od4uyyw0j6c" referencedColumnNames="id"
+                                     referencedTableName="own_user" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

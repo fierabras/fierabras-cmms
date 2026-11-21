@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.grash.integration.support.TestOrganizations;
 import com.grash.model.*;
 import com.grash.model.abstracts.WorkOrderBase;
 import com.grash.model.enums.DateFormat;
@@ -154,6 +155,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
             }
             Long settingsId = settingsIds.get(0);
             // ON DELETE CASCADE from company removes its settings, roles, users, requests and work orders.
+            TestOrganizations.deleteWorkOrderRevisions(jdbcTemplate, companyId);
             jdbcTemplate.update("DELETE FROM company WHERE id = ?", companyId);
             assertEquals(0, count("SELECT count(*) FROM own_user WHERE company_id = ?", companyId),
                     "cleanup left users of company " + companyId);

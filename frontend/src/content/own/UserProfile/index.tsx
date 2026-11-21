@@ -14,6 +14,8 @@ import api from '../../../utils/api';
 import WorkOrder from '../../../models/owns/workOrder';
 import { useNavigate } from 'react-router-dom';
 import { homeUrl } from '../../../config';
+import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
+import { conflictMessage } from '../../../utils/conflicts';
 
 function UserProfile() {
   const isMountedRef = useRefMounted();
@@ -22,6 +24,7 @@ function UserProfile() {
   // @ts-ignore
   const { t }: { t: any } = useTranslation();
   const { setTitle } = useContext(TitleContext);
+  const { showSnackBar } = useContext(CustomSnackBarContext);
   useEffect(() => {
     setTitle(t('profile'));
   }, []);
@@ -32,10 +35,14 @@ function UserProfile() {
 
   const onDeleteAccount = async () => {
     if (window.confirm('Are you sure you want to delete your account?')) {
-      const { success } = await api.deletes<{ success: boolean }>(`auth`);
-      if (success) {
-        logout();
-        navigate('/');
+      try {
+        const { success } = await api.deletes<{ success: boolean }>(`auth`);
+        if (success) {
+          logout();
+          navigate('/');
+        }
+      } catch (err) {
+        showSnackBar(conflictMessage(err, t, t('something_went_wrong')), 'error');
       }
     }
   };

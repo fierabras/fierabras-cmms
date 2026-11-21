@@ -249,6 +249,10 @@ public class WorkOrderService {
         if (optionalWorkOrder.isPresent()) {
             WorkOrder savedWorkOrder = optionalWorkOrder.get();
             if (savedWorkOrder.canBeEditedBy(user)) {
+                // P-11 (PPB-08): a disabled user is not assigned anew; those already assigned are kept
+                userService.rejectRetired(assignedUsers(savedWorkOrder.getPrimaryUser(),
+                        savedWorkOrder.getAssignedTo()), assignedUsers(workOrder.getPrimaryUser(),
+                        workOrder.getAssignedTo()));
                 em.detach(savedWorkOrder);
                 WorkOrder patchedWorkOrder = update(id, workOrder, user);
 
@@ -266,6 +270,16 @@ public class WorkOrderService {
                 return patchedWorkOrder;
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * The primary user and the assigned users, without nulls.
+     */
+    private static List<User> assignedUsers(User primaryUser, Collection<User> assignedTo) {
+        List<User> users = new ArrayList<>();
+        if (primaryUser != null) users.add(primaryUser);
+        if (assignedTo != null) users.addAll(assignedTo);
+        return users;
     }
 
     public Collection<WorkOrder> getAll() {
@@ -1182,6 +1196,9 @@ public class WorkOrderService {
             User primaryUser = workOrderReq.getPrimaryUser();
             workOrderReq.setPrimaryUser(primaryUser == null ? user : primaryUser);
         }
+        // P-11 (PPB-08): a disabled user is not assigned to a new work order
+        userService.rejectRetired(List.of(), assignedUsers(workOrderReq.getPrimaryUser(),
+                workOrderReq.getAssignedTo()));
         WorkOrder createdWorkOrder = create(workOrderReq, user.getCompany());
 
         if (!user.getCompany().isFirstWorkOrderCreated()) {

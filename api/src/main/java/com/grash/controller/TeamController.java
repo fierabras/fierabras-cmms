@@ -29,6 +29,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -83,6 +84,8 @@ public class TeamController {
                        HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
+            // P-11 (PPB-08): a disabled user does not join a team
+            userService.rejectRetired(List.of(), teamReq.getUsers());
             Team savedTeam = teamService.create(teamReq);
             teamService.notify(savedTeam, Helper.getLocale(user));
             return teamMapper.toShowDto(savedTeam);
@@ -102,6 +105,8 @@ public class TeamController {
             if (!user.getId().equals(savedTeam.getCreatedBy()) && !user.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             }
+            // P-11 (PPB-08): a disabled user does not join a team; current members are kept
+            userService.rejectRetired(savedTeam.getUsers(), team.getUsers());
             em.detach(savedTeam);
             Team patchTeam = teamService.update(id, team);
             teamService.patchNotify(savedTeam, patchTeam, Helper.getLocale(user));
@@ -118,7 +123,7 @@ public class TeamController {
         if (optionalTeam.isPresent()) {
             Team savedTeam = optionalTeam.get();
             if (user.getId().equals(savedTeam.getCreatedBy()) || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
-                teamService.delete(id);
+                teamService.delete(savedTeam, user);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

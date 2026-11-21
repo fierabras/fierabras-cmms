@@ -7,10 +7,8 @@ import com.grash.factory.MailServiceFactory;
 import com.grash.model.User;
 import com.grash.model.SuperAccountRelation;
 import com.grash.repository.SuperAccountRelationRepository;
-import com.grash.repository.UserRepository;
 import com.grash.security.CurrentUser;
 import com.grash.security.JwtTokenProvider;
-import com.grash.service.CompanyService;
 import com.grash.service.LdapService;
 import com.grash.service.UserService;
 import com.grash.service.VerificationTokenService;
@@ -43,8 +41,6 @@ public class AuthController {
     private final UserMapper userMapper;
     private final SuperAccountRelationRepository superAccountRelationRepository;
     private final JwtTokenProvider jwtTokenProvider;
-    private final CompanyService companyService;
-    private final UserRepository userRepository;
     private final LdapService ldapService;
     @Value("${frontend.url}")
     private String frontendUrl;
@@ -137,8 +133,9 @@ public class AuthController {
 
     @DeleteMapping(value = "/{username}")
     @PreAuthorize("hasRole('ROLE_SUPER_ADMIN')")
-    public String delete(@PathVariable String username) {
-        userService.delete(username);
+    public String delete(@PathVariable String username, @Parameter(hidden = true) @CurrentUser User user) {
+        // P-11 (PPB-02, PPB-12): 409 USER_IN_USE or OWNER_ACCOUNT; an allowed deletion is recorded
+        userService.delete(username, user);
         return username;
     }
 
@@ -212,9 +209,8 @@ public class AuthController {
     @DeleteMapping("")
     @PreAuthorize("permitAll()")
     public SuccessResponse deleteAccount(@Parameter(hidden = true) @CurrentUser User user) {
-        if (user.isOwnsCompany())
-            companyService.delete(user.getCompany().getId());
-        else userRepository.delete(user);
+        // P-11 (PPB-10, PPB-11): disables the account; the owner's is rejected with 409 OWNER_ACCOUNT
+        userService.deleteOwnAccount(user);
         return new SuccessResponse(true, "Account deleted successfully");
     }
 

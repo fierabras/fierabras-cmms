@@ -237,4 +237,14 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_21_1795285030_unique_folios.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795293167_own_user_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795293168_team_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795293169_custom_field_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795293170_currency_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795293171_configuration_references.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

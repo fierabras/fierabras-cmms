@@ -99,6 +99,10 @@ class UserServiceTest {
     private MailService mailService;
     @Mock
     private IntercomService intercomService;
+    @Mock
+    private AuditLogService auditLogService;
+    @Mock
+    private DeletionService deletionService;
 
     private Company company;
     private User user;
@@ -1204,10 +1208,31 @@ class UserServiceTest {
     @Nested
     class Delete {
 
+        // P-11 (D-P11-9): the deletion goes through DeletionService, which checks the dependents and records it
         @Test
-        void deletesByUsername() {
+        void deletesThroughDeletionService() {
+            User user = new User();
+            user.setId(9L);
+            user.setUsername("johndoe");
+            Company company = new Company();
+            company.setId(1L);
+            user.setCompany(company);
+            when(userRepository.findByUsername("johndoe")).thenReturn(Optional.of(user));
+
             userService.delete("johndoe");
-            verify(userRepository).deleteByUsername("johndoe");
+
+            verify(deletionService).delete(any(), isNull(), eq(com.grash.model.enums.AuditSource.API), any(),
+                    any());
+        }
+
+        @Test
+        void unknownUsername_deletesNothing() {
+            when(userRepository.findByUsername("nobody")).thenReturn(Optional.empty());
+
+            userService.delete("nobody");
+
+            verifyNoInteractions(deletionService);
+            verify(userRepository, never()).deleteByUsername(any());
         }
     }
 

@@ -16,6 +16,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
@@ -68,7 +69,13 @@ public class JwtTokenProvider {
     }
 
     public Authentication getAuthentication(String token) {
-        UserDetails userDetails = customUserDetailsService.loadUserByUsername(getUsername(token));
+        UserDetails userDetails;
+        try {
+            userDetails = customUserDetailsService.loadUserByUsername(getUsername(token));
+        } catch (UsernameNotFoundException e) {
+            // P-11: the subject of a token issued before a soft-delete (whose email changed) no longer exists
+            throw new CustomException("User account not found", HttpStatus.UNAUTHORIZED);
+        }
         if (!userDetails.isEnabled()) {
             throw new CustomException("User account is disabled", HttpStatus.UNAUTHORIZED);
         }
