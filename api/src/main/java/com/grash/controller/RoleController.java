@@ -123,7 +123,7 @@ public class RoleController {
             if (!savedRole.belongsOnlyToCompany(user.getCompany())) throw roleNotInCompany();
             // INC-02 (D-11): nobody deletes a role superior to their own.
             roleService.assertCanGrant(user.getRole(), savedRole);
-            roleService.delete(id);
+            roleService.delete(savedRole, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Role not found", HttpStatus.NOT_FOUND);

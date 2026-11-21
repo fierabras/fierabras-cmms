@@ -2,15 +2,21 @@ package com.grash.service;
 
 import com.grash.dto.RolePatchDTO;
 import com.grash.dto.license.LicenseEntitlement;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.RoleMapper;
 import com.grash.model.Role;
+import com.grash.model.enums.AuditAction;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.RoleRepository;
 import com.grash.repository.UserRepository;
 import com.grash.utils.Helper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -20,6 +26,8 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import org.springframework.http.HttpStatus;
 
 import java.util.*;
@@ -44,6 +52,12 @@ class RoleServiceTest {
     private LicenseService licenseService;
     @Mock
     private UserRepository userRepository;
+    @Mock
+    private EntityManager entityManager;
+    @Mock
+    private AuditLogService auditLogService;
+    @Mock
+    private Query deletedRowsQuery;
 
     private Role adminRole;
     private Role customRole;
@@ -327,49 +341,98 @@ class RoleServiceTest {
         }
     }
 
+    /**
+     * P-10: the deletion goes through the common mechanism (a real {@link DeletionService}, with the persistence
+     * and the audit log simulated): ROLE_IN_USE with the type USER, also when the foreign key of users rejects it.
+     */
     @Nested
     class Delete {
 
+        private RoleService service;
+
+        @BeforeEach
+        void setUpDeletion() {
+            service = new RoleService(roleRepository, roleMapper, companySettingsService, licenseService,
+                    userRepository, new DeletionService(entityManager, auditLogService));
+            when(roleRepository.findById(1L)).thenReturn(Optional.of(adminRole));
+        }
+
+        /**
+         * The deletion reaches the measure of the cascade: no rows deleted yet in the transaction.
+         */
+        private void deletionStarts() {
+            when(entityManager.createNativeQuery(anyString())).thenReturn(deletedRowsQuery);
+            when(deletedRowsQuery.getResultList()).thenReturn(List.of());
+        }
+
+        private DataIntegrityViolationException foreignKeyViolationOf(String referencingTable) {
+            ServerErrorMessage message = new ServerErrorMessage("SERROR\0C23503\0Mupdate or delete on table role "
+                    + "violates a foreign key\0t" + referencingTable + "\0");
+            return new DataIntegrityViolationException("could not execute statement", new PSQLException(message));
+        }
+
         @Test
-        void deletesById() {
-            roleService.delete(1L);
+        void deletesById_andRecordsItWithoutUser() {
+            deletionStarts();
+
+            service.delete(1L);
 
             verify(roleRepository).deleteById(1L);
+            verify(auditLogService).record(eq(new AuditTarget(EntityType.ROLE, 1L, null, "Administrator", null)),
+                    isNull(), eq(AuditAction.DELETE), eq(AuditSource.API), eq(Map.of()), eq(0));
         }
 
         @Test
         void roleWithUsers_throwsConflictAndDoesNotDelete() {
             when(userRepository.existsByRole_Id(1L)).thenReturn(true);
 
-            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+            ConflictException ex = assertThrows(ConflictException.class, () -> service.delete(1L));
 
             assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
+            assertEquals("ROLE_IN_USE", ex.getCode());
+            assertEquals(List.of("USER"), ex.getBlockingTypes());
             verify(roleRepository, never()).deleteById(anyLong());
+            verifyNoInteractions(auditLogService);
         }
 
         @Test
         void userAssignedConcurrently_constraintViolation_throwsConflict() {
             // No user before the deletion, one assigned meanwhile: the foreign key of users rejects it.
-            when(userRepository.existsByRole_Id(1L)).thenReturn(false, true);
-            doThrow(new DataIntegrityViolationException("fkrlvsrdrcmmbtbgeqr8y4j69p4"))
-                    .when(roleRepository).deleteById(1L);
+            deletionStarts();
+            doThrow(foreignKeyViolationOf("own_user")).when(roleRepository).deleteById(1L);
 
-            CustomException ex = assertThrows(CustomException.class, () -> roleService.delete(1L));
+            ConflictException ex = assertThrows(ConflictException.class, () -> service.delete(1L));
 
             assertEquals(HttpStatus.CONFLICT, ex.getHttpStatus());
             assertEquals("ROLE_IN_USE", ex.getCode());
+            assertEquals(List.of("USER"), ex.getBlockingTypes());
+            verifyNoInteractions(auditLogService);
         }
 
         @Test
-        void otherConstraintViolation_withoutUsers_isNotReportedAsRoleInUse() {
-            // INC-02 (R-10): the 409 of "role with users" comes only from the foreign key of users
+        void otherIntegrityViolation_notForeignKey_isRethrownUnchanged() {
+            // INC-02 (R-10): only a foreign key is reported as a role in use
+            deletionStarts();
             DataIntegrityViolationException other = new DataIntegrityViolationException("another constraint");
             doThrow(other).when(roleRepository).deleteById(1L);
 
             DataIntegrityViolationException ex = assertThrows(DataIntegrityViolationException.class,
-                    () -> roleService.delete(1L));
+                    () -> service.delete(1L));
 
             assertSame(other, ex);
+            verifyNoInteractions(auditLogService);
+        }
+
+        @Test
+        void foreignKeyOfUnknownTable_roleInUseWithoutBlockingTypes() {
+            deletionStarts();
+            doThrow(foreignKeyViolationOf("some_other_table")).when(roleRepository).deleteById(1L);
+
+            ConflictException ex = assertThrows(ConflictException.class, () -> service.delete(1L));
+
+            assertEquals("ROLE_IN_USE", ex.getCode());
+            assertNull(ex.getBlockingTypes(), "a table that is not a known dependent gives no type");
+            verifyNoInteractions(auditLogService);
         }
     }
 

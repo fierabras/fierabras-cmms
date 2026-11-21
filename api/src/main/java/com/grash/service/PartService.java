@@ -12,7 +12,9 @@ import com.grash.exception.CustomException;
 import com.grash.factory.MailServiceFactory;
 import com.grash.mapper.PartMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.webhook.PartField;
@@ -59,6 +61,7 @@ public class PartService {
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final MailServiceFactory mailServiceFactory;
+    private final DeletionService deletionService;
 
     @Value("${frontend.url}")
     private String frontendUrl;
@@ -209,14 +212,19 @@ public class PartService {
     }
 
 
+    /**
+     * Deletes the part and records it in the audit log, in one transaction (P-10).
+     */
     @Transactional
-    public void delete(Part part) {
+    public void delete(Part part, User actor) {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("partId", part.getId());
         Object serializedPart = partMapper.toShowDto(part);
         webhookDispatchService.dispatchWebhook(part.getCompany(), WebhookEvent.PART_DELETE, webhookPayload,
                 "deletePart", serializedPart, null, null, null, null, null);
-        partRepository.deleteById(part.getId());
+        deletionService.delete(new AuditTarget(EntityType.PART, part.getId(), null, part.getName(),
+                        part.getCompany().getId()), actor, AuditSource.API, null,
+                () -> partRepository.deleteById(part.getId()));
     }
 
     public Optional<Part> findById(Long id) {

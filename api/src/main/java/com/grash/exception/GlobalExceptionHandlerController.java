@@ -1,5 +1,6 @@
 package com.grash.exception;
 
+import com.grash.dto.ConflictResponse;
 import com.grash.dto.SuccessResponse;
 import org.springframework.boot.web.error.ErrorAttributeOptions;
 import org.springframework.boot.web.servlet.error.DefaultErrorAttributes;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.context.request.WebRequest;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -39,6 +42,10 @@ public class GlobalExceptionHandlerController {
     @ExceptionHandler(CustomException.class)
     public ResponseEntity<SuccessResponse> handleCustomException(HttpServletResponse res, CustomException ex) {
         ex.printStackTrace();
+        if (ex instanceof ConflictException conflict) {
+            return new ResponseEntity<>(new ConflictResponse(conflict.getMessage(), conflict.getCode(),
+                    conflict.getBlockingTypes()), conflict.getHttpStatus());
+        }
         return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage(), ex.getCode()), ex.getHttpStatus());
     }
 
@@ -67,10 +74,25 @@ public class GlobalExceptionHandlerController {
         return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage()), HttpStatus.BAD_REQUEST);
     }
 
+    /**
+     * Any other failure answers 500, except a foreign key that rejects a deletion (PPB-26): that is a 409
+     * {@code RECORD_IN_USE} without SQL or constraint names. Deletions with a rule answer their own code before
+     * reaching here ({@code DeletionService}).
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<SuccessResponse> handleException(HttpServletResponse res, Exception ex) {
         ex.printStackTrace();
+        if (isDeletion() && ForeignKeyViolation.in(ex).isPresent()) {
+            ConflictException conflict = ConflictException.recordInUse();
+            return new ResponseEntity<>(new ConflictResponse(conflict.getMessage(), conflict.getCode(), null),
+                    HttpStatus.CONFLICT);
+        }
         return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    private static boolean isDeletion() {
+        return RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes
+                && "DELETE".equalsIgnoreCase(attributes.getRequest().getMethod());
     }
 
 }

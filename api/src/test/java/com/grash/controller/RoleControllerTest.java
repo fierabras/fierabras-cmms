@@ -343,7 +343,7 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
 
-            verify(roleService, never()).delete(anyLong());
+            verify(roleService, never()).delete(any(Role.class), any());
         }
 
         @Test
@@ -357,7 +357,7 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
 
-            verify(roleService, never()).delete(anyLong());
+            verify(roleService, never()).delete(any(Role.class), any());
         }
 
         @Test
@@ -519,14 +519,15 @@ class RoleControllerTest extends AbstractControllerTest {
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);
             when(roleService.findById(4L)).thenReturn(Optional.of(companyRole));
-            doNothing().when(roleService).delete(4L);
+            doNothing().when(roleService).delete(companyRole, clientUser);
 
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.message").value("Deleted successfully"));
 
-            verify(roleService).delete(4L);
+            // P-10: the acting user travels with the role, for the audit log
+            verify(roleService).delete(companyRole, clientUser);
         }
     }
 

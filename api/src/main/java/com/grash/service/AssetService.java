@@ -12,10 +12,13 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.AssetMapper;
 import com.grash.model.*;
 import com.grash.model.enums.AssetStatus;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.AssetRepository;
+import com.grash.repository.WorkOrderRepository;
 import com.grash.service.CustomFieldValueService;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +45,10 @@ import static com.grash.utils.Consts.usageBasedLicenseLimits;
 @Service
 @RequiredArgsConstructor
 public class AssetService {
+    public static final String ASSET_IN_USE = "ASSET_IN_USE";
+    private static final String ASSET_IN_USE_MESSAGE = "This asset is used by other records. Archive it instead of "
+            + "deleting it";
+
     private final AssetRepository assetRepository;
     private LocationService locationService;
     private final FileService fileService;
@@ -60,6 +67,8 @@ public class AssetService {
     private WorkOrderService workOrderService;
     private final MessageSource messageSource;
     private final CustomSequenceService customSequenceService;
+    private final DeletionService deletionService;
+    private final WorkOrderRepository workOrderRepository;
     private final LicenseService licenseService;
     private WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
@@ -162,8 +171,18 @@ public class AssetService {
         return assetRepository.findAll();
     }
 
-    public void delete(Long id) {
-        assetRepository.deleteById(id);
+    /**
+     * Deletes the asset and records it in the audit log, in one transaction (P-10). An asset cited by a work order,
+     * in any status, is not deleted: 409 ASSET_IN_USE with the type WORK_ORDER (PPB-02). Its other dependents are
+     * covered by P-14; meanwhile their foreign keys answer ASSET_IN_USE without types.
+     */
+    @Transactional
+    public void delete(Asset asset, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.ASSET, asset.getId(), asset.getCustomId(), asset.getName(),
+                        asset.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(ASSET_IN_USE, ASSET_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.WORK_ORDER, () -> workOrderRepository.existsByAsset_Id(asset.getId())),
+                () -> assetRepository.deleteById(asset.getId()));
     }
 
     public Optional<Asset> findById(Long id) {

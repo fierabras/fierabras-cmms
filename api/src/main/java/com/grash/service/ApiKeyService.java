@@ -9,6 +9,8 @@ import com.grash.mapper.ApiKeyMapper;
 import com.grash.model.ApiKey;
 import com.grash.model.ApiKey_;
 import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PlanFeatures;
 import com.grash.repository.ApiKeyRepository;
@@ -38,6 +40,7 @@ public class ApiKeyService {
     private final ApiKeyRepository apiKeyRepository;
     private final ApiKeyMapper apiKeyMapper;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
 
     public Pair<ApiKey, String> create(@Valid ApiKeyPostDTO apiKeyReq, User user) {
         if (!user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
@@ -66,8 +69,13 @@ public class ApiKeyService {
         return apiKeyRepository.findAll();
     }
 
-    public void delete(Long id) {
-        apiKeyRepository.deleteById(id);
+    /**
+     * Deletes the key and records it in the audit log by its label; the value of the key is never recorded (P-10).
+     */
+    public void delete(ApiKey apiKey, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.API_KEY, apiKey.getId(), null, apiKey.getLabel(),
+                        apiKey.getCompany().getId()), actor, AuditSource.API, null,
+                () -> apiKeyRepository.deleteById(apiKey.getId()));
     }
 
     public Optional<ApiKey> findById(Long id) {

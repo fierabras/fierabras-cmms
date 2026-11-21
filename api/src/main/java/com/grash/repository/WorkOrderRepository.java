@@ -36,6 +36,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
 
     Collection<WorkOrder> findByAsset_Id(Long id);
 
+    boolean existsByAsset_Id(Long id);
+
     Collection<WorkOrder> findByLocation_Id(Long id);
 
     Page<WorkOrder> findByParentPreventiveMaintenance_Id(Long id, Pageable pageable);

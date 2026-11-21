@@ -7,6 +7,9 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.RoleMapper;
 import com.grash.model.Company;
 import com.grash.model.Role;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
@@ -15,10 +18,10 @@ import com.grash.repository.UserRepository;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -32,6 +35,8 @@ public class RoleService {
     public static final String ROLE_DEFAULT = "ROLE_DEFAULT";
     public static final String ROLE_SUPERIOR = "ROLE_SUPERIOR";
     public static final String ROLE_IN_USE = "ROLE_IN_USE";
+    private static final String ROLE_IN_USE_MESSAGE = "This role is assigned to at least one user. Assign another "
+            + "role to those users before deleting it";
     public static final String ROLE_VERSION_STALE = "ROLE_VERSION_STALE";
 
     private final RoleRepository roleRepository;
@@ -39,6 +44,7 @@ public class RoleService {
     private final CompanySettingsService companySettingsService;
     private final LicenseService licenseService;
     private final UserRepository userRepository;
+    private final DeletionService deletionService;
 
     public Role create(Role role) {
         if (role.getCode().equals(RoleCode.USER_CREATED) && !licenseService.hasEntitlement(LicenseEntitlement.CUSTOM_ROLES))
@@ -132,23 +138,26 @@ public class RoleService {
     }
 
     /**
-     * A role assigned to at least one user is never deleted (INC-02, C8). The foreign key own_user.role_id
-     * (ON DELETE RESTRICT) rejects a user assigned between the check and the deletion. Any other integrity violation
-     * is not reported as a role with users (R-10).
+     * A role assigned to at least one user is never deleted (INC-02, C8): 409 ROLE_IN_USE with the type USER. The
+     * foreign key own_user.role_id (ON DELETE RESTRICT) rejects a user assigned between the check and the deletion
+     * with the same answer (P-10). The deletion and its audit record are committed together.
      */
-    public void delete(Long id) {
-        if (userRepository.existsByRole_Id(id)) throw roleInUse();
-        try {
-            roleRepository.deleteById(id);
-        } catch (DataIntegrityViolationException e) {
-            if (userRepository.existsByRole_Id(id)) throw roleInUse();
-            throw e;
-        }
+    @Transactional
+    public void delete(Role role, User actor) {
+        Long companyId = role.getCompanySettings() == null ? null : role.getCompanySettings().getCompany().getId();
+        deletionService.delete(new AuditTarget(EntityType.ROLE, role.getId(), null, role.getName(), companyId),
+                actor, AuditSource.API,
+                DeletionRule.inUse(ROLE_IN_USE, ROLE_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.USER, () -> userRepository.existsByRole_Id(role.getId())),
+                () -> roleRepository.deleteById(role.getId()));
     }
 
-    private static CustomException roleInUse() {
-        return new CustomException("This role is assigned to at least one user. Assign another role to those users " +
-                "before deleting it", HttpStatus.CONFLICT, ROLE_IN_USE);
+    /**
+     * Deletes the role with this id, if it exists, as {@link #delete(Role, User)} without an acting user.
+     */
+    @Transactional
+    public void delete(Long id) {
+        roleRepository.findById(id).ifPresent(role -> delete(role, null));
     }
 
     public Optional<Role> findById(Long id) {
