@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { ReactNode, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Box,
@@ -125,58 +125,72 @@ function AuditLog() {
   const formatDateTime = (value: string) =>
     formatInTimeZone(new Date(value), timeZone, 'dd/MM/yyyy HH:mm');
 
+  // The grid cuts every cell to one line; long values wrap inside their cell instead
+  const wrapped = (content: ReactNode) => (
+    <Box sx={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{content}</Box>
+  );
+
   const columns: CustomDatagridColumn2<AuditLogRecord>[] = [
     {
       header: t('audit_occurred_at'),
       accessorKey: 'occurredAt',
+      size: 150,
       cell: (info) => formatDateTime(info.getValue() as string)
     },
     {
       header: t('audit_user'),
       accessorKey: 'actorName',
+      size: 210,
       cell: (info) => {
         const record = info.row.original;
-        return record.actorName ? (
-          <Box>
-            <Typography variant="body2">{record.actorName}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {record.actorEmail}
-            </Typography>
-          </Box>
-        ) : (
-          t('audit_system_user')
+        return wrapped(
+          record.actorName ? (
+            <>
+              <Typography variant="body2">{record.actorName}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {record.actorEmail}
+              </Typography>
+            </>
+          ) : (
+            t('audit_system_user')
+          )
         );
       }
     },
     {
       header: t('audit_action'),
       accessorKey: 'action',
-      cell: (info) => t(`audit_action_${info.getValue()}`)
+      size: 120,
+      cell: (info) => wrapped(t(`audit_action_${info.getValue()}`))
     },
     {
       header: t('audit_entity_type'),
       accessorKey: 'entityType',
-      cell: (info) => t(`entity_type_${info.getValue()}`)
+      size: 150,
+      cell: (info) => wrapped(t(`entity_type_${info.getValue()}`))
     },
     {
       header: t('audit_entity'),
       accessorKey: 'entityName',
+      size: 190,
       cell: (info) => {
         const record = info.row.original;
-        return (
+        return wrapped(
           [record.entityFolio, record.entityName].filter(Boolean).join(' · ') ||
-          `#${record.entityId}`
+            `#${record.entityId}`
         );
       }
     },
     {
       header: t('audit_source'),
       accessorKey: 'source',
-      cell: (info) => t(`audit_source_${info.getValue()}`)
+      size: 100,
+      cell: (info) => wrapped(t(`audit_source_${info.getValue()}`))
     },
     {
       header: t('audit_summary'),
       accessorKey: 'cascadeRows',
+      size: 260,
       cell: (info) => {
         const record = info.row.original;
         const rows = Object.entries(record.cascadeRows ?? {}).map(
@@ -184,7 +198,9 @@ function AuditLog() {
         );
         if (record.storageObjects)
           rows.push(`${t('audit_storage_objects')}: ${record.storageObjects}`);
-        return rows.length ? rows.join(', ') : '—';
+        return rows.length
+          ? wrapped(rows.map((row) => <div key={row}>{row}</div>))
+          : '—';
       }
     }
   ];
