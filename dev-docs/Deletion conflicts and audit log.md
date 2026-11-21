@@ -74,6 +74,10 @@ method that performs it.
 - `actor` is `null` for a job. `source` is `API`, `IMPORT`, `JOB` or `DEMO_PURGE`.
 - Never put a secret in `folio` or `name`: an API key is recorded by its label, a webhook endpoint by its event,
   never by its URL.
+- A child without a folio of its own (labor, additional cost, task, part consumption, relation and comment of a
+  work order) is recorded with the folio of its parent, so the record tells where it came from:
+  `AuditTarget.childOf(EntityType.TASK, task.getId(), label, task.getWorkOrder())`. Its `name` is its own label,
+  or `null` when it has none.
 - Mail, webhooks, notifications and deletion of stored objects must run only after the commit (`AfterCommit`).
 
 **The cascade summary depends on `track_counts`.** `DeletionService` measures the rows deleted in cascade with the
