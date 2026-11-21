@@ -11,17 +11,23 @@ import com.grash.dto.UserSignupRequest;
 import com.grash.dto.license.LicenseEntitlement;
 import com.grash.dto.license.LicensingState;
 import com.grash.event.CompanyCreatedEvent;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.factory.MailServiceFactory;
 import com.grash.mapper.UserMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditAction;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
 import com.grash.model.enums.RoleType;
 import com.grash.repository.UserRepository;
 import com.grash.repository.VerificationTokenRepository;
+import com.grash.repository.WorkOrderRepository;
 import com.grash.security.CustomUserDetail;
 import com.grash.security.JwtTokenProvider;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import jakarta.mail.MessagingException;
 import jakarta.persistence.EntityManager;
@@ -83,6 +89,24 @@ public class UserService {
     private final LicenseService licenseService;
     private final CacheService cacheService;
     private final IntercomService intercomService;
+    private final AuditLogService auditLogService;
+    private final DeletionService deletionService;
+    private final WorkOrderRepository workOrderRepository;
+
+    /**
+     * P-11: the owner tried to delete or disable their own account (PPB-10, PPB-12).
+     */
+    public static final String OWNER_ACCOUNT = "OWNER_ACCOUNT";
+    private static final String OWNER_ACCOUNT_MESSAGE = "The owner of the company cannot delete or disable their "
+            + "own account";
+    /**
+     * P-11: a disabled user was given as a new reference (PPB-08).
+     */
+    public static final String USER_RETIRED = "USER_RETIRED";
+    private static final String USER_RETIRED_MESSAGE = "This user is disabled and cannot be assigned";
+    public static final String USER_IN_USE = "USER_IN_USE";
+    private static final String USER_IN_USE_MESSAGE = "This user is used by other records. Disable it instead of "
+            + "deleting it";
 
     @Value("${api.host}")
     private String PUBLIC_API_URL;
@@ -249,7 +273,63 @@ public class UserService {
     }
 
     public void delete(String username) {
-        userRepository.deleteByUsername(username);
+        delete(username, null);
+    }
+
+    /**
+     * P-11 (PPB-02, PPB-12): {@code DELETE /auth/{username}} of the super administrator. Deletes the user unless
+     * other records cite them (409 USER_IN_USE with the blocking types) or they own their company (409
+     * OWNER_ACCOUNT); records the deletion. An unknown username changes nothing.
+     */
+    public void delete(String username, User actor) {
+        Optional<User> optionalUser = userRepository.findByUsername(username);
+        if (optionalUser.isEmpty()) return;
+        User user = optionalUser.get();
+        rejectOwnerAccount(user);
+        Long id = user.getId();
+        deletionService.delete(new AuditTarget(EntityType.USER, id, null,
+                        user.getFirstName() + " " + user.getLastName(), user.getCompany().getId()), actor,
+                AuditSource.API,
+                DeletionRule.inUse(USER_IN_USE, USER_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.ADDITIONAL_COST,
+                                () -> deletionService.isCited("additional_cost", "assigned_to_id", id))
+                        .blockedBy(EntityType.ASSET, () -> deletionService.isCited("asset", "primary_user_id", id))
+                        .blockedBy(EntityType.COMMENT, () -> deletionService.isCited("comment", "user_id", id))
+                        .blockedBy(EntityType.LABOR, () -> deletionService.isCited("labor", "assigned_to_id", id))
+                        .blockedBy(EntityType.PREVENTIVE_MAINTENANCE,
+                                () -> deletionService.isCited("preventive_maintenance", "primary_user_id", id))
+                        .blockedBy(EntityType.REQUEST, () -> deletionService.isCited("request", "primary_user_id", id))
+                        .blockedBy(EntityType.TASK_BASE, () -> deletionService.isCited("task_base", "user_id", id))
+                        .blockedBy(EntityType.WORK_ORDER,
+                                () -> deletionService.isCited("work_order", "completed_by_id", id)
+                                        || deletionService.isCited("work_order", "primary_user_id", id)
+                                        || workOrderRepository.isAssignedToClosedOrArchived(id))
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCited("work_order_aud", "completed_by_id", id)
+                                        || deletionService.isCited("work_order_aud", "primary_user_id", id)
+                                        || deletionService.isCited("work_order_history", "user_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_METER_TRIGGER,
+                                () -> deletionService.isCited("work_order_meter_trigger", "primary_user_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "user_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "user_id", id)),
+                () -> userRepository.deleteByUsername(username));
+    }
+
+    /**
+     * P-11 (PPB-08): a disabled user is not accepted as a new reference. {@code requested} are the users a request
+     * sets; those already in {@code previous} are kept even if disabled. Null elements are ignored.
+     */
+    public void rejectRetired(Collection<User> previous, Collection<User> requested) {
+        if (requested == null) return;
+        Set<Long> previousIds = new HashSet<>();
+        if (previous != null) previous.stream().filter(Objects::nonNull).map(User::getId).forEach(previousIds::add);
+        Set<Long> newIds = new HashSet<>();
+        requested.stream().filter(Objects::nonNull).map(User::getId).filter(Objects::nonNull)
+                .filter(userId -> !previousIds.contains(userId)).forEach(newIds::add);
+        if (!newIds.isEmpty() && userRepository.existsByIdInAndEnabledFalse(newIds))
+            throw new ConflictException(USER_RETIRED, USER_RETIRED_MESSAGE);
     }
 
     public Optional<User> findByEmail(String email) {
@@ -320,6 +400,18 @@ public class UserService {
     public void enableUser(String email) {
         User user = userRepository.findByEmailIgnoreCase(email).get();
         enableUser(user);
+    }
+
+    /**
+     * P-11 (PPB-23): {@code PATCH /users/{id}/enable}. Restoring a disabled user is recorded; enabling an enabled
+     * user changes nothing and is not. Activation at signup and invitation use {@link #enableUser(User)} and are
+     * not recorded.
+     */
+    public User restoreUser(User userToEnable, User requester) {
+        boolean wasEnabled = userToEnable.isEnabled();
+        User enabled = enableUser(userToEnable);
+        if (!wasEnabled) record(enabled, requester, AuditAction.RESTORE);
+        return enabled;
     }
 
     public User enableUser(User user) {
@@ -562,6 +654,48 @@ public class UserService {
             throw new CustomException("You cannot manage a user whose role is superior to yours", HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * P-11 (PPB-10, PPB-12): the owner never deletes nor disables their own account.
+     */
+    private static void rejectOwnerAccount(User target) {
+        if (target.isOwnsCompany()) throw new ConflictException(OWNER_ACCOUNT, OWNER_ACCOUNT_MESSAGE);
+    }
+
+    /**
+     * P-11 (PPB-11): "delete my account" of a user who does not own the company disables that user, who keeps
+     * every record; the owner is rejected with 409 OWNER_ACCOUNT and nothing changes.
+     */
+    public void deleteOwnAccount(User currentUser) {
+        User user = userRepository.findById(currentUser.getId())
+                .orElseThrow(() -> new CustomException("User not found", HttpStatus.NOT_FOUND));
+        rejectOwnerAccount(user);
+        retire(user, user);
+    }
+
+    /**
+     * Disables {@code user}, records the retirement if the user was enabled (PPB-23) and, once committed, removes
+     * the user from the cache, so that the previous tokens stop authenticating at once (CA-PPB-032).
+     */
+    private User retire(User user, User actor) {
+        boolean wasEnabled = user.isEnabled();
+        user.setEnabled(false);
+        user.setEnabledInSubscription(false);
+        User saved = save(user);
+        if (wasEnabled) record(saved, actor, AuditAction.RETIRE);
+        evictAfterCommit(saved.getEmail());
+        return saved;
+    }
+
+    private void record(User user, User actor, AuditAction action) {
+        auditLogService.record(new AuditTarget(EntityType.USER, user.getId(), null,
+                        user.getFirstName() + " " + user.getLastName(), user.getCompany().getId()), actor, action,
+                AuditSource.API, Map.of(), 0);
+    }
+
+    private void evictAfterCommit(String email) {
+        AfterCommit.run(() -> cacheService.evictUserFromCache(email));
+    }
+
     public User disableUser(Long id, User requester) {
         Optional<User> optionalUserToDisable = findByIdAndCompany(id, requester.getCompany().getId());
 
@@ -569,9 +703,8 @@ public class UserService {
             User userToDisable = optionalUserToDisable.get();
             if (requester.getRole().getEditOtherPermissions().contains(PermissionEntity.PEOPLE_AND_TEAMS)) {
                 assertCanManage(requester, userToDisable);
-                userToDisable.setEnabled(false);
-                userToDisable.setEnabledInSubscription(false);
-                return save(userToDisable);
+                rejectOwnerAccount(userToDisable);
+                return retire(userToDisable, requester);
             } else {
                 throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
             }
@@ -587,10 +720,16 @@ public class UserService {
             User userToSoftDelete = optionalUserToSoftDelete.get();
             if (requester.getId().equals(id) || requester.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
                 assertCanManage(requester, userToSoftDelete);
+                rejectOwnerAccount(userToSoftDelete);
+                String previousEmail = userToSoftDelete.getEmail();
                 userToSoftDelete.setEnabled(false);
                 userToSoftDelete.setEnabledInSubscription(false);
                 userToSoftDelete.setEmail(userToSoftDelete.getEmail().concat("_".concat(id.toString())));
-                return save(userToSoftDelete);
+                User saved = save(userToSoftDelete);
+                // P-11: the email changes, so the retirement is recorded even if the user was already disabled
+                record(saved, requester, AuditAction.RETIRE);
+                evictAfterCommit(previousEmail);
+                return saved;
             } else {
                 throw new CustomException("You don't have permission", HttpStatus.NOT_ACCEPTABLE);
             }

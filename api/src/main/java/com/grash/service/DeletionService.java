@@ -62,6 +62,15 @@ public class DeletionService {
                 cascadeRows.getOrDefault(FILE_TABLE, 0L).intValue());
     }
 
+    /**
+     * Whether a row of {@code table} cites {@code id} in {@code column}: the usual check of a {@link DeletionRule}.
+     * {@code table} and {@code column} are constants of the caller, never input.
+     */
+    public boolean isCited(String table, String column, Long id) {
+        return (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM " + table + " WHERE "
+                + column + " = ?1)").setParameter(1, id).getSingleResult();
+    }
+
     private Map<String, Long> deletedRows() {
         @SuppressWarnings("unchecked")
         List<Object[]> rows = entityManager.createNativeQuery(DELETED_ROWS).getResultList();

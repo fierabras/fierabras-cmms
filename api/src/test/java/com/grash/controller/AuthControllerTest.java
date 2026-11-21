@@ -1,6 +1,7 @@
 package com.grash.controller;
 
 import com.grash.dto.*;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.UserMapper;
 import com.grash.model.*;
@@ -471,8 +472,10 @@ class AuthControllerTest extends AbstractControllerTest {
                     .andExpect(status().isForbidden());
         }
 
+        // P-11 (D-P11-9): the owner's account is no longer deleted with the company; the service rejects it with
+        // 409 OWNER_ACCOUNT (end to end in AccountsIntegrationTest, CA-PPB-029)
         @Test
-        void deleteAccount_ownsCompany_deletesCompany() throws Exception {
+        void deleteAccount_ownerRejectedByService_409OwnerAccount_companyNotDeleted() throws Exception {
             Company company = new Company();
             company.setId(1L);
             clientUser.setOwnsCompany(true);
@@ -480,31 +483,30 @@ class AuthControllerTest extends AbstractControllerTest {
 
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);
-            doNothing().when(companyService).delete(1L);
+            doThrow(new ConflictException(UserService.OWNER_ACCOUNT, "owner")).when(userService)
+                    .deleteOwnAccount(clientUser);
 
             mockMvc.perform(delete("/auth"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.success").value(true))
-                    .andExpect(jsonPath("$.message").value("Account deleted successfully"));
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.success").value(false))
+                    .andExpect(jsonPath("$.code").value("OWNER_ACCOUNT"));
 
-            verify(companyService).delete(1L);
-            verify(userRepository, never()).delete((User) any());
+            verify(companyService, never()).delete(any());
         }
 
         @Test
-        void deleteAccount_notOwnsCompany_deletesUser() throws Exception {
+        void deleteAccount_notOwnsCompany_delegatesToUserService() throws Exception {
             setCurrentUser(clientUser);
             when(userService.whoami(any())).thenReturn(clientUser);
             clientUser.setOwnsCompany(false);
-            doNothing().when(userRepository).delete(clientUser);
 
             mockMvc.perform(delete("/auth"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.message").value("Account deleted successfully"));
 
-            verify(companyService, never()).delete(any());
-            verify(userRepository).delete((User) clientUser);
+            verify(userService).deleteOwnAccount(clientUser);
+            verify(userRepository, never()).delete((User) any());
         }
     }
 }
