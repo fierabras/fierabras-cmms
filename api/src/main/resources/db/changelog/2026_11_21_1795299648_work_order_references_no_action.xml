@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-12 (PPB-06, PPB-21, PPB-22): a work order is never deleted by the application, so the records that cite
+         it are protected references. Each foreign key gets its target rule and an index on its child column. NO
+         ACTION, not RESTRICT, keeps the deletion of a whole company and the demo data purge working: the rows go in
+         the same statement. part_transaction.work_order_id is left for P-16. Earlier changesets are left
+         untouched. -->
+
+    <changeSet id="2026_11_21_1795299648_relation_child_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="relation" constraintName="fkmn3265pc5poqrn82h1j75if3p"/>
+        <addForeignKeyConstraint baseColumnNames="child_id" baseTableName="relation"
+                                 constraintName="fkmn3265pc5poqrn82h1j75if3p" referencedColumnNames="id"
+                                 referencedTableName="work_order" onDelete="NO ACTION"/>
+        <createIndex tableName="relation" indexName="idx_relation_child_id">
+            <column name="child_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="relation" indexName="idx_relation_child_id"/>
+            <dropForeignKeyConstraint baseTableName="relation" constraintName="fkmn3265pc5poqrn82h1j75if3p"/>
+            <addForeignKeyConstraint baseColumnNames="child_id" baseTableName="relation"
+                                     constraintName="fkmn3265pc5poqrn82h1j75if3p" referencedColumnNames="id"
+                                     referencedTableName="work_order" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795299648_request_work_order_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fkoo6uxlauwwyxfohx3lver2t0x"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="request"
+                                 constraintName="fkoo6uxlauwwyxfohx3lver2t0x" referencedColumnNames="id"
+                                 referencedTableName="work_order" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_work_order_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fkoo6uxlauwwyxfohx3lver2t0x"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="request"
+                                     constraintName="fkoo6uxlauwwyxfohx3lver2t0x" referencedColumnNames="id"
+                                     referencedTableName="work_order" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795299648_work_order_history_work_order_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_history" constraintName="fkqxdc4ix6tovtwyr0on2f59hh4"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="work_order_history"
+                                 constraintName="fkqxdc4ix6tovtwyr0on2f59hh4" referencedColumnNames="id"
+                                 referencedTableName="work_order" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_history" indexName="idx_work_order_history_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_history" indexName="idx_work_order_history_work_order_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_history" constraintName="fkqxdc4ix6tovtwyr0on2f59hh4"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="work_order_history"
+                                     constraintName="fkqxdc4ix6tovtwyr0on2f59hh4" referencedColumnNames="id"
+                                     referencedTableName="work_order" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

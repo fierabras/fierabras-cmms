@@ -247,4 +247,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_21_1795293171_configuration_references.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_21_1795299648_work_order_references_no_action.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>
