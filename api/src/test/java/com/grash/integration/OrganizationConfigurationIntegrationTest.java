@@ -304,8 +304,10 @@ class OrganizationConfigurationIntegrationTest extends AbstractIntegrationTest {
             customer.setCompany(data.o2().company());
             customer.setBillingCurrency(currency);
             Customer savedCustomer = customerRepository.saveAndFlush(customer);
+            String token = superAdminToken();
+            long records = count("SELECT count(*) FROM audit_log");
 
-            Response response = api.call(delete("/currencies/" + currency.getId()), superAdminToken());
+            Response response = api.call(delete("/currencies/" + currency.getId()), token);
 
             assertEquals(List.of("CUSTOMER", "GENERAL_PREFERENCES"), assertInUse(response, "CURRENCY_IN_USE"));
             assertEquals(currency.getId(), jdbcTemplate.queryForObject("SELECT currency_id FROM general_preferences "
@@ -313,8 +315,7 @@ class OrganizationConfigurationIntegrationTest extends AbstractIntegrationTest {
             assertEquals(currency.getId(), jdbcTemplate.queryForObject("SELECT billing_currency_id FROM customer "
                     + "WHERE id = ?", Long.class, savedCustomer.getId()));
             assertTrue(currencyRepository.existsById(currency.getId()));
-            assertEquals(0, count("SELECT count(*) FROM audit_log WHERE entity_type = 'CURRENCY' AND entity_id = ?",
-                    currency.getId()));
+            assertEquals(records, count("SELECT count(*) FROM audit_log"), "a rejection leaves no audit record");
         }
 
         @Test

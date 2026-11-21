@@ -91,7 +91,12 @@ class AccountCharacterizationIntegrationTest extends AbstractIntegrationTest {
     void cleanUp() {
         createdUsers.forEach(id -> jdbcTemplate.update("DELETE FROM own_user WHERE id = ?", id));
         createdUsers.clear();
-        createdCurrencies.forEach(id -> jdbcTemplate.update("DELETE FROM currency WHERE id = ?", id));
+        createdCurrencies.forEach(id -> {
+            // P-11 records the deletion of a currency without organization (D-14)
+            jdbcTemplate.update("DELETE FROM audit_log WHERE company_id IS NULL AND entity_type = 'CURRENCY' "
+                    + "AND entity_id = ?", id);
+            jdbcTemplate.update("DELETE FROM currency WHERE id = ?", id);
+        });
         createdCurrencies.clear();
         created.forEach(organizations::delete);
         created.clear();
