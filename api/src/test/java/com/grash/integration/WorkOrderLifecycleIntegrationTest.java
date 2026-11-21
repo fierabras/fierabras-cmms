@@ -739,6 +739,95 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // Cells of the design matrix not covered by the criteria above
+    // =====================================================================================================
+
+    @Nested
+    class MatrixCells {
+
+        @Test
+        void archiveClosed_200_recordsRetire_associationsKept() {
+            CommonData data = data();
+            User a = data.o1().admin();
+            Fixture f = workOrders.create(a, data.o1().technician(), Status.COMPLETE, false);
+            String ta = api.login(a);
+            Map<String, Object> before = snapshot(f.id(), f.part());
+            before.remove("work_order");
+            before.remove("revisions");
+
+            ObjectNode shown = workOrders.shown(f.id(), ta);
+            shown.put("archived", true);
+            Response response = call(patch("/work-orders/" + f.id()), ta, shown);
+
+            assertEquals(200, response.status(), response.toString());
+            assertTrue(reload(f.id()).isArchived());
+            assertEquals(Status.COMPLETE, reload(f.id()).getStatus());
+            Map<String, Object> after = snapshot(f.id(), f.part());
+            after.remove("work_order");
+            after.remove("revisions");
+            assertEquals(before, after);
+            assertEquals(List.of("RETIRE"), audit(data).stream().map(row -> row.get("action")).toList());
+        }
+
+        @Test
+        void archivedFalseOnActive_isAnOrdinaryEdit_noRecord() {
+            CommonData data = data();
+            User a = data.o1().admin();
+            Fixture f = workOrders.create(a, data.o1().technician(), Status.OPEN, false);
+            String ta = api.login(a);
+
+            ObjectNode edit = workOrders.shown(f.id(), ta);
+            edit.put("archived", false);
+            edit.put("title", "edited");
+            Response response = call(patch("/work-orders/" + f.id()), ta, edit);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("edited", reload(f.id()).getTitle());
+            assertFalse(reload(f.id()).isArchived());
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void archived_replacementsWithoutDifference_200_noChanges() {
+            CommonData data = data();
+            User a = data.o1().admin();
+            Fixture f = workOrders.create(a, data.o1().technician(), Status.IN_PROGRESS, true);
+            String ta = api.login(a);
+            Map<String, Object> before = snapshot(f.id(), f.part());
+            String label = jdbc.queryForObject("SELECT tb.label FROM task t JOIN task_base tb ON tb.id = "
+                    + "t.task_base_id WHERE t.id = ?", String.class, f.task());
+
+            Response tasks = call(patch("/tasks/work-order/" + f.id()), ta, List.of(Map.of("label", label,
+                    "taskType", "SUBTASK", "options", List.of())));
+            Response parts = call(patch("/part-quantities/work-order/" + f.id()), ta, List.of(f.part()));
+
+            assertEquals(200, tasks.status(), tasks.toString());
+            assertEquals(200, parts.status(), parts.toString());
+            assertEquals(before, snapshot(f.id(), f.part()));
+        }
+
+        @Test
+        void open_partQuantityCreated_andRelationChanged_200() {
+            CommonData data = data();
+            User a = data.o1().admin();
+            Fixture f = workOrders.create(a, data.o1().technician(), Status.OPEN, false);
+            String ta = api.login(a);
+            WorkOrder other = workOrders.workOrder(data.o1().company());
+
+            Response created = call(post("/part-quantities"), ta, Map.of("workOrder", Map.of("id", f.id()),
+                    "part", Map.of("id", f.part()), "quantity", 1));
+            Response changed = call(patch("/relations/" + f.relation()), ta, Map.of("parent",
+                    Map.of("id", f.id()), "child", Map.of("id", other.getId())));
+
+            assertEquals(200, created.status(), created.toString());
+            assertEquals(200, changed.status(), changed.toString());
+            assertEquals(2, count("part_quantity", "work_order_id", f.id()));
+            assertEquals(other.getId(), jdbc.queryForObject("SELECT child_id FROM relation WHERE id = ?", Long.class,
+                    f.relation()));
+        }
+    }
+
+    // =====================================================================================================
     // E-10 · Foreign keys
     // =====================================================================================================
 
