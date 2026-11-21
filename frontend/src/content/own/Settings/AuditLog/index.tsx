@@ -140,7 +140,7 @@ function AuditLog() {
         return record.actorName ? (
           <Box>
             <Typography variant="body2">{record.actorName}</Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="body2" color="text.secondary">
               {record.actorEmail}
             </Typography>
           </Box>
@@ -207,14 +207,18 @@ function AuditLog() {
               onChange={(value: Date | null) =>
                 setForm({ ...form, from: value })
               }
-              renderInput={(params) => <TextField {...params} />}
+              renderInput={(params) => (
+                <TextField {...params} sx={{ minWidth: 170 }} />
+              )}
             />
             <DatePicker
               label={t('audit_to')}
               inputFormat="dd/MM/yyyy"
               value={form.to}
               onChange={(value: Date | null) => setForm({ ...form, to: value })}
-              renderInput={(params) => <TextField {...params} />}
+              renderInput={(params) => (
+                <TextField {...params} sx={{ minWidth: 170 }} />
+              )}
             />
             <TextField
               select
