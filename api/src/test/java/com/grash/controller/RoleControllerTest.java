@@ -343,7 +343,7 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
 
-            verify(roleService, never()).delete(anyLong());
+            verify(roleService, never()).delete(any(Role.class), any());
         }
 
         @Test
@@ -357,7 +357,7 @@ class RoleControllerTest extends AbstractControllerTest {
             mockMvc.perform(delete("/roles/4"))
                     .andExpect(status().isForbidden());
 
-            verify(roleService, never()).delete(anyLong());
+            verify(roleService, never()).delete(any(Role.class), any());
         }
 
         @Test
