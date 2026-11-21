@@ -1,12 +1,9 @@
-name: Test, Push to DockerHub & Deploy to Koyeb
+name: CI - Backend tests and frontend build
 
 on:
   push:
     branches:
-      - main
       - fierabras-main
-    tags:
-      - 'v*'
   pull_request:
     branches:
       - fierabras-main
@@ -15,54 +12,39 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.out.outputs.backend }}
-      frontend: ${{ steps.out.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Is tag push
-        id: ref
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "IS_TAG=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "IS_TAG=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Filter changed paths
         id: filter
-        if: ${{ steps.ref.outputs.IS_TAG == 'false' }}
         uses: dorny/paths-filter@v3
         with:
           base: ${{ github.ref }}
           filters: |
             backend:
               - 'api/**'
+              - '.github/workflows/**'
             frontend:
               - 'frontend/**'
-
-      - name: Compute effective targets
-        id: out
-        run: |
-          if [[ "${{ steps.ref.outputs.IS_TAG }}" == "true" ]]; then
-            echo "backend=true" >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
-            echo "frontend=${{ steps.filter.outputs.frontend }}" >> "$GITHUB_OUTPUT"
-          fi
+              - '.github/workflows/**'
 
   test:
     needs: detect-changes
     timeout-minutes: 25
-    if: ${{ vars.SKIP_TESTS != 'true' && needs.detect-changes.outputs.backend == 'true' }}
+    if: ${{ needs.detect-changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     env:
       SPRING_PROFILES_ACTIVE: ${{ vars.SPRING_PROFILES_ACTIVE }}
@@ -84,115 +66,17 @@ jobs:
           java-version: 17
           distribution: temurin
 
+      # No -DargLine: it would replace the surefire argLine in api/pom.xml (UTC and --add-opens).
+      # The integration tests start PostgreSQL with Testcontainers, using the Docker engine of the runner.
       - name: Run tests
-        run: mvn test -DargLine="--add-opens java.base/java.lang=ALL-UNNAMED"
+        run: mvn -B test
         working-directory: ./api
 
-  push-backend-docker:
-    needs: [detect-changes, test]
-    if: ${{ always() && needs.detect-changes.outputs.backend == 'true' && (vars.SKIP_TESTS == 'true' || needs.test.result == 'success' || needs.test.result == 'skipped') }}
+  build-frontend:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Determine Docker tag
-        id: docker-tag
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="latest"
-          fi
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./api
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            intelloop/atlas-cmms-backend:${{ steps.docker-tag.outputs.TAG }}
-
-  deploy-koyeb:
-    needs: [detect-changes, test]
-    if: ${{ always() && needs.detect-changes.outputs.backend == 'true' && (vars.SKIP_TESTS == 'true' || needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install and configure the Koyeb CLI
-        uses: koyeb-community/koyeb-actions@v2
-        with:
-          api_token: "${{ secrets.KOYEB_API_TOKEN }}"
-
-      - name: Deploy to Koyeb
-        uses: koyeb/action-git-deploy@v1
-        with:
-          app-name: soviet-jennette
-          service-name: atlas-api
-          service-instance-type: small
-          service-env: "PORT=8080"
-          service-ports: "8080:http"
-          service-routes: "/:8080"
-          service-checks: "8080:http:/health-check"
-          service-regions: 'par'
-          git-workdir: ./api
-          git-builder: docker
-
-  push-frontend-docker:
-    needs: [detect-changes, test]
-    if: ${{ always() && needs.detect-changes.outputs.frontend == 'true' && (vars.SKIP_TESTS == 'true' || needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    env:
-      FRONTEND_IMAGE: intelloop/atlas-cmms-frontend
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Determine Docker tag
-        id: docker-tag
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="latest"
-          fi
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.FRONTEND_IMAGE }}:${{ steps.docker-tag.outputs.TAG }}
-
-  deploy-netlify:
-    needs: [detect-changes, test]
-    if: ${{ always() && needs.detect-changes.outputs.frontend == 'true' && (vars.SKIP_TESTS == 'true' || needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -213,18 +97,3 @@ jobs:
         working-directory: ./frontend
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Deploy to Netlify
-        uses: nwtgck/actions-netlify@v2
-        with:
-          publish-dir: ./frontend/build
-          production-branch: main
-          deploy-message: ${{ github.event.head_commit.message }}
-          enable-pull-request-comment: true
-          enable-commit-comment: true
-          overwrites-pull-request-comment: true
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-          NODE_OPTIONS: --max_old_space_size=4096
-        timeout-minutes: 20
