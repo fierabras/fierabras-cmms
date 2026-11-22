@@ -482,6 +482,173 @@ class CategoryCustomerDeletionIntegrationTest extends AbstractIntegrationTest {
     }
 
     // =====================================================================================================
+    // E-3 · Customer (CA-PPB-109, CA-PPB-110)
+    // =====================================================================================================
+
+    @Nested
+    class CustomerInUse {
+
+        @Test
+        void ca109_associatedWithCompleteWorkOrder_409WithWorkOrder_associationKept_noRecord() {
+            CommonData data = data();
+            Customer customer = customer(data);
+            WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            associate("work_order_customers", "work_order_id", closed.getId(), "customers_id", customer);
+            Map<String, Object> before = TestWorkOrders.rows(jdbc, closed.getId(), null);
+            List<Map<String, Object>> customerBefore = row("customer", customer.getId());
+
+            Response response = deleteCustomer(data, customer);
+
+            assertEquals(List.of("WORK_ORDER"), assertInUse(response, CUSTOMER_IN_USE, CUSTOMER_MESSAGE));
+            assertEquals(before, TestWorkOrders.rows(jdbc, closed.getId(), null), "the association exists");
+            assertEquals(customerBefore, row("customer", customer.getId()));
+            assertTrue(audit(data).isEmpty());
+            assertNoSideEffects();
+        }
+
+        @Test
+        void associatedWithArchivedOpenWorkOrder_409WithWorkOrder() {
+            CommonData data = data();
+            Customer customer = customer(data);
+            WorkOrder archived = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            workOrders.moveTo(archived.getId(), Status.OPEN, true);
+            associate("work_order_customers", "work_order_id", archived.getId(), "customers_id", customer);
+
+            assertEquals(List.of("WORK_ORDER"), assertInUse(deleteCustomer(data, customer), CUSTOMER_IN_USE,
+                    CUSTOMER_MESSAGE));
+            assertEquals(1, count("SELECT count(*) FROM work_order_customers WHERE customers_id = ?",
+                    customer.getId()));
+        }
+
+        @Test
+        void ca110_associatedOnlyWithOpenWorkOrder_200_workOrderWithoutTheCustomer_recorded() {
+            CommonData data = data();
+            Customer customer = customer(data);
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            associate("work_order_customers", "work_order_id", open.getId(), "customers_id", customer);
+
+            Response response = deleteCustomer(data, customer);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(DELETED_BODY, response.body());
+            assertFalse(customerRepository.existsById(customer.getId()));
+            assertEquals(0, count("SELECT count(*) FROM work_order_customers WHERE work_order_id = ?",
+                    open.getId()));
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", open.getId()));
+            assertEquals(List.of("DELETE CUSTOMER " + customer.getId()), audit(data));
+            assertTrue(cascade(data).contains("\"work_order_customers\": 1"), cascade(data));
+        }
+
+        @Test
+        void approvedAndRejectedRequests_409WithRequest_pendingRequest_200() {
+            CommonData data = data();
+            Customer approvedCustomer = customer(data);
+            Customer rejectedCustomer = customer(data);
+            Customer pendingCustomer = customer(data);
+            WorkOrder approval = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Request approved = request(data);
+            jdbc.update("UPDATE request SET work_order_id = ? WHERE id = ?", approval.getId(), approved.getId());
+            Request rejected = request(data);
+            jdbc.update("UPDATE request SET cancelled = true WHERE id = ?", rejected.getId());
+            Request pending = request(data);
+            associate("request_customers", "request_id", approved.getId(), "customers_id", approvedCustomer);
+            associate("request_customers", "request_id", rejected.getId(), "customers_id", rejectedCustomer);
+            associate("request_customers", "request_id", pending.getId(), "customers_id", pendingCustomer);
+
+            assertEquals(List.of("REQUEST"), assertInUse(deleteCustomer(data, approvedCustomer), CUSTOMER_IN_USE,
+                    CUSTOMER_MESSAGE));
+            assertEquals(List.of("REQUEST"), assertInUse(deleteCustomer(data, rejectedCustomer), CUSTOMER_IN_USE,
+                    CUSTOMER_MESSAGE));
+            assertEquals(200, deleteCustomer(data, pendingCustomer).status());
+            assertEquals(2, count("SELECT count(*) FROM request_customers WHERE request_id IN (?, ?)",
+                    approved.getId(), rejected.getId()));
+            assertEquals(0, count("SELECT count(*) FROM request_customers WHERE request_id = ?", pending.getId()));
+        }
+
+        private Request request(CommonData data) {
+            Request request = new Request();
+            request.setTitle(TestRecords.unique("P-12b request"));
+            request.setCompany(data.o1().company());
+            return requestRepository.saveAndFlush(request);
+        }
+
+        @Test
+        void archivedAsset_409WithAsset_activeAsset_200() {
+            CommonData data = data();
+            Customer archivedCustomer = customer(data);
+            Customer activeCustomer = customer(data);
+            Asset archived = records.asset(data.o1().company());
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", archived.getId());
+            Asset active = records.asset(data.o1().company());
+            associate("t_asset_customer_associations", "id_asset", archived.getId(), "id_customer",
+                    archivedCustomer);
+            associate("t_asset_customer_associations", "id_asset", active.getId(), "id_customer", activeCustomer);
+
+            assertEquals(List.of("ASSET"), assertInUse(deleteCustomer(data, archivedCustomer), CUSTOMER_IN_USE,
+                    CUSTOMER_MESSAGE));
+            assertEquals(200, deleteCustomer(data, activeCustomer).status());
+            assertEquals(1, count("SELECT count(*) FROM t_asset_customer_associations WHERE id_customer = ?",
+                    archivedCustomer.getId()));
+        }
+
+        @Test
+        void disabledPreventiveMaintenance_409WithPreventiveMaintenance_enabled_200() {
+            CommonData data = data();
+            Customer disabledCustomer = customer(data);
+            Customer enabledCustomer = customer(data);
+            PreventiveMaintenance disabled = preventiveMaintenance(data);
+            jdbc.update("UPDATE schedule SET disabled = true WHERE id = ?", disabled.getSchedule().getId());
+            PreventiveMaintenance enabled = preventiveMaintenance(data);
+            associate("preventive_maintenance_customers", "preventive_maintenance_id", disabled.getId(),
+                    "customers_id", disabledCustomer);
+            associate("preventive_maintenance_customers", "preventive_maintenance_id", enabled.getId(),
+                    "customers_id", enabledCustomer);
+
+            assertEquals(List.of("PREVENTIVE_MAINTENANCE"), assertInUse(deleteCustomer(data, disabledCustomer),
+                    CUSTOMER_IN_USE, CUSTOMER_MESSAGE));
+            assertEquals(200, deleteCustomer(data, enabledCustomer).status());
+        }
+
+        private PreventiveMaintenance preventiveMaintenance(CommonData data) {
+            PreventiveMaintenance preventiveMaintenance = new PreventiveMaintenance();
+            preventiveMaintenance.setName(TestRecords.unique("P-12b PM"));
+            preventiveMaintenance.setTitle(preventiveMaintenance.getName());
+            preventiveMaintenance.setCompany(data.o1().company());
+            return preventiveMaintenanceRepository.saveAndFlush(preventiveMaintenance);
+        }
+
+        @Test
+        void locationAndPart_neverBlock_200_associationsRemoved() {
+            CommonData data = data();
+            Customer customer = customer(data);
+            Location location = records.location(data.o1().company());
+            Part part = records.part(data.o1().company(), data.o1().admin());
+            associate("t_location_customer_associations", "id_location", location.getId(), "id_customer", customer);
+            associate("t_part_customer_associations", "id_part", part.getId(), "id_customer", customer);
+
+            assertEquals(200, deleteCustomer(data, customer).status());
+            assertEquals(0, count("SELECT count(*) FROM t_location_customer_associations WHERE id_location = ?",
+                    location.getId()));
+            assertEquals(0, count("SELECT count(*) FROM t_part_customer_associations WHERE id_part = ?",
+                    part.getId()));
+        }
+
+        @Test
+        void closedWorkOrderAndArchivedAsset_409WithBothTypes() {
+            CommonData data = data();
+            Customer customer = customer(data);
+            WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            Asset archived = records.asset(data.o1().company());
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", archived.getId());
+            associate("work_order_customers", "work_order_id", closed.getId(), "customers_id", customer);
+            associate("t_asset_customer_associations", "id_asset", archived.getId(), "id_customer", customer);
+
+            assertEquals(List.of("ASSET", "WORK_ORDER"), assertInUse(deleteCustomer(data, customer),
+                    CUSTOMER_IN_USE, CUSTOMER_MESSAGE).stream().sorted().toList());
+        }
+    }
+
+    // =====================================================================================================
     // D-P12b-1 · Demo purge with the protected keys
     // =====================================================================================================
 

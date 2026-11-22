@@ -309,7 +309,7 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
     class Customers {
 
         @Test
-        void associatedWithClosedWorkOrder_200_associationRemoved() {
+        void associatedWithClosedWorkOrder_409_associationKept() {
             CommonData data = data();
             Customer customer = customer(data);
             WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
@@ -318,9 +318,10 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
 
             Response response = api.call(delete("/customers/" + customer.getId()), api.login(data.o1().admin()));
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(DELETED_BODY, response.body());
-            assertEquals(0, count("SELECT count(*) FROM work_order_customers WHERE work_order_id = ?",
+            // P-12b: before, 200 with the association removed
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("CUSTOMER_IN_USE"), response.body());
+            assertEquals(1, count("SELECT count(*) FROM work_order_customers WHERE work_order_id = ?",
                     closed.getId()));
             assertEquals(0, auditRecords(data));
         }
