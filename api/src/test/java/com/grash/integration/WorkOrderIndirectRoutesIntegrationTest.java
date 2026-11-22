@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 
 /**
@@ -287,6 +288,71 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
             assertEquals(200, response.status(), response.toString());
             assertEquals(data.o1().technician().getId(), jdbc.queryForObject(
                     "SELECT primary_user_id FROM work_order WHERE id = ?", Long.class, open.getId()));
+        }
+    }
+
+    // =====================================================================================================
+    // CA-P12C-02: a replacement without difference writes nothing (H1-04)
+    // =====================================================================================================
+
+    @Nested
+    class IdenticalReplacements {
+
+        /**
+         * Sends back the parts and the tasks the work order already has, as the web app does when it saves.
+         */
+        private void assertSameReplacementsChangeNothing(CommonData data, Long id) {
+            String admin = api.login(data.o1().admin());
+            List<Long> parts = jdbc.queryForList("SELECT part_id FROM part_quantity WHERE work_order_id = ?",
+                    Long.class, id);
+            List<Map<String, Object>> tasks = new ArrayList<>();
+            json(api.call(get("/tasks/work-order/" + id), admin)).forEach(task -> tasks.add(Map.of(
+                    "label", task.get("taskBase").get("label").asText(),
+                    "taskType", task.get("taskBase").get("taskType").asText(),
+                    "options", List.of())));
+            jdbc.update("UPDATE work_order SET first_time_to_react = NULL WHERE id = ?", id);
+            Map<String, Object> before = rows(id);
+
+            Response partsResponse = workOrders.call(patch("/part-quantities/work-order/" + id), admin, parts);
+            Response tasksResponse = workOrders.call(patch("/tasks/work-order/" + id), admin, tasks);
+
+            assertEquals(200, partsResponse.status(), partsResponse.toString());
+            assertEquals(200, tasksResponse.status(), tasksResponse.toString());
+            assertEquals(before, rows(id));
+        }
+
+        @Test
+        void closedAndArchived_withChildren_200_rowsIdentical() {
+            CommonData data = data();
+            for (boolean archived : List.of(false, true)) {
+                Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(),
+                        archived ? Status.OPEN : Status.COMPLETE, archived);
+                assertSameReplacementsChangeNothing(data, f.id());
+            }
+        }
+
+        @Test
+        void closedAndArchived_withoutChildren_200_rowsIdentical() {
+            CommonData data = data();
+            for (boolean archived : List.of(false, true)) {
+                WorkOrder workOrder = records.workOrder(data.o1().company(), null,
+                        archived ? Status.OPEN : Status.COMPLETE, false);
+                workOrders.moveTo(workOrder.getId(), workOrder.getStatus(), archived);
+                assertSameReplacementsChangeNothing(data, workOrder.getId());
+            }
+        }
+
+        @Test
+        void open_identicalReplacement_stillRecordsTheFirstReaction() {
+            CommonData data = data();
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            Response response = workOrders.call(patch("/part-quantities/work-order/" + open.getId()),
+                    api.login(data.o1().admin()), List.of());
+
+            assertEquals(200, response.status(), response.toString());
+            assertNotNull(jdbc.queryForObject("SELECT first_time_to_react FROM work_order WHERE id = ?",
+                    Timestamp.class, open.getId()));
         }
     }
 }

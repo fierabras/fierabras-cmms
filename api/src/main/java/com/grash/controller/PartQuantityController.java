@@ -86,7 +86,9 @@ public class PartQuantityController {
                 // removed, and before anything is written
                 if (!partQuantityMappedPartIds.containsAll(parts) || !parts.containsAll(partQuantityMappedPartIds))
                     WorkOrderStateGuard.check(savedWorkOrder, WorkOrderStateGuard.Change.CHILD);
-                if (savedWorkOrder.getFirstTimeToReact() == null) {
+                // P-12c (E-2, H1-04): without difference, a closed or archived work order is not written either
+                if (savedWorkOrder.getFirstTimeToReact() == null
+                        && WorkOrderStateGuard.admits(savedWorkOrder, WorkOrderStateGuard.Change.CHILD)) {
                     savedWorkOrder.setFirstTimeToReact(new Date());
                     workOrderService.save(savedWorkOrder);
                 }
