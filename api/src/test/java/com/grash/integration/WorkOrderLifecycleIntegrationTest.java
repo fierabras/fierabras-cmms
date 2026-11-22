@@ -317,6 +317,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
             workOrders.moveTo(workOrder.getId(), Status.OPEN, true);
             String ta = api.login(a);
             Map<String, Object> before = jdbc.queryForMap("SELECT * FROM work_order WHERE id = ?", workOrder.getId());
+            long records = auditRecords(data);
 
             Response read = api.call(get("/work-orders/" + workOrder.getId()), ta);
             ObjectNode edit = workOrders.shown(workOrder.getId(), ta);
@@ -327,6 +328,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
             assertEquals(asset.getId(), json(read).get("asset").get("id").asLong());
             assertConflict(change, RETIRED);
             assertEquals(before, jdbc.queryForMap("SELECT * FROM work_order WHERE id = ?", workOrder.getId()));
+            assertEquals(records, auditRecords(data), "a rejection leaves no record (P-12c)");
         }
 
         @Test
@@ -522,6 +524,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
             assertConflict(call(patch("/work-orders/" + f.id()), ta, withoutAssigned), CLOSED);
             assertConflict(call(patch("/work-orders/" + f.id()), ta, withoutCustomers), CLOSED);
             assertEquals(before, snapshot(f.id(), f.part()));
+            assertEquals(0, auditRecords(data), "a rejection leaves no record (P-12c)");
         }
 
         @Test
@@ -597,6 +600,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
             assertConflict(api.call(delete("/comments/" + f.comment()), tt), CLOSED);
 
             assertEquals(comment, jdbc.queryForMap("SELECT * FROM comment WHERE id = ?", f.comment()));
+            assertEquals(0, auditRecords(data), "a rejection leaves no record (P-12c)");
         }
 
         @Test
@@ -608,6 +612,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
             assertConflict(api.call(delete("/relations/" + f.relation()), api.login(a)), CLOSED);
 
             assertEquals(1, count("relation", "id", f.relation()));
+            assertEquals(0, auditRecords(data), "a rejection leaves no record (P-12c)");
         }
 
         @Test
