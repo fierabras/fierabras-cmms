@@ -3,6 +3,8 @@ package com.grash.integration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.grash.dto.imports.ImportRejection;
+import com.grash.dto.imports.ImportResponse;
 import com.grash.dto.imports.WorkOrderImportDTO;
 import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestApi.Response;
@@ -131,17 +133,21 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
     class Audit {
 
         @Test
-        void h1_01_importedReopeningHasAuditRecord() {
+        void h1_01_importedRowOfClosedWorkOrder_isRejected_notReopened() {
+            // D-P12c-1: the audit expected a reopening with its REOPEN record; PPB-20 b rejects the row instead
             CommonData data = data();
             WorkOrder order = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
 
-            importService.importWorkOrders(List.of(WorkOrderImportDTO.builder().id(order.getId()).title("H1 import")
-                    .status("Open").build()), data.o1().company(), data.o1().admin());
+            ImportResponse response = importService.importWorkOrders(List.of(WorkOrderImportDTO.builder()
+                    .id(order.getId()).title("H1 import").status("Open").build()), data.o1().company(),
+                    data.o1().admin());
 
             int events = jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? AND entity_id = ? "
                     + "AND action = 'REOPEN'", Integer.class, data.o1().company().getId(), order.getId());
-            assertEquals(Status.OPEN, status(order.getId()));
-            assertEquals(1, events);
+            assertEquals(Status.COMPLETE, status(order.getId()));
+            assertEquals(0, events);
+            assertEquals(List.of(order.getId()), response.getRejected().stream().map(ImportRejection::getId)
+                    .toList());
         }
 
         @Test
@@ -420,6 +426,73 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(open.getId(), relation(f.relation()).get("parent_id"));
+        }
+    }
+
+    // =====================================================================================================
+    // CA-P12C-04: import (H1-01, PPB-20 b)
+    // =====================================================================================================
+
+    @Nested
+    class Import {
+
+        private WorkOrderImportDTO row(Long id, String title) {
+            return WorkOrderImportDTO.builder().id(id).title(title).status("Open").build();
+        }
+
+        @Test
+        void closedAndArchivedRowsRejected_openUpdated_newCreated() {
+            CommonData data = data();
+            Fixture closed = workOrders.create(data.o1().admin(), data.o1().technician(), Status.COMPLETE, false);
+            WorkOrder archived = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            workOrders.moveTo(archived.getId(), Status.OPEN, true);
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            String newTitle = TestRecords.unique("P-12c new");
+            Map<String, Object> closedBefore = rows(closed.id());
+            Map<String, Object> archivedBefore = rows(archived.getId());
+            long records = auditRecords(data);
+
+            ImportResponse response = importService.importWorkOrders(List.of(row(closed.id(), "P-12c closed"),
+                    row(archived.getId(), "P-12c archived"), row(open.getId(), "P-12c open"), row(null, newTitle)),
+                    data.o1().company(), data.o1().admin());
+
+            assertEquals(closedBefore, rows(closed.id()));
+            assertEquals(archivedBefore, rows(archived.getId()));
+            assertEquals(records, auditRecords(data), "no reopening nor any other record");
+            assertEquals(1, response.getCreated());
+            assertEquals(1, response.getUpdated());
+            assertEquals(2, response.getRejected().size(), response.toString());
+            ImportRejection closedRow = response.getRejected().get(0);
+            ImportRejection archivedRow = response.getRejected().get(1);
+            assertEquals(List.of(1, closed.id(), CLOSED), List.of(closedRow.getRow(), closedRow.getId(),
+                    closedRow.getCode()));
+            assertEquals(List.of(2, archived.getId(), RETIRED), List.of(archivedRow.getRow(), archivedRow.getId(),
+                    archivedRow.getCode()));
+            assertTrue(closedRow.getMessage().startsWith("This work order is complete"), closedRow.getMessage());
+            assertTrue(archivedRow.getMessage().startsWith("This work order is archived"),
+                    archivedRow.getMessage());
+            assertEquals("P-12c open", jdbc.queryForObject("SELECT title FROM work_order WHERE id = ?",
+                    String.class, open.getId()));
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM work_order WHERE company_id = ? AND title = ?",
+                    Integer.class, data.o1().company().getId(), newTitle));
+        }
+
+        @Test
+        void existingOpenRow_archivedColumn_doesNotArchive() {
+            // D-P12c-4: the import neither archives nor restores an existing work order
+            CommonData data = data();
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            ImportResponse response = importService.importWorkOrders(List.of(WorkOrderImportDTO.builder()
+                    .id(open.getId()).title("P-12c open").status("Open").archived("Yes").build()),
+                    data.o1().company(), data.o1().admin());
+
+            assertEquals(1, response.getUpdated());
+            assertEquals(List.of(), response.getRejected());
+            assertEquals(false, jdbc.queryForObject("SELECT archived FROM work_order WHERE id = ?", Boolean.class,
+                    open.getId()));
+            assertEquals("P-12c open", jdbc.queryForObject("SELECT title FROM work_order WHERE id = ?",
+                    String.class, open.getId()));
         }
     }
 }

@@ -613,7 +613,8 @@ public class WorkOrderService {
         // P-20 (CA-P20-10): a work order updated by the import keeps its folio
         if (workOrder.getCustomId() == null) workOrder.setCustomId(getWorkOrderNumber(company));
 
-        workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
+        // P-12c (E-4, D-P12c-4): the import neither archives nor restores an existing work order
+        if (previous == null) workOrder.setArchived(Helper.getBooleanFromString(dto.getArchived()));
         Status status = Status.getStatusFromString(dto.getStatus());
         // INC-02 (T-14, D-15): the import keeps the closing date of the file (Excel serial date, as dueDate).
         Date closedOn = Helper.getDateFromExcelDate(dto.getCompletedOn());
