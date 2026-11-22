@@ -355,4 +355,71 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
                     Timestamp.class, open.getId()));
         }
     }
+
+    // =====================================================================================================
+    // CA-P12C-03: moving a relation to another work order (H1-05)
+    // =====================================================================================================
+
+    @Nested
+    class MovedRelation {
+
+        private Map<String, Object> relation(Long id) {
+            return jdbc.queryForMap("SELECT * FROM relation WHERE id = ?", id);
+        }
+
+        private Response move(String token, Long relation, Long parent, Long child) {
+            return workOrders.call(patch("/relations/" + relation), token, Map.of("parent", Map.of("id", parent),
+                    "child", Map.of("id", child)));
+        }
+
+        @Test
+        void toClosedWorkOrder_409Closed_relationUnchanged() {
+            CommonData data = data();
+            Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
+            WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            Map<String, Object> before = relation(f.relation());
+
+            assertConflict(move(api.login(data.o1().admin()), f.relation(), closed.getId(), f.relatedWorkOrder()),
+                    CLOSED);
+            assertEquals(before, relation(f.relation()));
+        }
+
+        @Test
+        void toArchivedWorkOrder_409Retired_relationUnchanged() {
+            CommonData data = data();
+            Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
+            WorkOrder archived = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            workOrders.moveTo(archived.getId(), Status.OPEN, true);
+            Map<String, Object> before = relation(f.relation());
+
+            assertConflict(move(api.login(data.o1().admin()), f.relation(), archived.getId(),
+                    f.relatedWorkOrder()), RETIRED);
+            assertEquals(before, relation(f.relation()));
+        }
+
+        @Test
+        void outOfClosedWorkOrder_409Closed_relationUnchanged() {
+            CommonData data = data();
+            Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.COMPLETE, false);
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Map<String, Object> before = relation(f.relation());
+
+            assertConflict(move(api.login(data.o1().admin()), f.relation(), open.getId(), f.relatedWorkOrder()),
+                    CLOSED);
+            assertEquals(before, relation(f.relation()));
+        }
+
+        @Test
+        void betweenOpenWorkOrders_200_moved() {
+            CommonData data = data();
+            Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
+            WorkOrder open = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            Response response = move(api.login(data.o1().admin()), f.relation(), open.getId(),
+                    f.relatedWorkOrder());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(open.getId(), relation(f.relation()).get("parent_id"));
+        }
+    }
 }

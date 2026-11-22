@@ -86,6 +86,15 @@ public class RelationController {
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             // P-12 (E-4): the relations of a closed or archived work order do not change
             WorkOrderStateGuard.check(optionalRelation.get().getParent(), WorkOrderStateGuard.Change.CHILD);
+            // P-12c (E-3, H1-05): moving the relation to another work order also takes that work order
+            WorkOrder newParent = relation.getParent();
+            if (newParent != null && newParent.getId() != null
+                    && !newParent.getId().equals(optionalRelation.get().getParent().getId())) {
+                WorkOrder owner = workOrderService.findById(newParent.getId())
+                        .orElseThrow(() -> new CustomException("Work order not found", HttpStatus.NOT_FOUND));
+                if (!owner.canBeEditedBy(user)) throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+                WorkOrderStateGuard.check(owner, WorkOrderStateGuard.Change.CHILD);
+            }
             return relationMapper.toShowDto(relationService.update(id, relation));
         } else {
             return null;
