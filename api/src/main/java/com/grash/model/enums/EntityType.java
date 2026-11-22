@@ -9,6 +9,7 @@ public enum EntityType {
     API_KEY("api_key"),
     ASSET("asset"),
     COMMENT("comment"),
+    COST_CATEGORY("cost_category"),
     CURRENCY("currency"),
     CUSTOM_FIELD("custom_field"),
     CUSTOM_FIELD_VALUE("custom_field_value"),
@@ -24,9 +25,11 @@ public enum EntityType {
     TASK("task"),
     TASK_BASE("task_base"),
     TEAM("team"),
+    TIME_CATEGORY("time_category"),
     USER("own_user"),
     WEBHOOK_ENDPOINT("webhook_endpoint"),
     WORK_ORDER("work_order"),
+    WORK_ORDER_CATEGORY("work_order_category"),
     /**
      * The revisions of a work order ({@code work_order_aud}).
      */

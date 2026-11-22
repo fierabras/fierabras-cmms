@@ -52,6 +52,7 @@ import SearchInput from '../components/SearchInput';
 import { createColumnHelper } from '@tanstack/react-table';
 import useTableState from '../../../hooks/useTableState';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import { getCustomFields } from '../../../slices/customField';
 import { CustomFieldEntityType } from '../../../models/owns/customField';
 import { getCustomFieldsIFields, getCustomFieldsRequiredShape } from '../type';
@@ -182,7 +183,10 @@ const Customers = ({ openModal, handleCloseModal }: PropsType) => {
     showSnackBar(t('customer_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('customer_delete_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('customer_delete_failure')),
+      'error'
+    );
 
   useEffect(() => {
     if (customerId && isNumeric(customerId)) {

@@ -2005,6 +2005,12 @@ const locale = {
   custom_field_in_use:
     'This custom field has values in other records and cannot be deleted.',
   currency_in_use: 'This currency is in use and cannot be deleted.',
+  work_order_category_in_use:
+    'This work order category is in use and cannot be deleted.',
+  cost_category_in_use: 'This cost category is in use and cannot be deleted.',
+  time_category_in_use: 'This time category is in use and cannot be deleted.',
+  customer_in_use:
+    'This contractor is linked to closed, archived or disabled records and cannot be deleted.',
   in_use_blocked_by: 'It is used by: {{types}}.',
   work_order_not_deletable:
     'Work orders cannot be deleted. Archive the work order instead.',

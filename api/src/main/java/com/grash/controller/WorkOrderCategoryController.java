@@ -92,7 +92,7 @@ public class WorkOrderCategoryController {
         if (optionalWorkOrderCategory.isPresent()) {
             WorkOrderCategory savedWorkOrderCategory = optionalWorkOrderCategory.get();
             if (user.getId().equals(savedWorkOrderCategory.getCreatedBy()) || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.CATEGORIES)) {
-                workOrderCategoryService.delete(id);
+                workOrderCategoryService.delete(savedWorkOrderCategory, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

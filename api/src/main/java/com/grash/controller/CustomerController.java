@@ -111,7 +111,7 @@ public class CustomerController {
             Customer savedCustomer = optionalCustomer.get();
             if (user.getId().equals(savedCustomer.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.VENDORS_AND_CUSTOMERS)) {
-                customerService.delete(id);
+                customerService.delete(savedCustomer, user);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
