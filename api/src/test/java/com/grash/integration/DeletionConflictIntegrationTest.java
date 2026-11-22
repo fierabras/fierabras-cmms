@@ -7,6 +7,7 @@ import com.grash.integration.support.FaultInjector.Fault;
 import com.grash.integration.support.FaultInjector.Operation;
 import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestApi.Response;
+import com.grash.integration.support.TestAssetRecords;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestOrganizations.O1;
@@ -55,6 +56,7 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
 
     private final TestOrganizations organizations;
     private final TestRecords records;
+    private final TestAssetRecords assetRecords;
     private final TestApi api;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -63,9 +65,11 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     DeletionConflictIntegrationTest(TestOrganizations organizations, TestRecords records, MockMvc mockMvc,
-                                    ObjectMapper objectMapper, JdbcTemplate jdbcTemplate) {
+                                    ObjectMapper objectMapper, JdbcTemplate jdbcTemplate,
+                                    TestAssetRecords assetRecords) {
         this.organizations = organizations;
         this.records = records;
+        this.assetRecords = assetRecords;
         this.api = new TestApi(mockMvc, objectMapper);
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
@@ -276,17 +280,26 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
 
         @Test
         void deletionWithoutRule_foreignKeyViolation_409RecordInUse_noInternals() {
+            // P-14 (C-2): the location now has a rule, so the test deletes a floor plan (a deletion without a rule)
+            // cited by a table that the test owns
             O1 o1 = newO1();
             Location location = records.location(o1.company());
-            records.portalCiting(o1.company(), location, null);
+            Long floorPlan = assetRecords.floorPlan(location).getId();
+            jdbcTemplate.execute("CREATE TABLE p14_unknown_reference (floor_plan_id BIGINT NOT NULL "
+                    + "REFERENCES floor_plan (id))");
+            try {
+                jdbcTemplate.update("INSERT INTO p14_unknown_reference (floor_plan_id) VALUES (?)", floorPlan);
 
-            Response response = api.call(delete("/locations/" + location.getId()), api.login(o1.admin()));
+                Response response = api.call(delete("/floor-plans/" + floorPlan), api.login(o1.admin()));
 
-            JsonNode body = assertConflict(response, "RECORD_IN_USE");
-            assertAll(
-                    () -> assertEquals(RECORD_IN_USE_MESSAGE, body.get("message").asText()),
-                    () -> assertNull(body.get("blockingTypes")),
-                    () -> assertEquals(1, count("SELECT count(*) FROM location WHERE id = ?", location.getId())));
+                JsonNode body = assertConflict(response, "RECORD_IN_USE");
+                assertAll(
+                        () -> assertEquals(RECORD_IN_USE_MESSAGE, body.get("message").asText()),
+                        () -> assertNull(body.get("blockingTypes")),
+                        () -> assertEquals(1, count("SELECT count(*) FROM floor_plan WHERE id = ?", floorPlan)));
+            } finally {
+                jdbcTemplate.execute("DROP TABLE p14_unknown_reference");
+            }
         }
     }
 

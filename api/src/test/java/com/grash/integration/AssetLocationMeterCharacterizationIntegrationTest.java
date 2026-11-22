@@ -485,8 +485,19 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             return call(delete("/locations/" + location.getId()), user);
         }
 
+        private void assertInUse(Response response, Location location, CommonData data, String... types) {
+            assertAll(
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("\"code\":\"LOCATION_IN_USE\""), response.toString()),
+                    () -> assertTrue(List.of(types).stream().allMatch(type -> response.body().contains("\"" + type
+                            + "\"")), response.toString()),
+                    () -> assertEquals(1, rows("location", location.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
         @Test
-        void childLocationAndFloorPlan_200_deletedInCascade_noAuditRecord() {
+        void childLocationAndFloorPlan_409_subtreeAndFloorPlanKept() {
+            // before P-14: 200, the child and the floor plan deleted in cascade, no audit record
             CommonData data = data();
             Location parent = records.location(data.o1().company());
             Location child = records.location(data.o1().company());
@@ -495,15 +506,15 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteLocation(parent, data.o1().admin());
 
+            assertInUse(response, parent, data, "LOCATION");
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("location", child.getId())),
-                    () -> assertEquals(0, rows("floor_plan", floorPlan.getId())),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(1, rows("location", child.getId())),
+                    () -> assertEquals(1, rows("floor_plan", floorPlan.getId())));
         }
 
         @Test
-        void referencingRecords_200_theirLocationSetToNull() {
+        void referencingRecords_409_theyKeepTheLocation() {
+            // before P-14: 200, their location set to null, the revision included
             CommonData data = data();
             Company company = data.o1().company();
             Location location = records.location(company);
@@ -530,51 +541,48 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             // the revision that Envers wrote when the work order was created
             jdbc.update("UPDATE work_order_aud SET location_id = ? WHERE id = ?", location.getId(),
                     workOrder.getId());
-            assertEquals(1, count("SELECT count(*) FROM work_order_aud WHERE id = ? AND location_id = ?",
-                    workOrder.getId(), location.getId()));
 
             Response response = deleteLocation(location, data.o1().admin());
 
+            assertInUse(response, location, data, "ASSET", "METER", "REQUEST", "PREVENTIVE_MAINTENANCE",
+                    "WORK_ORDER", "WORK_ORDER_METER_TRIGGER", "USER");
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertNull(reference("asset", "location_id", asset.getId())),
-                    () -> assertNull(reference("meter", "location_id", meter.getId())),
-                    () -> assertNull(reference("request", "location_id", request.getId())),
-                    () -> assertNull(reference("preventive_maintenance", "location_id",
+                    () -> assertEquals(location.getId(), reference("asset", "location_id", asset.getId())),
+                    () -> assertEquals(location.getId(), reference("meter", "location_id", meter.getId())),
+                    () -> assertEquals(location.getId(), reference("request", "location_id", request.getId())),
+                    () -> assertEquals(location.getId(), reference("preventive_maintenance", "location_id",
                             preventiveMaintenance.getId())),
-                    () -> assertNull(reference("work_order", "location_id", workOrder.getId())),
-                    () -> assertNull(reference("work_order_meter_trigger", "location_id", trigger.getId())),
-                    () -> assertNull(reference("own_user", "location_id", technician.getId())),
-                    () -> assertEquals(0, count("SELECT count(*) FROM work_order_aud WHERE id = ? "
-                            + "AND location_id IS NOT NULL", workOrder.getId())),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(location.getId(), reference("work_order", "location_id", workOrder.getId())),
+                    () -> assertEquals(location.getId(), reference("work_order_meter_trigger", "location_id",
+                            trigger.getId())),
+                    () -> assertEquals(location.getId(), reference("own_user", "location_id", technician.getId())),
+                    () -> assertEquals(1, count("SELECT count(*) FROM work_order_aud WHERE id = ? "
+                            + "AND location_id = ?", workOrder.getId(), location.getId())));
         }
 
         @Test
-        void workflowAction_200_wholeWorkflowDeletedInCascade() {
+        void workflowAction_409_workflowKept() {
+            // before P-14: 200, the whole workflow deleted in cascade
             CommonData data = data();
             Location location = records.location(data.o1().company());
             Workflow workflow = workflow(data.o1().company(), null, location, null, null);
 
             Response response = deleteLocation(location, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("workflow", workflow.getId())));
+            assertInUse(response, location, data, "WORKFLOW_ACTION");
+            assertEquals(1, rows("workflow", workflow.getId()));
         }
 
         @Test
-        void portalField_409RecordInUse_fieldKept() {
+        void portalField_409LocationInUseWithRequestPortalField_fieldKept() {
+            // before P-14: 409 RECORD_IN_USE
             CommonData data = data();
             Location location = records.location(data.o1().company());
             records.portalCiting(data.o1().company(), location, null);
 
             Response response = deleteLocation(location, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(409, response.status(), response.toString()),
-                    () -> assertTrue(response.body().contains("RECORD_IN_USE"), response.toString()),
-                    () -> assertEquals(1, rows("location", location.getId())));
+            assertInUse(response, location, data, "REQUEST_PORTAL_FIELD");
         }
 
         @Test
@@ -988,7 +996,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             assertEquals(List.of(
                     "asset.category_id -> asset_category fkhw44q3ymkd329b8b6mvqxatsh n false",
-                    "asset.location_id -> location fkoo11h2f4j12wv0axk6d8u1wy0 n false",
+                    "asset.location_id -> location fkoo11h2f4j12wv0axk6d8u1wy0 a true",
                     "asset.parent_asset_id -> asset fk6qu6wqhpppa2w4y09l3tt4q56 a true",
                     "asset_downtime.asset_id -> asset fkrbg55bho0cxaorbbt7jwskrpo c false",
                     "custom_field_value.asset_id -> asset fk_custom_field_value_asset c true",
@@ -996,16 +1004,16 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "custom_field_value.meter_id -> meter fk_custom_field_value_meter c true",
                     "custom_field_value.work_order_meter_trigger_id -> work_order_meter_trigger fk_custom_field_value_work_order_meter_trigger a true",
                     "floor_plan.location_id -> location fkidx35wj5iwhfi5xrcs9jdsr2d c false",
-                    "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb c false",
+                    "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb a true",
                     "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi a true",
-                    "meter.location_id -> location fk8jgoj4oi6b9sjqeuh9v592a6q n false",
+                    "meter.location_id -> location fk8jgoj4oi6b9sjqeuh9v592a6q a true",
                     "meter.meter_category_id -> meter_category fkoid61jgpxbr04np7rop8pag13 n false",
-                    "own_user.location_id -> location fktmprdfwe8axkp8cobywe2gc1d n false",
+                    "own_user.location_id -> location fktmprdfwe8axkp8cobywe2gc1d a true",
                     "preventive_maintenance.asset_id -> asset fk2r1291umxjxrddelq96v3pl4n a true",
-                    "preventive_maintenance.location_id -> location fk53hdmxmgd3fjb2fjsh43d1irf n false",
+                    "preventive_maintenance.location_id -> location fk53hdmxmgd3fjb2fjsh43d1irf a true",
                     "reading.meter_id -> meter fkrk4bo4tq59pfymwvx2jnjvlae c false",
                     "request.asset_id -> asset fkml2rlcjiurmq5rjyw1gmsstf6 a true",
-                    "request.location_id -> location fkj7y0rwrqngdydkkdcohwisqq6 n false",
+                    "request.location_id -> location fkj7y0rwrqngdydkkdcohwisqq6 a true",
                     "request_portal_field.asset_id -> asset fk_request_portal_field_asset a false",
                     "request_portal_field.location_id -> location fk_request_portal_field_location a false",
                     "t_asset_customer_associations.id_asset -> asset fkil356y7ax7m8tqfryd4p8pe6o c true",
@@ -1023,18 +1031,18 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "task_base.asset_id -> asset fkfcyjas01bhns54mn9uxk3xqx8 a true",
                     "task_base.meter_id -> meter fkgtij68ko3kykqk1od01ahoudg c false",
                     "work_order.asset_id -> asset fkp4hbmaa9hcp6myymsfyxg6fo2 a true",
-                    "work_order.location_id -> location fkdbtdl51i4yup1hs6ek3ecqros n false",
-                    "work_order_aud.location_id -> location FK_work_order_AUD_location_id n false",
+                    "work_order.location_id -> location fkdbtdl51i4yup1hs6ek3ecqros a true",
+                    "work_order_aud.location_id -> location FK_work_order_AUD_location_id a true",
                     "work_order_meter_trigger.asset_id -> asset fkdkxi8xmqmo48y8xtml1860nbc a true",
-                    "work_order_meter_trigger.location_id -> location fkmdb3avajahyo8mc6wi38ls8xi n false",
+                    "work_order_meter_trigger.location_id -> location fkmdb3avajahyo8mc6wi38ls8xi a true",
                     "work_order_meter_trigger.meter_id -> meter fk87doqr843tj4vmxarqujm3sgy c false",
                     "work_order_meter_trigger_assigned_to.work_order_meter_trigger_id -> work_order_meter_trigger fk42orqs7y05ghgkis54tathjv c false",
                     "work_order_meter_trigger_customers.work_order_meter_trigger_id -> work_order_meter_trigger fkkvfp8se58k6wyyt8ctgv4r3f0 c false",
                     "work_order_meter_trigger_files.work_order_meter_trigger_id -> work_order_meter_trigger fkol2wwydmtktqbnc7lvv23r5jy c false",
                     "workflow_action.asset_id -> asset fkufu41twy3j9sfswo2tm7nkue a true",
-                    "workflow_action.location_id -> location fk6nkenbmcv4vyxw23kwm4ftgaq c false",
+                    "workflow_action.location_id -> location fk6nkenbmcv4vyxw23kwm4ftgaq a true",
                     "workflow_condition.asset_id -> asset fkhsrmx7f4fbfh4g1jdo5vray90 a true",
-                    "workflow_condition.location_id -> location fkoueqwngifye55uqf2pj5u0257 c false"), keys);
+                    "workflow_condition.location_id -> location fkoueqwngifye55uqf2pj5u0257 a true"), keys);
         }
 
         @Test
@@ -1058,7 +1066,6 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "deprecation.company_id -> company",
                     "floor_plan.location_id -> location",
                     "location.company_id -> company",
-                    "location.parent_location_id -> location",
                     "meter.company_id -> company",
                     "meter_category.company_settings_id -> company_settings",
                     "reading.meter_id -> meter",

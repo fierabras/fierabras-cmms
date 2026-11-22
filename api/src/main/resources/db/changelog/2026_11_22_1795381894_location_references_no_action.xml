@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-14 (PPB-02, PPB-03, PPB-04, PPB-21, PPB-22): a location with child locations, or cited by assets, meters,
+         users, preventive maintenances, requests, work orders and their revisions, meter triggers or workflows, is
+         not deleted. Those references become NO ACTION; until now deleting the location deleted its subtree and
+         whole workflows (CASCADE), or put the reference in NULL, revisions included. Each child column gets an
+         index. NO ACTION, not RESTRICT, keeps the deletion of a whole company working. Earlier changesets are left
+         untouched. -->
+
+    <changeSet id="2026_11_22_1795381894_asset_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="asset" constraintName="fkoo11h2f4j12wv0axk6d8u1wy0"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="asset"
+                                 constraintName="fkoo11h2f4j12wv0axk6d8u1wy0" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="asset" indexName="idx_asset_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_location_id"/>
+            <dropForeignKeyConstraint baseTableName="asset" constraintName="fkoo11h2f4j12wv0axk6d8u1wy0"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="asset"
+                                     constraintName="fkoo11h2f4j12wv0axk6d8u1wy0" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_location_parent_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="location" constraintName="fk9s1sco601u8l6ptdxf432h4kb"/>
+        <addForeignKeyConstraint baseColumnNames="parent_location_id" baseTableName="location"
+                                 constraintName="fk9s1sco601u8l6ptdxf432h4kb" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="location" indexName="idx_location_parent_location_id">
+            <column name="parent_location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="location" indexName="idx_location_parent_location_id"/>
+            <dropForeignKeyConstraint baseTableName="location" constraintName="fk9s1sco601u8l6ptdxf432h4kb"/>
+            <addForeignKeyConstraint baseColumnNames="parent_location_id" baseTableName="location"
+                                     constraintName="fk9s1sco601u8l6ptdxf432h4kb" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_meter_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="meter" constraintName="fk8jgoj4oi6b9sjqeuh9v592a6q"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="meter"
+                                 constraintName="fk8jgoj4oi6b9sjqeuh9v592a6q" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="meter" indexName="idx_meter_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="meter" indexName="idx_meter_location_id"/>
+            <dropForeignKeyConstraint baseTableName="meter" constraintName="fk8jgoj4oi6b9sjqeuh9v592a6q"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="meter"
+                                     constraintName="fk8jgoj4oi6b9sjqeuh9v592a6q" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_own_user_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="own_user" constraintName="fktmprdfwe8axkp8cobywe2gc1d"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="own_user"
+                                 constraintName="fktmprdfwe8axkp8cobywe2gc1d" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="own_user" indexName="idx_own_user_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user" indexName="idx_own_user_location_id"/>
+            <dropForeignKeyConstraint baseTableName="own_user" constraintName="fktmprdfwe8axkp8cobywe2gc1d"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="own_user"
+                                     constraintName="fktmprdfwe8axkp8cobywe2gc1d" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_preventive_maintenance_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk53hdmxmgd3fjb2fjsh43d1irf"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="preventive_maintenance"
+                                 constraintName="fk53hdmxmgd3fjb2fjsh43d1irf" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_location_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk53hdmxmgd3fjb2fjsh43d1irf"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="preventive_maintenance"
+                                     constraintName="fk53hdmxmgd3fjb2fjsh43d1irf" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_request_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fkj7y0rwrqngdydkkdcohwisqq6"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="request"
+                                 constraintName="fkj7y0rwrqngdydkkdcohwisqq6" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_location_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fkj7y0rwrqngdydkkdcohwisqq6"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="request"
+                                     constraintName="fkj7y0rwrqngdydkkdcohwisqq6" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_work_order_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkdbtdl51i4yup1hs6ek3ecqros"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order"
+                                 constraintName="fkdbtdl51i4yup1hs6ek3ecqros" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_location_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkdbtdl51i4yup1hs6ek3ecqros"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order"
+                                     constraintName="fkdbtdl51i4yup1hs6ek3ecqros" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_work_order_aud_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_location_id"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_location_id" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_location_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_location_id"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_location_id" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_work_order_meter_trigger_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkmdb3avajahyo8mc6wi38ls8xi"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fkmdb3avajahyo8mc6wi38ls8xi" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_location_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkmdb3avajahyo8mc6wi38ls8xi"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fkmdb3avajahyo8mc6wi38ls8xi" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_workflow_action_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fk6nkenbmcv4vyxw23kwm4ftgaq"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="workflow_action"
+                                 constraintName="fk6nkenbmcv4vyxw23kwm4ftgaq" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_location_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fk6nkenbmcv4vyxw23kwm4ftgaq"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="workflow_action"
+                                     constraintName="fk6nkenbmcv4vyxw23kwm4ftgaq" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795381894_workflow_condition_location_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkoueqwngifye55uqf2pj5u0257"/>
+        <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="workflow_condition"
+                                 constraintName="fkoueqwngifye55uqf2pj5u0257" referencedColumnNames="id"
+                                 referencedTableName="location" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_location_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkoueqwngifye55uqf2pj5u0257"/>
+            <addForeignKeyConstraint baseColumnNames="location_id" baseTableName="workflow_condition"
+                                     constraintName="fkoueqwngifye55uqf2pj5u0257" referencedColumnNames="id"
+                                     referencedTableName="location" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

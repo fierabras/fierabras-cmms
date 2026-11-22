@@ -10,6 +10,7 @@ import com.grash.integration.support.TestWorkOrders;
 import com.grash.integration.support.TestWorkOrders.Fixture;
 import com.grash.model.Asset;
 import com.grash.model.File;
+import com.grash.model.Location;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.WorkOrderCategory;
@@ -148,6 +149,24 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertTrue(result.body().contains("ASSET_IN_USE"), result.toString());
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM work_order w JOIN asset a ON a.id = w.asset_id "
                 + "WHERE a.id = ?", Integer.class, asset.getId()));
+    }
+
+    @Test
+    void assetGivenTheLocation_whileTheLocationIsDeleted_409LocationInUse_referenceCommitted() throws Exception {
+        // P-14 (R-1): the location had no dependents when its deletion started
+        Location location = records.location(data.o1().company());
+        Asset asset = records.asset(data.o1().company());
+
+        Response result = compete(() -> jdbc.update("UPDATE asset SET location_id = ? WHERE id = ?",
+                location.getId(), asset.getId()), () -> api.call(delete("/locations/" + location.getId()), admin));
+
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("\"code\":\"LOCATION_IN_USE\""), result.toString());
+        assertTrue(result.body().contains("\"blockingTypes\":[\"ASSET\"]"), result.toString());
+        assertEquals(location.getId(), jdbc.queryForObject("SELECT location_id FROM asset WHERE id = ?", Long.class,
+                asset.getId()));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
     }
 
     @Test

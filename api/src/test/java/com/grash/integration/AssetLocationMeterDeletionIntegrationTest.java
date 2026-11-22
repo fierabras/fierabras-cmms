@@ -13,6 +13,7 @@ import com.grash.integration.support.TestRecords;
 import com.grash.model.Asset;
 import com.grash.model.AssetDowntime;
 import com.grash.model.Company;
+import com.grash.model.Location;
 import com.grash.model.Meter;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
@@ -382,6 +383,228 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
                     "request.asset_id", "task_base.asset_id", "work_order_meter_trigger.asset_id",
                     "workflow_action.asset_id", "workflow_condition.asset_id").stream().map(key -> (Executable) () ->
                     assertEquals("a true", schemaOf(key.split("\\.")[0], key.split("\\.")[1]), key)));
+        }
+    }
+
+    /**
+     * Deletes {@code path} as A of O1 and asserts 409 {@code code} with exactly {@code type}, the entity and the
+     * dependent unchanged and no audit record.
+     */
+    private void assertBlockedBy(CommonData data, String path, String table, Long id, String code, String type,
+                                 String dependentTable, Long dependentId) {
+        List<Map<String, Object>> before = row(table, id);
+        List<Map<String, Object>> dependentBefore = row(dependentTable, dependentId);
+
+        Response response = call(delete(path + id), data.o1().admin());
+
+        assertEquals(List.of(type), assertInUse(response, code));
+        assertAll(
+                () -> assertEquals(before, row(table, id)),
+                () -> assertEquals(dependentBefore, row(dependentTable, dependentId)),
+                () -> assertEquals(0, auditRecords(data)));
+    }
+
+    // =====================================================================================================
+    // E-2: location
+    // =====================================================================================================
+
+    @Nested
+    class LocationDeletion {
+
+        private static final String LOCATION_IN_USE = "LOCATION_IN_USE";
+        private static final String PATH = "/locations/";
+
+        /**
+         * A location of O1 cited in {@code table}.location_id by the row {@code dependentId}; asserts the 409.
+         */
+        private void assertCitedBy(CommonData data, String type, String table, Long dependentId) {
+            Location location = records.location(data.o1().company());
+            jdbc.update("UPDATE " + table + " SET location_id = ? WHERE id = ?", location.getId(), dependentId);
+            assertBlockedBy(data, PATH, "location", location.getId(), LOCATION_IN_USE, type, table, dependentId);
+        }
+
+        @Test
+        void ca006_childLocationAndAsset_409WithLocationAndAsset_noChanges() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            Location child = records.location(data.o1().company());
+            jdbc.update("UPDATE location SET parent_location_id = ? WHERE id = ?", location.getId(), child.getId());
+            Asset asset = records.asset(data.o1().company());
+            jdbc.update("UPDATE asset SET location_id = ? WHERE id = ?", location.getId(), asset.getId());
+            Map<String, List<Map<String, Object>>> before = new LinkedHashMap<>();
+            before.put("location", row("location", location.getId()));
+            before.put("child", row("location", child.getId()));
+            before.put("asset", row("asset", asset.getId()));
+
+            Response response = call(delete(PATH + location.getId()), data.o1().admin());
+
+            assertEquals(List.of("ASSET", "LOCATION"), assertInUse(response, LOCATION_IN_USE));
+            Map<String, List<Map<String, Object>>> after = new LinkedHashMap<>();
+            after.put("location", row("location", location.getId()));
+            after.put("child", row("location", child.getId()));
+            after.put("asset", row("asset", asset.getId()));
+            assertAll(
+                    () -> assertEquals(before, after),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void meter_409WithMeter() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            assertCitedBy(data, "METER", "meter", meter.getId());
+        }
+
+        @Test
+        void userOfTheLocation_409WithUser() {
+            CommonData data = data();
+            assertCitedBy(data, "USER", "own_user", data.o1().technician().getId());
+        }
+
+        @Test
+        void disabledWorker_409WithUser() {
+            // D-P14-4, §3.3 (c)
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            User technician = data.o1().technician();
+            jdbc.update("INSERT INTO t_location_user_associations (id_location, id_user) VALUES (?, ?)",
+                    location.getId(), technician.getId());
+            disable(technician);
+            assertBlockedBy(data, PATH, "location", location.getId(), LOCATION_IN_USE, "USER", "own_user",
+                    technician.getId());
+        }
+
+        @Test
+        void enabledWorker_200() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            jdbc.update("INSERT INTO t_location_user_associations (id_location, id_user) VALUES (?, ?)",
+                    location.getId(), data.o1().technician().getId());
+
+            assertDeleted(call(delete(PATH + location.getId()), data.o1().admin()));
+        }
+
+        @Test
+        void preventiveMaintenance_409WithPreventiveMaintenance() {
+            CommonData data = data();
+            assertCitedBy(data, "PREVENTIVE_MAINTENANCE", "preventive_maintenance",
+                    module.preventiveMaintenance(data.o1().company()).getId());
+        }
+
+        @Test
+        void request_409WithRequest() {
+            CommonData data = data();
+            assertCitedBy(data, "REQUEST", "request", module.request(data.o1().company()).getId());
+        }
+
+        @Test
+        void workOrder_409WithWorkOrder() {
+            CommonData data = data();
+            assertCitedBy(data, "WORK_ORDER", "work_order",
+                    records.workOrder(data.o1().company(), null, Status.COMPLETE, false).getId());
+        }
+
+        @Test
+        void workOrderRevision_409WithWorkOrderHistory() {
+            // the work order no longer cites the location; one of its revisions does
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            jdbc.update("UPDATE work_order_aud SET location_id = ? WHERE id = ?", location.getId(), workOrder.getId());
+            assertBlockedBy(data, PATH, "location", location.getId(), LOCATION_IN_USE, "WORK_ORDER_HISTORY",
+                    "work_order", workOrder.getId());
+        }
+
+        @Test
+        void meterTrigger_409WithWorkOrderMeterTrigger() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            assertCitedBy(data, "WORK_ORDER_METER_TRIGGER", "work_order_meter_trigger",
+                    module.trigger(meter, WorkOrderMeterTriggerCondition.MORE_THAN, 10).getId());
+        }
+
+        @Test
+        void workflowAction_409WithWorkflowAction() {
+            CommonData data = data();
+            Workflow workflow = module.workflow(data.o1().company(), records.asset(data.o1().company()), null,
+                    records.asset(data.o1().company()), null);
+            assertCitedBy(data, "WORKFLOW_ACTION", "workflow_action", workflow.getAction().getId());
+        }
+
+        @Test
+        void workflowCondition_409WithWorkflowCondition() {
+            CommonData data = data();
+            Workflow workflow = module.workflow(data.o1().company(), records.asset(data.o1().company()), null,
+                    records.asset(data.o1().company()), null);
+            assertCitedBy(data, "WORKFLOW_CONDITION", "workflow_condition",
+                    workflow.getSecondaryConditions().iterator().next().getId());
+        }
+
+        @Test
+        void portalField_409WithRequestPortalField() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            Long field = records.portalCiting(data.o1().company(), location, null).getFields().get(0).getId();
+            assertBlockedBy(data, PATH, "location", location.getId(), LOCATION_IN_USE, "REQUEST_PORTAL_FIELD",
+                    "request_portal_field", field);
+        }
+
+        @Test
+        void dependentAddedBetweenCheckAndDeletion_409WithItsType_never500() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            faults.runBefore("location", Operation.DELETE,
+                    "UPDATE meter SET location_id = " + location.getId() + " WHERE id = " + meter.getId());
+
+            Response response = call(delete(PATH + location.getId()), data.o1().admin());
+
+            assertEquals(List.of("METER"), assertInUse(response, LOCATION_IN_USE));
+            assertAll(
+                    () -> assertEquals(1, rows("location", location.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void withoutDependentsWithFloorPlan_200_deletedWithItsFloorPlan_recorded() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            jdbc.update("UPDATE location SET custom_id = 'L-P14' WHERE id = ?", location.getId());
+            Long floorPlan = module.floorPlan(location).getId();
+
+            assertDeleted(call(delete(PATH + location.getId()), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("location", location.getId())),
+                    () -> assertEquals(0, rows("floor_plan", floorPlan)),
+                    () -> assertEquals(List.of("DELETE LOCATION L-P14 " + location.getName()
+                            + " {\"floor_plan\": 1} 0"), audit(data)));
+        }
+
+        @Test
+        void technicianNotCreator_403_otherOrganization_403_unknown_404_noAuditRecord() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+
+            Response technician = call(delete(PATH + location.getId()), data.o1().technician());
+            Response otherOrganization = call(delete(PATH + location.getId()), data.o2().admin());
+            Response unknown = call(delete(PATH + Long.MAX_VALUE), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(403, technician.status(), technician.toString()),
+                    () -> assertEquals(403, otherOrganization.status(), otherOrganization.toString()),
+                    () -> assertEquals(404, unknown.status(), unknown.toString()),
+                    () -> assertEquals(1, rows("location", location.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void schema_referencesToLocationAreNoActionWithIndex() {
+            assertAll(List.of("asset.location_id", "location.parent_location_id", "meter.location_id",
+                    "own_user.location_id", "preventive_maintenance.location_id", "request.location_id",
+                    "work_order.location_id", "work_order_aud.location_id", "work_order_meter_trigger.location_id",
+                    "workflow_action.location_id", "workflow_condition.location_id").stream().map(key ->
+                    (Executable) () -> assertEquals("a true", schemaOf(key.split("\\.")[0], key.split("\\.")[1]),
+                            key)));
         }
     }
 }

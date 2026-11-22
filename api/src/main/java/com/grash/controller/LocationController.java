@@ -188,7 +188,7 @@ public class LocationController {
             Location savedLocation = optionalLocation.get();
             if (user.getId().equals(savedLocation.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.LOCATIONS)) {
-                locationService.delete(id);
+                locationService.delete(savedLocation, user);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

@@ -257,4 +257,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_22_1795380717_asset_references_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_22_1795381894_location_references_no_action.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>
