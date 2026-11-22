@@ -34,8 +34,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
- * P-17 characterization: fixes how {@code DELETE /files/{id}} and the removal of a task with an image behave before
- * any change. The 403 and 404 answers must keep passing after P-17.
+ * P-17 characterization: fixed how {@code DELETE /files/{id}} and the removal of a task with an image behaved before
+ * any change. The 403 and 404 answers must keep passing after P-17. The tests that showed a file in use being deleted
+ * (200), a closed work order losing the image of its task, or a stored object left behind now fix the contract of
+ * P-17, as step 8 of the order allows.
  */
 @AutoConfigureMockMvc
 class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTest {
@@ -118,7 +120,7 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
     class InUse {
 
         @Test
-        void imageOfAnAsset_200_assetLosesItsImage_objectKept_noRecord() {
+        void imageOfAnAsset_409_assetKeepsItsImage_objectKept_noRecord() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Asset asset = records.asset(data.o1().company());
@@ -129,11 +131,11 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
             Response response = deleteFile(file, admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(DELETED_BODY, response.body()),
-                    () -> assertEquals(0, files(file)),
-                    () -> assertNull(jdbc.queryForObject("SELECT image_id FROM asset WHERE id = ?", Long.class,
-                            asset.getId()), "SET NULL today"),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("FILE_IN_USE"), response.toString()),
+                    () -> assertEquals(1, files(file)),
+                    () -> assertEquals(file, jdbc.queryForObject("SELECT image_id FROM asset WHERE id = ?",
+                            Long.class, asset.getId()), "P-17: the asset keeps its image"),
                     () -> assertTrue(storageDouble.contains(path), "the object stays in the storage"),
                     () -> assertTrue(storageDouble.calls().stream().allMatch(call -> List.of("upload",
                             "generateSignedUrl").contains(call.name())), "only the upload: " + storageDouble.calls()),
@@ -141,8 +143,8 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
         }
 
         @Test
-        void audioOfARequest_200_requestDeletedInCascade() {
-            // C-04: request.audio_description_id is CASCADE today
+        void audioOfARequest_409_requestKept() {
+            // C-04: request.audio_description_id was CASCADE; P-17 makes it NO ACTION
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Response created = api.call(post("/requests").contentType(MediaType.APPLICATION_JSON)
@@ -160,15 +162,15 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
             Response response = deleteFile(file, admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, files(file)),
-                    () -> assertEquals(0, count("SELECT count(*) FROM request WHERE id = ?", request),
-                            "the request is deleted with its audio today"),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(1, files(file)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM request WHERE id = ? AND audio_description_id = ?",
+                            request, file), "P-17: the request keeps its audio"),
                     () -> assertEquals(0, auditRecords(data)));
         }
 
         @Test
-        void attachedToAClosedWorkOrder_200_associationRemoved() {
+        void attachedToAClosedWorkOrder_409_associationKept() {
             // H1-02
             CommonData data = data();
             Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.COMPLETE, false);
@@ -176,10 +178,10 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
             Response response = deleteFile(f.file(), api.login(data.o1().admin()));
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, files(f.file())),
-                    () -> assertEquals(0, count("SELECT count(*) FROM work_order_files WHERE work_order_id = ?",
-                            f.id()), "the closed work order loses the attachment today"),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(1, files(f.file())),
+                    () -> assertEquals(1, count("SELECT count(*) FROM work_order_files WHERE work_order_id = ?",
+                            f.id()), "P-17: the closed work order keeps the attachment"),
                     () -> assertEquals(0, auditRecords(data)));
         }
     }
@@ -188,7 +190,7 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
     class Unused {
 
         @Test
-        void unused_200_deleted_objectKept_noRecord() {
+        void unused_200_deleted_objectDeleted_recorded() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Long file = upload(admin, null);
@@ -200,8 +202,8 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(DELETED_BODY, response.body()),
                     () -> assertEquals(0, files(file)),
-                    () -> assertTrue(storageDouble.contains(path), "the object stays in the storage"),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertFalse(storageDouble.contains(path), "P-17: the object is deleted"),
+                    () -> assertEquals(1, auditRecords(data), "P-17: the deletion is recorded"));
         }
 
         @Test
@@ -260,7 +262,7 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
     class TaskImages {
 
         @Test
-        void imageOfATaskOfAnOpenWorkOrder_200_deleted_objectKept() {
+        void imageOfATaskOfAnOpenWorkOrder_200_deleted_objectDeleted() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
@@ -272,11 +274,11 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
             assertAll(
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, files(file)),
-                    () -> assertTrue(storageDouble.contains(path), "the object stays in the storage"));
+                    () -> assertFalse(storageDouble.contains(path), "P-17: the object is deleted"));
         }
 
         @Test
-        void imageOfATaskOfAClosedWorkOrder_200_deleted() {
+        void imageOfATaskOfAClosedWorkOrder_409_kept() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
@@ -286,12 +288,12 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
             Response response = deleteFile(file, admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, files(file), "the closed work order loses the image of its task today"));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(1, files(file), "P-17 (D-P17-2): the closed work order keeps the image"));
         }
 
         @Test
-        void taskWithAnImageRemoved_200_fileRowGoesInCascade_objectKept() {
+        void taskWithAnImageRemoved_200_fileRowGoesInCascade_objectDeleted() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
@@ -304,7 +306,7 @@ class FileDeletionCharacterizationIntegrationTest extends AbstractIntegrationTes
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, count("SELECT count(*) FROM task WHERE id = ?", f.task())),
                     () -> assertEquals(0, files(file), "file.task_id is CASCADE"),
-                    () -> assertTrue(storageDouble.contains(path), "the object stays in the storage"),
+                    () -> assertFalse(storageDouble.contains(path), "P-17: the object is deleted"),
                     () -> assertEquals(List.of("TASK {\"file\": 1} 1"), jdbc.queryForList(
                             "SELECT entity_type || ' ' || cascade_rows::text || ' ' || storage_objects "
                                     + "FROM audit_log WHERE company_id = ?", String.class,

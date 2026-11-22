@@ -59,6 +59,8 @@ public class PreventiveMaintenanceService {
     private final CustomFieldValueService customFieldValueService;
     private final WorkOrderService workOrderService;
     private final TaskService taskService;
+    private final FileService fileService;
+    private final DeletionService deletionService;
 
 
     @Transactional
@@ -147,8 +149,15 @@ public class PreventiveMaintenanceService {
         return preventiveMaintenanceRepository.findAll();
     }
 
+    /**
+     * P-17 (C-4): the images of its tasks go with it in cascade; their stored objects are deleted after the commit.
+     * A cited image answers 409 (C-1). No rule nor audit record yet (P-15).
+     */
+    @Transactional
     public void delete(Long id) {
-        preventiveMaintenanceRepository.deleteById(id);
+        List<String> images = fileService.objectsOfPreventiveMaintenance(id);
+        deletionService.deleteUnrecorded(() -> preventiveMaintenanceRepository.deleteById(id));
+        fileService.deleteObjectsAfterCommit(images);
     }
 
     public Optional<PreventiveMaintenance> findById(Long id) {

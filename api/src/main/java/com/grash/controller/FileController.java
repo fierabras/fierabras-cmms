@@ -183,7 +183,8 @@ public class FileController {
             File savedFile = optionalFile.get();
             if (user.getId().equals(savedFile.getCreatedBy())
                     || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.FILES)) {
-                fileService.delete(id);
+                // P-17: 404 and 403 above; 409 FILE_IN_USE (or a closed work order) from the service
+                fileService.delete(savedFile, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

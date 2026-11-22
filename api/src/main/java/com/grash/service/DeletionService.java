@@ -49,6 +49,25 @@ public class DeletionService {
         if (rule != null) rule.rejectIfInUse();
         entityManager.flush();
         Map<String, Long> before = deletedRows();
+        run(rule, deletion);
+        Map<String, Long> after = deletedRows();
+        Map<String, Long> cascadeRows = cascadeRows(before, after, target.type().getTable());
+        // P-17 (D-P17-5): every file row deleted by the operation, the entity's own included
+        long storageObjects = after.getOrDefault(FILE_TABLE, 0L) - before.getOrDefault(FILE_TABLE, 0L);
+        auditLogService.record(target, actor, AuditAction.DELETE, source, cascadeRows, (int) storageObjects);
+    }
+
+    /**
+     * P-17 (C-1): deletes without a rule and without an audit record, for the deletions that P-15 has not migrated
+     * yet; a foreign key that rejects the deletion becomes 409 {@code RECORD_IN_USE}, never a 500, whatever the
+     * HTTP method of the request.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void deleteUnrecorded(Runnable deletion) {
+        run(null, deletion);
+    }
+
+    private void run(DeletionRule rule, Runnable deletion) {
         try {
             deletion.run();
             entityManager.flush();
@@ -57,9 +76,6 @@ public class DeletionService {
             if (violation.isEmpty()) throw failure;
             throw rule == null ? ConflictException.recordInUse() : rule.conflictFor(violation.get().referencingTable());
         }
-        Map<String, Long> cascadeRows = cascadeRows(before, deletedRows(), target.type().getTable());
-        auditLogService.record(target, actor, AuditAction.DELETE, source, cascadeRows,
-                cascadeRows.getOrDefault(FILE_TABLE, 0L).intValue());
     }
 
     /**
