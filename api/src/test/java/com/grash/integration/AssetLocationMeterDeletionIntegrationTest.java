@@ -14,15 +14,22 @@ import com.grash.model.Asset;
 import com.grash.model.AssetCategory;
 import com.grash.model.AssetDowntime;
 import com.grash.model.Company;
+import com.grash.model.Deprecation;
+import com.grash.model.File;
+import com.grash.model.FloorPlan;
 import com.grash.model.Location;
 import com.grash.model.Meter;
 import com.grash.model.MeterCategory;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
+import com.grash.model.WorkOrderMeterTrigger;
 import com.grash.model.Workflow;
+import com.grash.model.enums.FileType;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.WorkOrderMeterTriggerCondition;
 import com.grash.repository.AssetCategoryRepository;
+import com.grash.repository.DeprecationRepository;
+import com.grash.repository.FileRepository;
 import com.grash.repository.MeterCategoryRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +42,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,13 +72,17 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
     private final FaultInjector faults;
     private final AssetCategoryRepository assetCategoryRepository;
     private final MeterCategoryRepository meterCategoryRepository;
+    private final DeprecationRepository deprecationRepository;
+    private final FileRepository fileRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     AssetLocationMeterDeletionIntegrationTest(TestOrganizations organizations, TestRecords records,
                                               TestAssetRecords module, MockMvc mockMvc, ObjectMapper objectMapper,
                                               JdbcTemplate jdbc, AssetCategoryRepository assetCategoryRepository,
-                                              MeterCategoryRepository meterCategoryRepository) {
+                                              MeterCategoryRepository meterCategoryRepository,
+                                              DeprecationRepository deprecationRepository,
+                                              FileRepository fileRepository) {
         this.organizations = organizations;
         this.records = records;
         this.module = module;
@@ -80,6 +92,8 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
         this.faults = new FaultInjector(jdbc);
         this.assetCategoryRepository = assetCategoryRepository;
         this.meterCategoryRepository = meterCategoryRepository;
+        this.deprecationRepository = deprecationRepository;
+        this.fileRepository = fileRepository;
     }
 
     @AfterEach
@@ -964,6 +978,98 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
             assertAll(
                     () -> assertEquals("a true", schemaOf("asset", "category_id")),
                     () -> assertEquals("a true", schemaOf("meter", "meter_category_id")));
+        }
+    }
+
+    // =====================================================================================================
+    // E-6: children removed with a trace (PPB-14, PPB-23)
+    // =====================================================================================================
+
+    @Nested
+    class Children {
+
+        @Test
+        void ca115_meterTriggerWithAssignees_200_triggerAndItsAssociationsDeleted_usersKept_recorded() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            WorkOrderMeterTrigger trigger = module.trigger(meter, WorkOrderMeterTriggerCondition.MORE_THAN, 10);
+            User technician = data.o1().technician();
+            jdbc.update("INSERT INTO work_order_meter_trigger_assigned_to (work_order_meter_trigger_id, "
+                    + "assigned_to_id) VALUES (?, ?)", trigger.getId(), technician.getId());
+
+            assertDeleted(call(delete("/work-order-meter-triggers/" + trigger.getId()), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("work_order_meter_trigger", trigger.getId())),
+                    () -> assertEquals(0, count("SELECT count(*) FROM work_order_meter_trigger_assigned_to "
+                            + "WHERE work_order_meter_trigger_id = ?", trigger.getId())),
+                    () -> assertEquals(1, rows("own_user", technician.getId())),
+                    () -> assertEquals(1, rows("meter", meter.getId())),
+                    () -> assertEquals(List.of("DELETE WORK_ORDER_METER_TRIGGER - " + trigger.getName()
+                            + " {\"work_order_meter_trigger_assigned_to\": 1} 0"), audit(data)));
+        }
+
+        @Test
+        void ca117_floorPlanWithImage_200_deleted_imageUnreferencedAndDeletableAfterwards_recorded() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            jdbc.update("UPDATE location SET custom_id = 'L-P14' WHERE id = ?", location.getId());
+            FloorPlan floorPlan = module.floorPlan(location);
+            File image = new File();
+            image.setName(TestRecords.unique("P-14 floor plan image"));
+            image.setPath("p14/" + TestRecords.unique("image"));
+            image.setType(FileType.IMAGE);
+            image.setCompany(data.o1().company());
+            Long f8 = fileRepository.saveAndFlush(image).getId();
+            jdbc.update("UPDATE floor_plan SET image_id = ? WHERE id = ?", f8, floorPlan.getId());
+
+            assertDeleted(call(delete("/floor-plans/" + floorPlan.getId()), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("floor_plan", floorPlan.getId())),
+                    () -> assertEquals(1, rows("file", f8), "the image is kept, without references"),
+                    () -> assertEquals(List.of("DELETE FLOOR_PLAN L-P14 " + floorPlan.getName() + " {} 0"),
+                            audit(data)));
+
+            assertDeleted(call(delete("/files/" + f8), data.o1().admin()));
+            assertEquals(0, rows("file", f8));
+        }
+
+        @Test
+        void ca130_manualDowntime_200_deleted_recorded() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company(), "A-P14", false);
+            Response created = call(post("/asset-downtimes").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"asset\":{\"id\":" + asset.getId() + "},\"startsOn\":\""
+                            + Instant.now().plusSeconds(60) + "\",\"duration\":3600}"), data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            Long downtime = json(created).get("id").asLong();
+
+            assertDeleted(call(delete("/asset-downtimes/" + downtime), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("asset_downtime", downtime)),
+                    () -> assertEquals(1, rows("asset", asset.getId())),
+                    () -> assertEquals(List.of("DELETE ASSET_DOWNTIME A-P14 - {} 0"), audit(data)));
+        }
+
+        @Test
+        void deprecation_200_deleted_assetPointerSetToNull_recorded() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company(), "A-P14", false);
+            Deprecation deprecation = new Deprecation();
+            deprecation.setCompany(data.o1().company());
+            Long id = deprecationRepository.saveAndFlush(deprecation).getId();
+            jdbc.update("UPDATE asset SET deprecation_id = ? WHERE id = ?", id, asset.getId());
+
+            assertDeleted(call(delete("/deprecations/" + id), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("deprecation", id)),
+                    () -> assertNull(jdbc.queryForObject("SELECT deprecation_id FROM asset WHERE id = ?", Long.class,
+                            asset.getId())),
+                    () -> assertEquals(List.of("DELETE DEPRECATION A-P14 - {} 0"), audit(data)));
+        }
+
+        @Test
+        void schema_customFieldValuesGoWithTheirMeterTrigger() {
+            assertEquals("c true", schemaOf("custom_field_value", "work_order_meter_trigger_id"));
         }
     }
 }

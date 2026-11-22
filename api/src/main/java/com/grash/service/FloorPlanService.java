@@ -4,6 +4,10 @@ import com.grash.dto.FloorPlanPatchDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.FloorPlanMapper;
 import com.grash.model.FloorPlan;
+import com.grash.model.Location;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.FloorPlanRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +27,7 @@ public class FloorPlanService {
     private final LocationService locationService;
     private final FloorPlanMapper floorPlanMapper;
     private final EntityManager em;
+    private final DeletionService deletionService;
 
     @Transactional
     public FloorPlan create(FloorPlan floorPlan) {
@@ -46,8 +51,17 @@ public class FloorPlanService {
         return floorPlanRepository.findAll();
     }
 
-    public void delete(Long id) {
-        floorPlanRepository.deleteById(id);
+    /**
+     * P-14 (PPB-14, PPB-23): deletes the floor plan and records it in the audit log with the folio of its location, in
+     * one transaction. Its image is kept, without references: it can be deleted afterwards.
+     */
+    @Transactional
+    public void delete(FloorPlan floorPlan, User actor) {
+        Long id = floorPlan.getId();
+        Location location = floorPlan.getLocation();
+        deletionService.delete(new AuditTarget(EntityType.FLOOR_PLAN, id, location.getCustomId(), floorPlan.getName(),
+                        location.getCompany().getId()), actor, AuditSource.API, null,
+                () -> floorPlanRepository.deleteById(id));
     }
 
     public Optional<FloorPlan> findById(Long id) {

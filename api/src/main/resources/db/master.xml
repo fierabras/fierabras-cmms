@@ -263,4 +263,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_22_1795383488_asset_and_meter_category_references_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_22_1795384003_meter_trigger_custom_field_values_cascade.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

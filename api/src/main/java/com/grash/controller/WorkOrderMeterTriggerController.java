@@ -103,7 +103,7 @@ public class WorkOrderMeterTriggerController {
         if (optionalWorkOrderMeterTrigger.isPresent()) {
             WorkOrderMeterTrigger savedWorkOrderMeterTrigger = optionalWorkOrderMeterTrigger.get();
             checkAccessToMeter(savedWorkOrderMeterTrigger.getMeter(), user, false);
-            workOrderMeterTriggerService.delete(id);
+            workOrderMeterTriggerService.delete(savedWorkOrderMeterTrigger, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("WorkOrderMeterTrigger not found", HttpStatus.NOT_FOUND);

@@ -94,7 +94,7 @@ public class FloorPlanController {
         if (optionalFloorPlan.isPresent()) {
             FloorPlan savedFloorPlan = optionalFloorPlan.get();
             checkAccessToFloorPlan(savedFloorPlan, user);
-            floorPlanService.delete(id);
+            floorPlanService.delete(savedFloorPlan, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("FloorPlan not found", HttpStatus.NOT_FOUND);

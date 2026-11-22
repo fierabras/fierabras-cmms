@@ -102,7 +102,7 @@ public class AssetDowntimeController {
         Optional<AssetDowntime> optionalAssetDowntime = assetDowntimeService.findById(id);
         if (optionalAssetDowntime.isPresent()) {
             if (canPatchAsset(optionalAssetDowntime.get().getAsset(), user)) {
-                assetDowntimeService.delete(id);
+                assetDowntimeService.delete(optionalAssetDowntime.get(), user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

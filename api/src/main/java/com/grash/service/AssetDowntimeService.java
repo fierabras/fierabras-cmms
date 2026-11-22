@@ -5,11 +5,15 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.exception.CustomException;
 import com.grash.mapper.AssetDowntimeMapper;
 import com.grash.model.AssetDowntime;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.AssetDowntimeRepository;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +25,7 @@ public class AssetDowntimeService {
     private final CompanyService companyService;
     private final AssetDowntimeMapper assetDowntimeMapper;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
 
     public AssetDowntime create(AssetDowntime assetDowntime, boolean manual) {
         if (manual && !licenseService.hasEntitlement(LicenseEntitlement.ASSET_DOWNTIME))
@@ -47,8 +52,16 @@ public class AssetDowntimeService {
         return assetDowntimeRepository.findAll();
     }
 
-    public void delete(Long id) {
-        assetDowntimeRepository.deleteById(id);
+    /**
+     * P-14 (PPB-14, PPB-23): deletes the downtime and records it in the audit log with the folio of its asset, in one
+     * transaction.
+     */
+    @Transactional
+    public void delete(AssetDowntime downtime, User actor) {
+        Long id = downtime.getId();
+        deletionService.delete(new AuditTarget(EntityType.ASSET_DOWNTIME, id, downtime.getAsset().getCustomId(), null,
+                        downtime.getCompany().getId()), actor, AuditSource.API, null,
+                () -> assetDowntimeRepository.deleteById(id));
     }
 
     public Optional<AssetDowntime> findById(Long id) {

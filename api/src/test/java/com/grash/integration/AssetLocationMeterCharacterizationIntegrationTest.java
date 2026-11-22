@@ -781,7 +781,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class Children {
 
         @Test
-        void meterTrigger_200_deletedWithItsAssignees_noAuditRecord() {
+        void meterTrigger_200_deletedWithItsAssignees_recorded() {
             CommonData data = data();
             WorkOrderMeterTrigger trigger = trigger(meter(data.o1().company(),
                     records.asset(data.o1().company())), WorkOrderMeterTriggerCondition.MORE_THAN, 10);
@@ -796,11 +796,11 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     () -> assertEquals(0, count("SELECT count(*) FROM work_order_meter_trigger_assigned_to "
                             + "WHERE work_order_meter_trigger_id = ?", trigger.getId())),
                     () -> assertEquals(1, rows("own_user", data.o1().technician().getId())),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(1, auditRecords(data), "P-14: recorded; before P-14 no record"));
         }
 
         @Test
-        void floorPlanWithImage_200_imageKept_noAuditRecord() {
+        void floorPlanWithImage_200_imageKept_recorded() {
             CommonData data = data();
             FloorPlan floorPlan = floorPlan(records.location(data.o1().company()));
             Long image = file(data.o1().company());
@@ -812,11 +812,11 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, rows("floor_plan", floorPlan.getId())),
                     () -> assertEquals(1, rows("file", image)),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(1, auditRecords(data), "P-14: recorded; before P-14 no record"));
         }
 
         @Test
-        void downtime_200_deleted_noAuditRecord() {
+        void downtime_200_deleted_recorded() {
             CommonData data = data();
             AssetDowntime downtime = records.downtime(records.asset(data.o1().company()));
 
@@ -825,11 +825,11 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             assertAll(
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, rows("asset_downtime", downtime.getId())),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(1, auditRecords(data), "P-14: recorded; before P-14 no record"));
         }
 
         @Test
-        void deprecation_200_deleted_assetPointerSetToNull_noAuditRecord() {
+        void deprecation_200_deleted_assetPointerSetToNull_recorded() {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Deprecation deprecation = new Deprecation();
@@ -844,7 +844,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, rows("deprecation", id)),
                     () -> assertNull(reference("asset", "deprecation_id", asset.getId())),
-                    () -> assertEquals(0, auditRecords(data)));
+                    () -> assertEquals(1, auditRecords(data), "P-14: recorded; before P-14 no record"));
         }
 
         @Test
@@ -1033,7 +1033,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "custom_field_value.asset_id -> asset fk_custom_field_value_asset c true",
                     "custom_field_value.location_id -> location fk_custom_field_value_location c true",
                     "custom_field_value.meter_id -> meter fk_custom_field_value_meter c true",
-                    "custom_field_value.work_order_meter_trigger_id -> work_order_meter_trigger fk_custom_field_value_work_order_meter_trigger a true",
+                    "custom_field_value.work_order_meter_trigger_id -> work_order_meter_trigger fk_custom_field_value_work_order_meter_trigger c true",
                     "floor_plan.location_id -> location fkidx35wj5iwhfi5xrcs9jdsr2d c false",
                     "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb a true",
                     "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi a true",

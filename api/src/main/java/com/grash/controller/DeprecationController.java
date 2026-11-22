@@ -70,7 +70,7 @@ public class DeprecationController {
         Optional<Deprecation> optionalDeprecation = deprecationService.findById(id);
         if (optionalDeprecation.isPresent()) {
             Deprecation savedDeprecation = optionalDeprecation.get();
-            deprecationService.delete(id);
+            deprecationService.delete(savedDeprecation, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Deprecation not found", HttpStatus.NOT_FOUND);
