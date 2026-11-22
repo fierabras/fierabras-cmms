@@ -60,12 +60,16 @@ public class TaskService {
      */
     @Transactional
     public void delete(Task task, User actor) {
+        // P-17 (E-3): the images of the task go with it in cascade (file.task_id); their objects after the commit
+        List<String> images = fileService.objectsOfTask(task.getId());
         if (task.getWorkOrder() == null) {
-            delete(task.getId());
-            return;
+            // P-17 (C-1): an image cited by another record answers 409, never 500; no rule nor record (P-15)
+            deletionService.deleteUnrecorded(() -> delete(task.getId()));
+        } else {
+            deletionService.delete(AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(),
+                    task.getWorkOrder()), actor, AuditSource.API, null, () -> taskRepository.deleteById(task.getId()));
         }
-        deletionService.delete(AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(),
-                task.getWorkOrder()), actor, AuditSource.API, null, () -> taskRepository.deleteById(task.getId()));
+        fileService.deleteObjectsAfterCommit(images);
     }
 
     public Optional<Task> findById(Long id) {

@@ -12,6 +12,7 @@ const conflictKeys: Record<string, string> = {
   COST_CATEGORY_IN_USE: 'cost_category_in_use',
   TIME_CATEGORY_IN_USE: 'time_category_in_use',
   CUSTOMER_IN_USE: 'customer_in_use',
+  FILE_IN_USE: 'file_in_use',
   WORK_ORDER_NOT_DELETABLE: 'work_order_not_deletable',
   WORK_ORDER_CLOSED: 'work_order_closed',
   WORK_ORDER_RETIRED: 'work_order_retired'

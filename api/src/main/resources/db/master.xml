@@ -251,4 +251,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_21_1795315315_category_references_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_22_1795363675_file_references_no_action.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

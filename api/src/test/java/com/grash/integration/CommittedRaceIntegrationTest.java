@@ -9,6 +9,7 @@ import com.grash.integration.support.TestRecords;
 import com.grash.integration.support.TestWorkOrders;
 import com.grash.integration.support.TestWorkOrders.Fixture;
 import com.grash.model.Asset;
+import com.grash.model.File;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.WorkOrderCategory;
@@ -26,6 +27,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -56,6 +58,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final WorkOrderCategoryRepository workOrderCategoryRepository;
+    private final FileRepository fileRepository;
     private CommonData data;
     private User superAdmin;
     private String admin;
@@ -74,6 +77,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.workOrderCategoryRepository = workOrderCategoryRepository;
+        this.fileRepository = fileRepository;
     }
 
     @BeforeEach
@@ -206,5 +210,30 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
                 Long.class, workOrder.getId()));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
                 data.o1().company().getId()));
+    }
+
+    @Test
+    void assetGivenTheImage_whileTheFileIsDeleted_409_referenceCommitted_noStorageDelete() throws Exception {
+        // P-17: the check of the rule does not see the uncommitted reference; the foreign key (NO ACTION) does
+        Asset asset = records.asset(data.o1().company());
+        File file = new File();
+        file.setName(TestRecords.unique("P-17 file"));
+        file.setPath("p17/" + file.getName());
+        file.setCompany(data.o1().company());
+        Long fileId = fileRepository.saveAndFlush(file).getId();
+
+        Response result = compete(() -> jdbc.update("UPDATE asset SET image_id = ? WHERE id = ?", fileId,
+                        asset.getId()),
+                () -> api.call(delete("/files/" + fileId), admin));
+
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("FILE_IN_USE"), result.toString());
+        assertTrue(result.body().contains("\"blockingTypes\":[\"ASSET\"]"), result.toString());
+        assertEquals(fileId, jdbc.queryForObject("SELECT image_id FROM asset WHERE id = ?", Long.class,
+                asset.getId()));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM file WHERE id = ?", Integer.class, fileId));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
+        assertEquals(List.of(), storageDouble.calls("delete"));
     }
 }

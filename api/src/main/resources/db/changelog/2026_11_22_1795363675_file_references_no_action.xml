@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-17 (PPB-18, PPB-21, PPB-22): a file that a record cites is not deleted; FileService answers 409
+         FILE_IN_USE first. Each reference to file gets its target rule and an index on its child column. Until now
+         deleting a file put these references in NULL, and deleting the audio of a request deleted the request.
+         NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows go in the same statement.
+         The work order revisions (work_order_aud) have no company: a purge deletes them first. The association
+         tables and the two signature_id keys keep their rule. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795363675_asset_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="asset" constraintName="fkhh76eg71adtmdagspxgbnmjd5"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="asset"
+                                 constraintName="fkhh76eg71adtmdagspxgbnmjd5" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="asset" indexName="idx_asset_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_image_id"/>
+            <dropForeignKeyConstraint baseTableName="asset" constraintName="fkhh76eg71adtmdagspxgbnmjd5"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="asset"
+                                     constraintName="fkhh76eg71adtmdagspxgbnmjd5" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_company_logo_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="company" constraintName="fkd2u2jho0d84whs0ryeg9ixs5t"/>
+        <addForeignKeyConstraint baseColumnNames="logo_id" baseTableName="company"
+                                 constraintName="fkd2u2jho0d84whs0ryeg9ixs5t" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="company" indexName="idx_company_logo_id">
+            <column name="logo_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company" indexName="idx_company_logo_id"/>
+            <dropForeignKeyConstraint baseTableName="company" constraintName="fkd2u2jho0d84whs0ryeg9ixs5t"/>
+            <addForeignKeyConstraint baseColumnNames="logo_id" baseTableName="company"
+                                     constraintName="fkd2u2jho0d84whs0ryeg9ixs5t" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_floor_plan_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="floor_plan" constraintName="fkfg2lm01gcc8gwo3kkm1l64vc0"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="floor_plan"
+                                 constraintName="fkfg2lm01gcc8gwo3kkm1l64vc0" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="floor_plan" indexName="idx_floor_plan_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="floor_plan" indexName="idx_floor_plan_image_id"/>
+            <dropForeignKeyConstraint baseTableName="floor_plan" constraintName="fkfg2lm01gcc8gwo3kkm1l64vc0"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="floor_plan"
+                                     constraintName="fkfg2lm01gcc8gwo3kkm1l64vc0" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_location_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="location" constraintName="fkjuo4g2hd6k6g383v9jr6megvr"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="location"
+                                 constraintName="fkjuo4g2hd6k6g383v9jr6megvr" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="location" indexName="idx_location_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="location" indexName="idx_location_image_id"/>
+            <dropForeignKeyConstraint baseTableName="location" constraintName="fkjuo4g2hd6k6g383v9jr6megvr"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="location"
+                                     constraintName="fkjuo4g2hd6k6g383v9jr6megvr" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_meter_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="meter" constraintName="fk7sr43v36jpwvqhwvuk0o8ob0w"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="meter"
+                                 constraintName="fk7sr43v36jpwvqhwvuk0o8ob0w" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="meter" indexName="idx_meter_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="meter" indexName="idx_meter_image_id"/>
+            <dropForeignKeyConstraint baseTableName="meter" constraintName="fk7sr43v36jpwvqhwvuk0o8ob0w"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="meter"
+                                     constraintName="fk7sr43v36jpwvqhwvuk0o8ob0w" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_own_user_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkqwalae8dm1n117q5p2k5xv8mk"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="own_user"
+                                 constraintName="fkqwalae8dm1n117q5p2k5xv8mk" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="own_user" indexName="idx_own_user_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user" indexName="idx_own_user_image_id"/>
+            <dropForeignKeyConstraint baseTableName="own_user" constraintName="fkqwalae8dm1n117q5p2k5xv8mk"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="own_user"
+                                     constraintName="fkqwalae8dm1n117q5p2k5xv8mk" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_part_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="part" constraintName="fkeh8vu21l8gci666ew34wnfgb9"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="part"
+                                 constraintName="fkeh8vu21l8gci666ew34wnfgb9" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="part" indexName="idx_part_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part" indexName="idx_part_image_id"/>
+            <dropForeignKeyConstraint baseTableName="part" constraintName="fkeh8vu21l8gci666ew34wnfgb9"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="part"
+                                     constraintName="fkeh8vu21l8gci666ew34wnfgb9" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_preventive_maintenance_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk5uad3bfd5192xkt6u5lx1lhjw"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="preventive_maintenance"
+                                 constraintName="fk5uad3bfd5192xkt6u5lx1lhjw" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_image_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk5uad3bfd5192xkt6u5lx1lhjw"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="preventive_maintenance"
+                                     constraintName="fk5uad3bfd5192xkt6u5lx1lhjw" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_request_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fk3j1uj2uh9af66u9jmfjtvraar"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="request"
+                                 constraintName="fk3j1uj2uh9af66u9jmfjtvraar" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_image_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fk3j1uj2uh9af66u9jmfjtvraar"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="request"
+                                     constraintName="fk3j1uj2uh9af66u9jmfjtvraar" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_request_audio_description_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fk_request_audio_description"/>
+        <addForeignKeyConstraint baseColumnNames="audio_description_id" baseTableName="request"
+                                 constraintName="fk_request_audio_description" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_audio_description_id">
+            <column name="audio_description_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_audio_description_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fk_request_audio_description"/>
+            <addForeignKeyConstraint baseColumnNames="audio_description_id" baseTableName="request"
+                                     constraintName="fk_request_audio_description" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_work_order_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fk3rui6pnm8in4f41ck17h595kg"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order"
+                                 constraintName="fk3rui6pnm8in4f41ck17h595kg" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_image_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fk3rui6pnm8in4f41ck17h595kg"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order"
+                                     constraintName="fk3rui6pnm8in4f41ck17h595kg" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_work_order_aud_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_image_id"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_image_id" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_image_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_image_id"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_image_id" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795363675_work_order_meter_trigger_image_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkbdhu8fagmbqqtyf07h10lap9o"/>
+        <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fkbdhu8fagmbqqtyf07h10lap9o" referencedColumnNames="id"
+                                 referencedTableName="file" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_image_id">
+            <column name="image_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_image_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkbdhu8fagmbqqtyf07h10lap9o"/>
+            <addForeignKeyConstraint baseColumnNames="image_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fkbdhu8fagmbqqtyf07h10lap9o" referencedColumnNames="id"
+                                     referencedTableName="file" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
