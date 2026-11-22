@@ -420,6 +420,22 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void toWorkOrderOfAnotherOrganization_403_relationUnchanged() {
+            // INV-10: the new owner of another organization is never reached, whatever its state
+            CommonData data = data();
+            Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
+            WorkOrder foreign = records.workOrder(data.o2().company(), null, Status.COMPLETE, false);
+            Map<String, Object> before = relation(f.relation());
+
+            Response response = move(api.login(data.o1().admin()), f.relation(), foreign.getId(),
+                    f.relatedWorkOrder());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains(CLOSED), response.toString());
+            assertEquals(before, relation(f.relation()));
+        }
+
+        @Test
         void betweenOpenWorkOrders_200_moved() {
             CommonData data = data();
             Fixture f = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
