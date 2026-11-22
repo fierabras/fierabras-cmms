@@ -2133,6 +2133,14 @@ const esJSON = {
   custom_field_in_use:
     'Este campo personalizado tiene valores en otros registros y no se puede eliminar.',
   currency_in_use: 'Esta moneda está en uso y no se puede eliminar.',
+  work_order_category_in_use:
+    'Esta categoría de orden de trabajo está en uso y no se puede eliminar.',
+  cost_category_in_use:
+    'Esta categoría de costo está en uso y no se puede eliminar.',
+  time_category_in_use:
+    'Esta categoría de tiempo está en uso y no se puede eliminar.',
+  customer_in_use:
+    'Este contratista está vinculado a registros cerrados, archivados o desactivados y no se puede eliminar.',
   in_use_blocked_by: 'Lo usan: {{types}}.',
   work_order_not_deletable:
     'Las órdenes de trabajo no se eliminan. Archive la orden de trabajo en su lugar.',

@@ -38,6 +38,7 @@ import Category from '../../../models/owns/category';
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import { PermissionEntity } from '../../../models/owns/role';
 import PermissionErrorMessage from '../components/PermissionErrorMessage';
+import { conflictMessage } from '../../../utils/conflicts';
 
 const IconButtonWrapper = styled(IconButton)(
   ({ theme }) => `
@@ -118,7 +119,10 @@ function CategoriesLayout(props: CategoriesLayoutProps) {
     showSnackBar(t('category_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('category_delete_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('category_delete_failure')),
+      'error'
+    );
 
   const tabs = [
     { value: '', label: t('work_orders') },
