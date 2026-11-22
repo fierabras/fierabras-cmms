@@ -649,7 +649,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class CategoryDeletion {
 
         @Test
-        void assetCategoryInUse_200_assetCategorySetToNull_noAuditRecord() {
+        void assetCategoryInUse_409_assetKeepsItsCategory_noAuditRecord() {
+            // before P-14: 200, the category of the asset set to null, no audit record
             CommonData data = data();
             AssetCategory category = assetCategoryRepository.saveAndFlush(new AssetCategory(
                     TestRecords.unique("P-14 asset category"), data.o1().company().getCompanySettings()));
@@ -659,13 +660,15 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = call(delete("/asset-categories/" + category.getId()), data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertNull(reference("asset", "category_id", asset.getId())),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("ASSET_CATEGORY_IN_USE"), response.toString()),
+                    () -> assertEquals(category.getId(), reference("asset", "category_id", asset.getId())),
                     () -> assertEquals(0, auditRecords(data)));
         }
 
         @Test
-        void meterCategoryInUse_200_meterCategorySetToNull_noAuditRecord() {
+        void meterCategoryInUse_409_meterKeepsItsCategory_noAuditRecord() {
+            // before P-14: 200, the category of the meter set to null, no audit record
             CommonData data = data();
             MeterCategory category = meterCategoryRepository.saveAndFlush(new MeterCategory(
                     TestRecords.unique("P-14 meter category"), data.o1().company().getCompanySettings()));
@@ -675,8 +678,9 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = call(delete("/meter-categories/" + category.getId()), data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertNull(reference("meter", "meter_category_id", meter.getId())),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("METER_CATEGORY_IN_USE"), response.toString()),
+                    () -> assertEquals(category.getId(), reference("meter", "meter_category_id", meter.getId())),
                     () -> assertEquals(0, auditRecords(data)));
         }
     }
@@ -1022,7 +1026,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     ORDER BY 1""", String.class);
 
             assertEquals(List.of(
-                    "asset.category_id -> asset_category fkhw44q3ymkd329b8b6mvqxatsh n false",
+                    "asset.category_id -> asset_category fkhw44q3ymkd329b8b6mvqxatsh a true",
                     "asset.location_id -> location fkoo11h2f4j12wv0axk6d8u1wy0 a true",
                     "asset.parent_asset_id -> asset fk6qu6wqhpppa2w4y09l3tt4q56 a true",
                     "asset_downtime.asset_id -> asset fkrbg55bho0cxaorbbt7jwskrpo c false",
@@ -1034,7 +1038,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb a true",
                     "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi a true",
                     "meter.location_id -> location fk8jgoj4oi6b9sjqeuh9v592a6q a true",
-                    "meter.meter_category_id -> meter_category fkoid61jgpxbr04np7rop8pag13 n false",
+                    "meter.meter_category_id -> meter_category fkoid61jgpxbr04np7rop8pag13 a true",
                     "own_user.location_id -> location fktmprdfwe8axkp8cobywe2gc1d a true",
                     "preventive_maintenance.asset_id -> asset fk2r1291umxjxrddelq96v3pl4n a true",
                     "preventive_maintenance.location_id -> location fk53hdmxmgd3fjb2fjsh43d1irf a true",

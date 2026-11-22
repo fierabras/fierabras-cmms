@@ -11,15 +11,19 @@ import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Asset;
+import com.grash.model.AssetCategory;
 import com.grash.model.AssetDowntime;
 import com.grash.model.Company;
 import com.grash.model.Location;
 import com.grash.model.Meter;
+import com.grash.model.MeterCategory;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.Workflow;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.WorkOrderMeterTriggerCondition;
+import com.grash.repository.AssetCategoryRepository;
+import com.grash.repository.MeterCategoryRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -58,12 +62,15 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbc;
     private final FaultInjector faults;
+    private final AssetCategoryRepository assetCategoryRepository;
+    private final MeterCategoryRepository meterCategoryRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     AssetLocationMeterDeletionIntegrationTest(TestOrganizations organizations, TestRecords records,
                                               TestAssetRecords module, MockMvc mockMvc, ObjectMapper objectMapper,
-                                              JdbcTemplate jdbc) {
+                                              JdbcTemplate jdbc, AssetCategoryRepository assetCategoryRepository,
+                                              MeterCategoryRepository meterCategoryRepository) {
         this.organizations = organizations;
         this.records = records;
         this.module = module;
@@ -71,6 +78,8 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
         this.objectMapper = objectMapper;
         this.jdbc = jdbc;
         this.faults = new FaultInjector(jdbc);
+        this.assetCategoryRepository = assetCategoryRepository;
+        this.meterCategoryRepository = meterCategoryRepository;
     }
 
     @AfterEach
@@ -844,6 +853,117 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
                     () -> assertEquals(2, count("SELECT count(*) FROM reading WHERE meter_id = ?", meter.getId())),
                     () -> assertEquals(workOrdersBefore + 1, count("SELECT count(*) FROM work_order WHERE "
                             + "company_id = ?", data.o1().company().getId()), "R2 fired the trigger"));
+        }
+    }
+
+    // =====================================================================================================
+    // E-4: asset and meter categories
+    // =====================================================================================================
+
+    @Nested
+    class CategoryDeletion {
+
+        private Long assetCategory(CommonData data) {
+            return assetCategoryRepository.saveAndFlush(new AssetCategory(TestRecords.unique("P-14 asset category"),
+                    data.o1().company().getCompanySettings())).getId();
+        }
+
+        private Long meterCategory(CommonData data) {
+            return meterCategoryRepository.saveAndFlush(new MeterCategory(TestRecords.unique("P-14 meter category"),
+                    data.o1().company().getCompanySettings())).getId();
+        }
+
+        @Test
+        void ca100_assetCategoryUsedByAnAsset_409WithAsset_noChanges() {
+            // D-P14-2: only assets cite an asset category
+            CommonData data = data();
+            Long category = assetCategory(data);
+            Asset asset = records.asset(data.o1().company());
+            jdbc.update("UPDATE asset SET category_id = ? WHERE id = ?", category, asset.getId());
+            assertBlockedBy(data, "/asset-categories/", "asset_category", category, "ASSET_CATEGORY_IN_USE", "ASSET",
+                    "asset", asset.getId());
+        }
+
+        @Test
+        void ca102_meterCategoryUsedByAMeter_409WithMeter_noChanges() {
+            CommonData data = data();
+            Long category = meterCategory(data);
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            jdbc.update("UPDATE meter SET meter_category_id = ? WHERE id = ?", category, meter.getId());
+            assertBlockedBy(data, "/meter-categories/", "meter_category", category, "METER_CATEGORY_IN_USE", "METER",
+                    "meter", meter.getId());
+        }
+
+        @Test
+        void assetCategoryGivenBetweenCheckAndDeletion_409WithAsset_never500() {
+            CommonData data = data();
+            Long category = assetCategory(data);
+            Asset asset = records.asset(data.o1().company());
+            faults.runBefore("asset_category", Operation.DELETE,
+                    "UPDATE asset SET category_id = " + category + " WHERE id = " + asset.getId());
+
+            Response response = call(delete("/asset-categories/" + category), data.o1().admin());
+
+            assertEquals(List.of("ASSET"), assertInUse(response, "ASSET_CATEGORY_IN_USE"));
+            assertEquals(1, rows("asset_category", category));
+        }
+
+        @Test
+        void meterCategoryGivenBetweenCheckAndDeletion_409WithMeter_never500() {
+            CommonData data = data();
+            Long category = meterCategory(data);
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            faults.runBefore("meter_category", Operation.DELETE,
+                    "UPDATE meter SET meter_category_id = " + category + " WHERE id = " + meter.getId());
+
+            Response response = call(delete("/meter-categories/" + category), data.o1().admin());
+
+            assertEquals(List.of("METER"), assertInUse(response, "METER_CATEGORY_IN_USE"));
+            assertEquals(1, rows("meter_category", category));
+        }
+
+        @Test
+        void unused_200_deletedAndRecorded() {
+            CommonData data = data();
+            Long assetCategory = assetCategory(data);
+            Long meterCategory = meterCategory(data);
+            String assetName = jdbc.queryForObject("SELECT name FROM asset_category WHERE id = ?", String.class,
+                    assetCategory);
+            String meterName = jdbc.queryForObject("SELECT name FROM meter_category WHERE id = ?", String.class,
+                    meterCategory);
+
+            assertDeleted(call(delete("/asset-categories/" + assetCategory), data.o1().admin()));
+            assertDeleted(call(delete("/meter-categories/" + meterCategory), data.o1().admin()));
+            assertEquals(List.of("DELETE ASSET_CATEGORY - " + assetName + " {} 0",
+                    "DELETE METER_CATEGORY - " + meterName + " {} 0"), audit(data));
+        }
+
+        @Test
+        void technicianNotCreator_403_otherOrganization_403_unknown_404_noAuditRecord() {
+            CommonData data = data();
+            Long assetCategory = assetCategory(data);
+            Long meterCategory = meterCategory(data);
+
+            List<Integer> statuses = List.of(
+                    call(delete("/asset-categories/" + assetCategory), data.o1().technician()).status(),
+                    call(delete("/meter-categories/" + meterCategory), data.o1().technician()).status(),
+                    call(delete("/asset-categories/" + assetCategory), data.o2().admin()).status(),
+                    call(delete("/meter-categories/" + meterCategory), data.o2().admin()).status(),
+                    call(delete("/asset-categories/" + Long.MAX_VALUE), data.o1().admin()).status(),
+                    call(delete("/meter-categories/" + Long.MAX_VALUE), data.o1().admin()).status());
+
+            assertAll(
+                    () -> assertEquals(List.of(403, 403, 403, 403, 404, 404), statuses),
+                    () -> assertEquals(1, rows("asset_category", assetCategory)),
+                    () -> assertEquals(1, rows("meter_category", meterCategory)),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void schema_referencesToTheCategoriesAreNoActionWithIndex() {
+            assertAll(
+                    () -> assertEquals("a true", schemaOf("asset", "category_id")),
+                    () -> assertEquals("a true", schemaOf("meter", "meter_category_id")));
         }
     }
 }

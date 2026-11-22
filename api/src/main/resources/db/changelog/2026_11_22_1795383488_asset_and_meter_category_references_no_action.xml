@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-14 (PPB-02, PPB-21, PPB-22): an asset category used by an asset, or a meter category used by a meter,
+         is not deleted. Those references become NO ACTION; until now deleting the category put them in NULL. Each
+         child column gets an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795383488_asset_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="asset" constraintName="fkhw44q3ymkd329b8b6mvqxatsh"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="asset"
+                                 constraintName="fkhw44q3ymkd329b8b6mvqxatsh" referencedColumnNames="id"
+                                 referencedTableName="asset_category" onDelete="NO ACTION"/>
+        <createIndex tableName="asset" indexName="idx_asset_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_category_id"/>
+            <dropForeignKeyConstraint baseTableName="asset" constraintName="fkhw44q3ymkd329b8b6mvqxatsh"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="asset"
+                                     constraintName="fkhw44q3ymkd329b8b6mvqxatsh" referencedColumnNames="id"
+                                     referencedTableName="asset_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795383488_meter_meter_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="meter" constraintName="fkoid61jgpxbr04np7rop8pag13"/>
+        <addForeignKeyConstraint baseColumnNames="meter_category_id" baseTableName="meter"
+                                 constraintName="fkoid61jgpxbr04np7rop8pag13" referencedColumnNames="id"
+                                 referencedTableName="meter_category" onDelete="NO ACTION"/>
+        <createIndex tableName="meter" indexName="idx_meter_meter_category_id">
+            <column name="meter_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="meter" indexName="idx_meter_meter_category_id"/>
+            <dropForeignKeyConstraint baseTableName="meter" constraintName="fkoid61jgpxbr04np7rop8pag13"/>
+            <addForeignKeyConstraint baseColumnNames="meter_category_id" baseTableName="meter"
+                                     constraintName="fkoid61jgpxbr04np7rop8pag13" referencedColumnNames="id"
+                                     referencedTableName="meter_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

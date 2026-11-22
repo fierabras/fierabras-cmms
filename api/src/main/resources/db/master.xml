@@ -261,4 +261,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_22_1795382854_meter_references_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_22_1795383488_asset_and_meter_category_references_no_action.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>
