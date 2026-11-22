@@ -495,4 +495,67 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
                     String.class, open.getId()));
         }
     }
+
+    // =====================================================================================================
+    // CA-P12C-05: automations after archiving (H1-12)
+    // =====================================================================================================
+
+    @Nested
+    class Automations {
+
+        private void assignOn(CommonData data, WFMainCondition condition, User user) {
+            WorkflowAction action = new WorkflowAction();
+            action.setCompany(data.o1().company());
+            action.setWorkOrderAction(WorkOrderAction.ASSIGN_USER);
+            action.setUser(user);
+            Workflow workflow = new Workflow();
+            workflow.setCompany(data.o1().company());
+            workflow.setTitle(TestRecords.unique("P-12c automation"));
+            workflow.setMainCondition(condition);
+            workflow.setAction(action);
+            workflowRepository.saveAndFlush(workflow);
+        }
+
+        @Test
+        void archive_automationDoesNotChangeTheArchivedWorkOrder_oneRetireRecord() {
+            CommonData data = data();
+            String admin = api.login(data.o1().admin());
+            assignOn(data, WFMainCondition.WORK_ORDER_ARCHIVED, data.o1().technician());
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            jdbc.update("UPDATE work_order SET first_time_to_react = now() WHERE id = ?", workOrder.getId());
+            Map<String, Object> before = new java.util.HashMap<>(jdbc.queryForMap(
+                    "SELECT * FROM work_order WHERE id = ?", workOrder.getId()));
+            ObjectNode shown = workOrders.shown(workOrder.getId(), admin);
+            shown.put("archived", true);
+
+            Response response = workOrders.call(patch("/work-orders/" + workOrder.getId()), admin, shown);
+
+            assertEquals(200, response.status(), response.toString());
+            Map<String, Object> after = new java.util.HashMap<>(jdbc.queryForMap(
+                    "SELECT * FROM work_order WHERE id = ?", workOrder.getId()));
+            assertEquals(true, after.get("archived"));
+            for (String changedByTheArchiving : List.of("archived", "updated_at", "updated_by")) {
+                before.remove(changedByTheArchiving);
+                after.remove(changedByTheArchiving);
+            }
+            assertEquals(before, after);
+            assertEquals(List.of("RETIRE"), jdbc.queryForList("SELECT action FROM audit_log WHERE company_id = ?",
+                    String.class, data.o1().company().getId()));
+        }
+
+        @Test
+        void close_automationStillChangesTheClosedWorkOrder() {
+            CommonData data = data();
+            assignOn(data, WFMainCondition.WORK_ORDER_CLOSED, data.o1().technician());
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            Response response = workOrders.call(patch("/work-orders/" + workOrder.getId() + "/change-status"),
+                    api.login(data.o1().admin()), Map.of("status", "COMPLETE"));
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(Status.COMPLETE, status(workOrder.getId()));
+            assertEquals(data.o1().technician().getId(), jdbc.queryForObject(
+                    "SELECT primary_user_id FROM work_order WHERE id = ?", Long.class, workOrder.getId()));
+        }
+    }
 }
