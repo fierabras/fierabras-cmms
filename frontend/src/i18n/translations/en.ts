@@ -1984,6 +1984,7 @@ const locale = {
   entity_type_LABOR: 'Labor',
   entity_type_PREVENTIVE_MAINTENANCE: 'Preventive maintenance',
   entity_type_REQUEST: 'Request',
+  entity_type_REQUEST_PORTAL: 'Request portal',
   entity_type_TASK_BASE: 'Task',
   entity_type_TEAM: 'Team',
   entity_type_WORK_ORDER_HISTORY: 'Work order history',
@@ -2025,6 +2026,13 @@ const locale = {
     'This work order is complete: its labor, costs, tasks, parts, links, files, assignees and custom fields cannot change. Reopen it first.',
   work_order_retired:
     'This work order is archived and cannot change. Restore it first.',
+  request_closed:
+    'This request was already approved or rejected and can no longer be changed or deleted.',
+  request_portal_in_use:
+    'This request portal has received requests and cannot be deleted.',
+  request_under_review:
+    'This request is being reviewed by another user. Try again.',
+  request_approve_failure: "The Request couldn't be approved",
   restore: 'Restore',
   wo_restore_confirm: 'Are you sure you want to restore this Work Order ',
   wo_restore_success: 'The Work Order has been restored',

@@ -2112,6 +2112,7 @@ const esJSON = {
   entity_type_LABOR: 'Mano de obra',
   entity_type_PREVENTIVE_MAINTENANCE: 'Mantenimiento preventivo',
   entity_type_REQUEST: 'Solicitud',
+  entity_type_REQUEST_PORTAL: 'Portal de solicitudes',
   entity_type_TASK_BASE: 'Tarea',
   entity_type_TEAM: 'Equipo',
   entity_type_WORK_ORDER_HISTORY: 'Historial de la orden de trabajo',
@@ -2155,6 +2156,13 @@ const esJSON = {
     'Esta orden de trabajo está completada: su mano de obra, costos, tareas, repuestos, vínculos, archivos, asignados y campos personalizados no pueden cambiar. Reábrala primero.',
   work_order_retired:
     'Esta orden de trabajo está archivada y no puede cambiar. Restáurela primero.',
+  request_closed:
+    'Esta solicitud ya fue aprobada o rechazada; ya no se puede modificar ni eliminar.',
+  request_portal_in_use:
+    'Este portal ya recibió solicitudes y no se puede eliminar.',
+  request_under_review:
+    'Otro usuario está revisando esta solicitud. Inténtelo de nuevo.',
+  request_approve_failure: 'La solicitud no pudo ser aprobada.',
   restore: 'Restaurar',
   wo_restore_confirm: '¿Está seguro de que desea restaurar esta orden de trabajo ',
   wo_restore_success: 'La orden de trabajo ha sido restaurada.',
