@@ -1343,6 +1343,9 @@ const locale = {
   manufacturer: 'Manufacturer',
   power: 'Power',
   import_error: "The import didn't succeed",
+  import_rows_rejected:
+    '{{total}} rows were not imported and their records did not change: {{rows}}',
+  import_row_rejected: 'Row {{row}} (ID {{id}}): {{reason}}',
   request_upgrade: 'Request upgrade',
   operation_success: 'The operation is a success',
   CANCELLED: 'Rejected',

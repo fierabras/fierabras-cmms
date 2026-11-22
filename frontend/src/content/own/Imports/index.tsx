@@ -42,11 +42,20 @@ import {
 import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import FeatureErrorMessage from '../components/FeatureErrorMessage';
 import api from '../../../utils/api';
+import { conflictCodeMessage } from '../../../utils/conflicts';
 import i18n from 'i18next';
 import downloadFile from 'downloadjs';
 import useImport, { EntityType } from 'src/hooks/useImport';
 
 interface OwnProps {}
+
+// P-12c (W-2): a row rejected by the import, as the API sends it
+interface ImportRejection {
+  row: number;
+  id: number;
+  code: string;
+  message: string;
+}
 
 export interface OwnHeader {
   label: string;
@@ -254,6 +263,30 @@ const Import = ({}: OwnProps) => {
           }),
           'success'
         );
+        // P-12c (W-2): the rows the API did not import (a closed or archived work order), each with its reason
+        const rejected =
+          (response as ImportResponse & { rejected?: ImportRejection[] })
+            .rejected ?? [];
+        if (rejected.length)
+          showSnackBar(
+            t('import_rows_rejected', {
+              total: rejected.length,
+              rows: rejected
+                .map((rejection) =>
+                  t('import_row_rejected', {
+                    row: rejection.row,
+                    id: rejection.id,
+                    reason: conflictCodeMessage(
+                      rejection.code,
+                      t,
+                      rejection.message
+                    )
+                  })
+                )
+                .join(' ')
+            }),
+            'error'
+          );
         setOpenModal(false);
         reset();
       })
