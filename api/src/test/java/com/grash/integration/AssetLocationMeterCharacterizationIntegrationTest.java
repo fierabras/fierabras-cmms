@@ -880,7 +880,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class DisabledUser {
 
         @Test
-        void asPrimaryUserOfANewAsset_200() {
+        void asPrimaryUserOfANewAsset_409UserRetired() {
+            // before P-14: 200, the asset created with the disabled user
             CommonData data = data();
             User technician = data.o1().technician();
             disable(technician);
@@ -888,11 +889,13 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = send(post("/assets"), "{\"name\":\"" + TestRecords.unique("P-14 asset")
                     + "\",\"primaryUser\":{\"id\":" + technician.getId() + "}}", data.o1().admin());
 
-            assertEquals(technician.getId(), reference("asset", "primary_user_id", id(response)));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("USER_RETIRED"), response.toString());
         }
 
         @Test
-        void assignedToAnEditedAsset_200() {
+        void assignedToAnEditedAsset_409UserRetired() {
+            // before P-14: 200, the disabled user assigned
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             User technician = data.o1().technician();
@@ -903,13 +906,14 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(1, count("SELECT count(*) FROM t_asset_user_associations WHERE id_asset = ? "
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM t_asset_user_associations WHERE id_asset = ? "
                             + "AND id_user = ?", asset.getId(), technician.getId())));
         }
 
         @Test
-        void asWorkerOfANewLocation_200() {
+        void asWorkerOfANewLocation_409UserRetired() {
+            // before P-14: 200
             CommonData data = data();
             User technician = data.o1().technician();
             disable(technician);
@@ -917,12 +921,13 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = send(post("/locations"), "{\"name\":\"" + TestRecords.unique("P-14 location")
                     + "\",\"workers\":[{\"id\":" + technician.getId() + "}]}", data.o1().admin());
 
-            assertEquals(1, count("SELECT count(*) FROM t_location_user_associations WHERE id_location = ? "
-                    + "AND id_user = ?", id(response), technician.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("USER_RETIRED"), response.toString());
         }
 
         @Test
-        void asUserOfANewMeter_200() {
+        void asUserOfANewMeter_409UserRetired() {
+            // before P-14: 200
             CommonData data = data();
             User technician = data.o1().technician();
             disable(technician);
@@ -932,12 +937,13 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     + "\",\"updateFrequency\":1,\"asset\":{\"id\":" + asset.getId() + "},\"users\":[{\"id\":"
                     + technician.getId() + "}]}", data.o1().admin());
 
-            assertEquals(1, count("SELECT count(*) FROM t_meter_user_associations WHERE id_meter = ? "
-                    + "AND id_user = ?", id(response), technician.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("USER_RETIRED"), response.toString());
         }
 
         @Test
-        void asPrimaryUserOfANewMeterTrigger_200() {
+        void asPrimaryUserOfANewMeterTrigger_409UserRetired() {
+            // before P-14: 200
             CommonData data = data();
             User technician = data.o1().technician();
             disable(technician);
@@ -948,8 +954,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     + "\"value\":10,\"waitBefore\":0,\"meter\":{\"id\":" + meter.getId() + "},\"primaryUser\":{\"id\":"
                     + technician.getId() + "}}", data.o1().admin());
 
-            assertEquals(technician.getId(), reference("work_order_meter_trigger", "primary_user_id",
-                    id(response)));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("USER_RETIRED"), response.toString());
         }
     }
 

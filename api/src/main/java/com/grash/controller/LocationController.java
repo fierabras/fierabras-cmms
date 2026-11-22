@@ -31,6 +31,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -150,6 +151,8 @@ public class LocationController {
                            HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.LOCATIONS)) {
+            // P-14 (E-8): a disabled user is not accepted as a new reference
+            userService.rejectRetired(List.of(), locationReq.getWorkers());
             Location savedLocation = locationService.create(locationReq, user.getCompany());
             locationService.notify(savedLocation, Helper.getLocale(user));
             return locationMapper.toShowDto(savedLocation, locationService);
@@ -165,10 +168,13 @@ public class LocationController {
         Optional<Location> optionalLocation = locationService.findById(id);
         if (optionalLocation.isPresent()) {
             Location savedLocation = optionalLocation.get();
+            List<User> previousWorkers = new ArrayList<>(savedLocation.getWorkers());
             em.detach(savedLocation);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.LOCATIONS) || user.getId().equals(savedLocation.getCreatedBy())) {
                 if (location.getParentLocation() != null && location.getParentLocation().getId().equals(id))
                     throw new CustomException("Parent location cannot be the same id", HttpStatus.NOT_ACCEPTABLE);
+                // P-14 (E-8): a disabled user is not accepted as a new reference
+                userService.rejectRetired(previousWorkers, location.getWorkers());
 
                 Location patchedLocation = locationService.update(id, location, user.getCompany());
                 locationService.patchNotify(savedLocation, patchedLocation, Helper.getLocale(user));

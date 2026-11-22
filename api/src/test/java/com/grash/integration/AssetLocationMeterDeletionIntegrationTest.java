@@ -1072,4 +1072,206 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
             assertEquals("c true", schemaOf("custom_field_value", "work_order_meter_trigger_id"));
         }
     }
+
+    // =====================================================================================================
+    // E-8: a disabled user is not accepted as a new reference (PPB-08)
+    // =====================================================================================================
+
+    @Nested
+    class DisabledUser {
+
+        private static final String USER_RETIRED = "USER_RETIRED";
+
+        private Response send(MockHttpServletRequestBuilder request, String body, User user) {
+            return call(request.contentType(MediaType.APPLICATION_JSON).content(body), user);
+        }
+
+        private String ids(User... users) {
+            return "[" + String.join(",", List.of(users).stream().map(u -> "{\"id\":" + u.getId() + "}").toList())
+                    + "]";
+        }
+
+        private void assertRetired(Response response) {
+            assertEquals(List.of(), assertInUse(response, USER_RETIRED));
+        }
+
+        private long count(String table, CommonData data) {
+            return AssetLocationMeterDeletionIntegrationTest.this.count("SELECT count(*) FROM " + table
+                    + " WHERE company_id = ?", data.o1().company().getId());
+        }
+
+        @Test
+        void newAssetWithADisabledPrimaryUser_409_notCreated() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            long assets = count("asset", data);
+
+            assertRetired(send(post("/assets"), "{\"name\":\"" + TestRecords.unique("P-14 asset")
+                    + "\",\"primaryUser\":{\"id\":" + data.o1().technician().getId() + "}}", data.o1().admin()));
+            assertEquals(assets, count("asset", data));
+        }
+
+        @Test
+        void editedAssetGivenADisabledUser_409_unchanged() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            disable(data.o1().technician());
+            List<Map<String, Object>> before = row("asset", asset.getId());
+
+            assertRetired(send(patch("/assets/" + asset.getId()), "{\"name\":\"" + asset.getName()
+                    + "\",\"status\":\"OPERATIONAL\",\"assignedTo\":" + ids(data.o1().technician()) + "}",
+                    data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(before, row("asset", asset.getId())),
+                    () -> assertEquals(0, AssetLocationMeterDeletionIntegrationTest.this.count(
+                            "SELECT count(*) FROM t_asset_user_associations WHERE id_asset = ?", asset.getId())));
+        }
+
+        @Test
+        void editedAssetKeepingAUserDisabledAfterwards_200() {
+            // the previous references are kept (PPB-08)
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            User technician = data.o1().technician();
+            jdbc.update("INSERT INTO t_asset_user_associations (id_asset, id_user) VALUES (?, ?)", asset.getId(),
+                    technician.getId());
+            jdbc.update("UPDATE asset SET primary_user_id = ? WHERE id = ?", technician.getId(), asset.getId());
+            disable(technician);
+
+            Response response = send(patch("/assets/" + asset.getId()), "{\"name\":\"P-14 renamed\","
+                    + "\"status\":\"OPERATIONAL\",\"primaryUser\":{\"id\":" + technician.getId() + "},\"assignedTo\":"
+                    + ids(technician) + "}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+        }
+
+        @Test
+        void newLocationWithADisabledWorker_409_notCreated() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            long locations = count("location", data);
+
+            assertRetired(send(post("/locations"), "{\"name\":\"" + TestRecords.unique("P-14 location")
+                    + "\",\"workers\":" + ids(data.o1().technician()) + "}", data.o1().admin()));
+            assertEquals(locations, count("location", data));
+        }
+
+        @Test
+        void editedLocationGivenADisabledWorker_409_unchanged() {
+            CommonData data = data();
+            Location location = records.location(data.o1().company());
+            disable(data.o1().technician());
+
+            assertRetired(send(patch("/locations/" + location.getId()), "{\"name\":\"" + location.getName()
+                    + "\",\"workers\":" + ids(data.o1().technician()) + "}", data.o1().admin()));
+            assertEquals(0, AssetLocationMeterDeletionIntegrationTest.this.count(
+                    "SELECT count(*) FROM t_location_user_associations WHERE id_location = ?", location.getId()));
+        }
+
+        @Test
+        void newMeterWithADisabledUser_409_notCreated() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            disable(data.o1().technician());
+            long meters = count("meter", data);
+
+            assertRetired(send(post("/meters"), "{\"name\":\"" + TestRecords.unique("P-14 meter")
+                    + "\",\"updateFrequency\":1,\"asset\":{\"id\":" + asset.getId() + "},\"users\":"
+                    + ids(data.o1().technician()) + "}", data.o1().admin()));
+            assertEquals(meters, count("meter", data));
+        }
+
+        @Test
+        void editedMeterGivenADisabledUser_409_unchanged() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            disable(data.o1().technician());
+
+            assertRetired(send(patch("/meters/" + meter.getId()), "{\"name\":\"" + meter.getName()
+                    + "\",\"updateFrequency\":1,\"users\":" + ids(data.o1().technician()) + "}", data.o1().admin()));
+            assertEquals(0, AssetLocationMeterDeletionIntegrationTest.this.count(
+                    "SELECT count(*) FROM t_meter_user_associations WHERE id_meter = ?", meter.getId()));
+        }
+
+        @Test
+        void newMeterTriggerWithADisabledPrimaryUser_409_notCreated() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            disable(data.o1().technician());
+            long triggers = count("work_order_meter_trigger", data);
+
+            assertRetired(send(post("/work-order-meter-triggers"), "{\"name\":\"" + TestRecords.unique("P-14 trigger")
+                    + "\",\"title\":\"P-14\",\"triggerCondition\":\"MORE_THAN\",\"value\":10,\"waitBefore\":0,"
+                    + "\"meter\":{\"id\":" + meter.getId() + "},\"primaryUser\":{\"id\":"
+                    + data.o1().technician().getId() + "}}", data.o1().admin()));
+            assertEquals(triggers, count("work_order_meter_trigger", data));
+        }
+
+        @Test
+        void editedMeterTriggerGivenADisabledUser_409_unchanged() {
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            WorkOrderMeterTrigger trigger = module.trigger(meter, WorkOrderMeterTriggerCondition.MORE_THAN, 10);
+            disable(data.o1().technician());
+            List<Map<String, Object>> before = row("work_order_meter_trigger", trigger.getId());
+
+            assertRetired(send(patch("/work-order-meter-triggers/" + trigger.getId()), "{\"name\":\""
+                    + trigger.getName() + "\",\"title\":\"P-14\",\"triggerCondition\":\"MORE_THAN\",\"value\":10,"
+                    + "\"assignedTo\":" + ids(data.o1().technician()) + "}", data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(before, row("work_order_meter_trigger", trigger.getId())),
+                    () -> assertEquals(0, AssetLocationMeterDeletionIntegrationTest.this.count(
+                            "SELECT count(*) FROM work_order_meter_trigger_assigned_to "
+                                    + "WHERE work_order_meter_trigger_id = ?", trigger.getId())));
+        }
+    }
+
+    // =====================================================================================================
+    // E-9: no route of the package deletes file rows (PPB-19, TD-P17-05)
+    // =====================================================================================================
+
+    @Nested
+    class StoredObjects {
+
+        @Test
+        void noCascadePathFromAssetLocationOrMeterReachesFile() {
+            List<String> paths = jdbc.queryForList("""
+                    WITH RECURSIVE cascade_path(tbl, path) AS (
+                        SELECT c.conrelid, c.confrelid::regclass::text || ' -> ' || c.conrelid::regclass::text
+                        FROM pg_constraint c
+                        WHERE c.contype = 'f' AND c.confdeltype = 'c'
+                          AND c.confrelid IN ('asset'::regclass, 'location'::regclass, 'meter'::regclass)
+                        UNION
+                        SELECT c.conrelid, p.path || ' -> ' || c.conrelid::regclass::text
+                        FROM pg_constraint c JOIN cascade_path p ON c.confrelid = p.tbl
+                        WHERE c.contype = 'f' AND c.confdeltype = 'c' AND c.conrelid <> c.confrelid
+                          AND length(p.path) < 400)
+                    SELECT path FROM cascade_path WHERE tbl = 'file'::regclass""", String.class);
+
+            assertEquals(List.of(), paths);
+        }
+
+        @Test
+        void allowedDeletions_deleteNoFileRow_andNoStoredObject() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            records.downtime(asset);
+            Location location = records.location(data.o1().company());
+            module.floorPlan(location);
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            long files = AssetLocationMeterDeletionIntegrationTest.this.count("SELECT count(*) FROM file");
+
+            assertDeleted(call(delete("/assets/" + asset.getId()), data.o1().admin()));
+            assertDeleted(call(delete("/locations/" + location.getId()), data.o1().admin()));
+            assertDeleted(call(delete("/meters/" + meter.getId()), data.o1().admin()));
+
+            assertAll(
+                    () -> assertEquals(files, AssetLocationMeterDeletionIntegrationTest.this.count(
+                            "SELECT count(*) FROM file")),
+                    () -> assertEquals(0, AssetLocationMeterDeletionIntegrationTest.this.count(
+                            "SELECT coalesce(sum(storage_objects), 0) FROM audit_log WHERE company_id = ?",
+                            data.o1().company().getId())),
+                    () -> assertTrue(storageDouble.calls("delete").isEmpty(), "no stored object deleted"));
+        }
+    }
 }
