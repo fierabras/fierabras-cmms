@@ -339,12 +339,13 @@ public class RequestController {
     public ResponseEntity<SuccessResponse> delete(@PathVariable("id") Long id, HttpServletRequest req) {
         User user = userService.whoami(req);
 
-        Optional<Request> optionalRequest = requestService.findById(id);
+        // P-13 (D-P13-1): locked as a review is, so that deleting and approving the same request do not overlap
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
             if (user.getId().equals(savedRequest.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.REQUESTS)) {
-                requestService.delete(id);
+                requestService.delete(savedRequest, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

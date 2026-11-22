@@ -10,10 +10,13 @@ import com.grash.dto.RequestShowDTO;
 import com.grash.dto.cutomField.CustomFieldValuePostDTO;
 import com.grash.dto.license.LicenseEntitlement;
 import com.grash.dto.workOrder.WorkOrderPostDTO;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.RequestMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.Priority;
@@ -56,6 +59,11 @@ public class RequestService {
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final OrderedIdQuery orderedIdQuery;
+    private final DeletionService deletionService;
+
+    public static final String REQUEST_CLOSED = "REQUEST_CLOSED";
+    private static final String REQUEST_CLOSED_MESSAGE = "This request is already approved or rejected and cannot be "
+            + "changed or deleted";
 
 
     @Transactional
@@ -150,8 +158,24 @@ public class RequestService {
         return requestRepository.findAll();
     }
 
-    public void delete(Long id) {
-        requestRepository.deleteById(id);
+    /**
+     * P-13 (PPB-05, PPB-23): only a pending request is deleted, and its deletion is recorded. Call it with the
+     * request locked ({@link #findByIdForReview}), so that a concurrent review either waits or finds it gone.
+     */
+    @Transactional
+    public void delete(Request request, User actor) {
+        rejectIfClosed(request);
+        deletionService.delete(new AuditTarget(EntityType.REQUEST, request.getId(), request.getCustomId(),
+                        request.getTitle(), request.getCompany().getId()), actor, AuditSource.API, null,
+                () -> requestRepository.delete(request));
+    }
+
+    /**
+     * P-13 (PPB-05, PPB-15): an approved or rejected request is closed: it is neither changed nor deleted.
+     */
+    public static void rejectIfClosed(Request request) {
+        if (request.getWorkOrder() != null || request.isCancelled())
+            throw new ConflictException(REQUEST_CLOSED, REQUEST_CLOSED_MESSAGE);
     }
 
     public Optional<Request> findById(Long id) {

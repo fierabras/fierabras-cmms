@@ -52,11 +52,5 @@ public class Request extends WorkOrderBase {
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CustomFieldValue> customFieldValues = new ArrayList<>();
 
-    @PreRemove
-    private void preRemove() {
-        if (workOrder != null)
-            workOrder.setParentRequest(null);
-    }
-
 }
 

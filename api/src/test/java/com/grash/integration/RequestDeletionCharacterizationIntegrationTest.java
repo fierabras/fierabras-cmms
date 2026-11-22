@@ -165,7 +165,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
     class DeleteRequest {
 
         @Test
-        void pendingByItsCreatorWithoutDeleteOther_200_deleted_notRecorded() {
+        void pendingByItsCreatorWithoutDeleteOther_200_deleted_recorded() {
             CommonData data = data();
             Long request = requestOfTechnician(data);
 
@@ -174,12 +174,12 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             assertAll(
                     () -> assertEquals(200, response.status(), response.toString()),
                     () -> assertEquals(0, requests(request)),
-                    () -> assertEquals(0, auditRecords(data), "today the deletion is not recorded"));
+                    () -> assertEquals(1, auditRecords(data), "P-13: the deletion is recorded"));
         }
 
         @Test
-        void approvedByItsCreator_200_deleted_workOrderLosesItsRequest() {
-            // TD-009: the @PreRemove of Request puts work_order.parent_request_id in NULL
+        void approvedByItsCreator_409_workOrderKeepsItsRequest() {
+            // TD-009 closed by P-13: an approved request is not deleted
             CommonData data = data();
             Long request = requestOfTechnician(data);
             Response approved = approve(request, api.login(data.o1().admin()));
@@ -189,14 +189,15 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = deleteRequest(request, api.login(data.o1().technician()));
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, requests(request)),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("REQUEST_CLOSED"), response.toString()),
+                    () -> assertEquals(1, requests(request)),
                     () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ? "
-                            + "AND parent_request_id IS NULL", workOrder), "the work order loses its request"));
+                            + "AND parent_request_id = ?", workOrder, request), "P-13: the work order keeps it"));
         }
 
         @Test
-        void rejectedByA_200_deleted() {
+        void rejectedByA_409_kept() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Long request = request(data.o1().admin(), null);
@@ -205,8 +206,9 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = deleteRequest(request, admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, requests(request)));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("REQUEST_CLOSED"), response.toString()),
+                    () -> assertEquals(1, requests(request)));
         }
 
         @Test
