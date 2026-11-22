@@ -27,6 +27,7 @@ public enum EntityType {
     RELATION("relation"),
     REQUEST("request"),
     REQUEST_PORTAL("request_portal"),
+    REQUEST_PORTAL_FIELD("request_portal_field"),
     ROLE("role"),
     TASK("task"),
     TASK_BASE("task_base"),

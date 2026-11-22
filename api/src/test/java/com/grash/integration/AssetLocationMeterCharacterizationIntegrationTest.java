@@ -289,8 +289,21 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             return call(delete("/assets/" + asset.getId()), user);
         }
 
+        /**
+         * P-14: asserts 409 ASSET_IN_USE with {@code type}, the asset kept and no audit record.
+         */
+        private void assertInUse(Response response, Asset asset, CommonData data, String type) {
+            assertAll(
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("\"code\":\"ASSET_IN_USE\""), response.toString()),
+                    () -> assertTrue(response.body().contains("\"" + type + "\""), response.toString()),
+                    () -> assertEquals(1, rows("asset", asset.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
         @Test
-        void childAsset_200_subtreeDeletedInCascade() {
+        void childAsset_409_subtreeKept() {
+            // before P-14: 200, the child deleted in cascade
             CommonData data = data();
             Asset parent = records.asset(data.o1().company());
             Asset child = records.asset(data.o1().company());
@@ -298,14 +311,13 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteAsset(parent, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("asset", child.getId())),
-                    () -> assertEquals(1, auditRecords(data)));
+            assertInUse(response, parent, data, "ASSET");
+            assertEquals(1, rows("asset", child.getId()));
         }
 
         @Test
-        void meterWithReading_200_meterAndReadingDeletedInCascade() {
+        void meterWithReading_409_meterAndReadingKept() {
+            // before P-14: 200, the meter and its reading deleted in cascade
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Meter meter = meter(data.o1().company(), asset);
@@ -313,27 +325,28 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteAsset(asset, data.o1().admin());
 
+            assertInUse(response, asset, data, "METER");
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("meter", meter.getId())),
-                    () -> assertEquals(0, rows("reading", reading.getId())));
+                    () -> assertEquals(1, rows("meter", meter.getId())),
+                    () -> assertEquals(1, rows("reading", reading.getId())));
         }
 
         @Test
-        void taskBase_200_deletedInCascade() {
+        void taskBase_409_kept() {
+            // before P-14: 200, the task deleted in cascade
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             TaskBase taskBase = taskBase(data.o1().company(), asset, null);
 
             Response response = deleteAsset(asset, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("task_base", taskBase.getId())));
+            assertInUse(response, asset, data, "TASK_BASE");
+            assertEquals(1, rows("task_base", taskBase.getId()));
         }
 
         @Test
-        void requestPreventiveMaintenanceAndMeterTrigger_200_theirAssetSetToNull() {
+        void requestPreventiveMaintenanceAndMeterTrigger_409_theyKeepTheAsset() {
+            // before P-14: 200, their asset set to null
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = records.asset(company);
@@ -349,28 +362,33 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteAsset(asset, data.o1().admin());
 
+            assertInUse(response, asset, data, "REQUEST");
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertNull(reference("request", "asset_id", request.getId())),
-                    () -> assertNull(reference("preventive_maintenance", "asset_id", preventiveMaintenance.getId())),
-                    () -> assertNull(reference("work_order_meter_trigger", "asset_id", trigger.getId())));
+                    () -> assertTrue(response.body().contains("\"PREVENTIVE_MAINTENANCE\""), response.toString()),
+                    () -> assertTrue(response.body().contains("\"WORK_ORDER_METER_TRIGGER\""), response.toString()),
+                    () -> assertEquals(asset.getId(), reference("request", "asset_id", request.getId())),
+                    () -> assertEquals(asset.getId(), reference("preventive_maintenance", "asset_id",
+                            preventiveMaintenance.getId())),
+                    () -> assertEquals(asset.getId(), reference("work_order_meter_trigger", "asset_id",
+                            trigger.getId())));
         }
 
         @Test
-        void workflowAction_200_actionAndWholeWorkflowDeletedInCascade() {
+        void workflowAction_409_workflowKept() {
+            // before P-14: 200, the action and the whole workflow deleted in cascade
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Workflow workflow = workflow(data.o1().company(), asset, null, null, null);
 
             Response response = deleteAsset(asset, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("workflow", workflow.getId())));
+            assertInUse(response, asset, data, "WORKFLOW_ACTION");
+            assertEquals(1, rows("workflow", workflow.getId()));
         }
 
         @Test
-        void workflowCondition_200_conditionDeletedInCascade_workflowKept() {
+        void workflowCondition_409_conditionKept() {
+            // before P-14: 200, the condition deleted in cascade
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Workflow workflow = workflow(data.o1().company(), records.asset(data.o1().company()), null, asset, null);
@@ -378,29 +396,25 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteAsset(asset, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("workflow_condition", condition)),
-                    () -> assertEquals(1, rows("workflow", workflow.getId())));
+            assertInUse(response, asset, data, "WORKFLOW_CONDITION");
+            assertEquals(1, rows("workflow_condition", condition));
         }
 
         @Test
-        void portalField_409AssetInUseWithoutTypes_fieldKept() {
+        void portalField_409WithRequestPortalField_fieldKept() {
+            // before P-14: 409 ASSET_IN_USE without types
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             records.portalCiting(data.o1().company(), null, asset);
 
             Response response = deleteAsset(asset, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(409, response.status(), response.toString()),
-                    () -> assertTrue(response.body().contains("ASSET_IN_USE"), response.toString()),
-                    () -> assertFalse(response.body().contains("blockingTypes"), response.toString()),
-                    () -> assertEquals(1, rows("asset", asset.getId())));
+            assertInUse(response, asset, data, "REQUEST_PORTAL_FIELD");
         }
 
         @Test
-        void disabledAssignedUser_200_associationDeleted() {
+        void disabledAssignedUser_409WithUser_associationKept() {
+            // before P-14: 200, the association deleted
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             User technician = data.o1().technician();
@@ -410,9 +424,9 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             Response response = deleteAsset(asset, data.o1().admin());
 
-            assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(1, rows("own_user", technician.getId())));
+            assertInUse(response, asset, data, "USER");
+            assertEquals(1, count("SELECT count(*) FROM t_asset_user_associations WHERE id_asset = ?",
+                    asset.getId()));
         }
 
         @Test
@@ -975,7 +989,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             assertEquals(List.of(
                     "asset.category_id -> asset_category fkhw44q3ymkd329b8b6mvqxatsh n false",
                     "asset.location_id -> location fkoo11h2f4j12wv0axk6d8u1wy0 n false",
-                    "asset.parent_asset_id -> asset fk6qu6wqhpppa2w4y09l3tt4q56 c false",
+                    "asset.parent_asset_id -> asset fk6qu6wqhpppa2w4y09l3tt4q56 a true",
                     "asset_downtime.asset_id -> asset fkrbg55bho0cxaorbbt7jwskrpo c false",
                     "custom_field_value.asset_id -> asset fk_custom_field_value_asset c true",
                     "custom_field_value.location_id -> location fk_custom_field_value_location c true",
@@ -983,14 +997,14 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "custom_field_value.work_order_meter_trigger_id -> work_order_meter_trigger fk_custom_field_value_work_order_meter_trigger a true",
                     "floor_plan.location_id -> location fkidx35wj5iwhfi5xrcs9jdsr2d c false",
                     "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb c false",
-                    "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi c false",
+                    "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi a true",
                     "meter.location_id -> location fk8jgoj4oi6b9sjqeuh9v592a6q n false",
                     "meter.meter_category_id -> meter_category fkoid61jgpxbr04np7rop8pag13 n false",
                     "own_user.location_id -> location fktmprdfwe8axkp8cobywe2gc1d n false",
-                    "preventive_maintenance.asset_id -> asset fk2r1291umxjxrddelq96v3pl4n n false",
+                    "preventive_maintenance.asset_id -> asset fk2r1291umxjxrddelq96v3pl4n a true",
                     "preventive_maintenance.location_id -> location fk53hdmxmgd3fjb2fjsh43d1irf n false",
                     "reading.meter_id -> meter fkrk4bo4tq59pfymwvx2jnjvlae c false",
-                    "request.asset_id -> asset fkml2rlcjiurmq5rjyw1gmsstf6 n false",
+                    "request.asset_id -> asset fkml2rlcjiurmq5rjyw1gmsstf6 a true",
                     "request.location_id -> location fkj7y0rwrqngdydkkdcohwisqq6 n false",
                     "request_portal_field.asset_id -> asset fk_request_portal_field_asset a false",
                     "request_portal_field.location_id -> location fk_request_portal_field_location a false",
@@ -1006,20 +1020,20 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "t_location_user_associations.id_location -> location fk2vp8mot9fhshwsh8flivg2e61 c true",
                     "t_location_vendor_associations.id_location -> location fkb6alk3ojlofcs76q4hnce764b c true",
                     "t_meter_user_associations.id_meter -> meter fk8ikpoqiwcc3i40wdfjl2dynv7 c true",
-                    "task_base.asset_id -> asset fkfcyjas01bhns54mn9uxk3xqx8 c false",
+                    "task_base.asset_id -> asset fkfcyjas01bhns54mn9uxk3xqx8 a true",
                     "task_base.meter_id -> meter fkgtij68ko3kykqk1od01ahoudg c false",
                     "work_order.asset_id -> asset fkp4hbmaa9hcp6myymsfyxg6fo2 a true",
                     "work_order.location_id -> location fkdbtdl51i4yup1hs6ek3ecqros n false",
                     "work_order_aud.location_id -> location FK_work_order_AUD_location_id n false",
-                    "work_order_meter_trigger.asset_id -> asset fkdkxi8xmqmo48y8xtml1860nbc n false",
+                    "work_order_meter_trigger.asset_id -> asset fkdkxi8xmqmo48y8xtml1860nbc a true",
                     "work_order_meter_trigger.location_id -> location fkmdb3avajahyo8mc6wi38ls8xi n false",
                     "work_order_meter_trigger.meter_id -> meter fk87doqr843tj4vmxarqujm3sgy c false",
                     "work_order_meter_trigger_assigned_to.work_order_meter_trigger_id -> work_order_meter_trigger fk42orqs7y05ghgkis54tathjv c false",
                     "work_order_meter_trigger_customers.work_order_meter_trigger_id -> work_order_meter_trigger fkkvfp8se58k6wyyt8ctgv4r3f0 c false",
                     "work_order_meter_trigger_files.work_order_meter_trigger_id -> work_order_meter_trigger fkol2wwydmtktqbnc7lvv23r5jy c false",
-                    "workflow_action.asset_id -> asset fkufu41twy3j9sfswo2tm7nkue c false",
+                    "workflow_action.asset_id -> asset fkufu41twy3j9sfswo2tm7nkue a true",
                     "workflow_action.location_id -> location fk6nkenbmcv4vyxw23kwm4ftgaq c false",
-                    "workflow_condition.asset_id -> asset fkhsrmx7f4fbfh4g1jdo5vray90 c false",
+                    "workflow_condition.asset_id -> asset fkhsrmx7f4fbfh4g1jdo5vray90 a true",
                     "workflow_condition.location_id -> location fkoueqwngifye55uqf2pj5u0257 c false"), keys);
         }
 
@@ -1038,7 +1052,6 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             assertEquals(List.of(
                     "asset.company_id -> company",
-                    "asset.parent_asset_id -> asset",
                     "asset_category.company_settings_id -> company_settings",
                     "asset_downtime.asset_id -> asset",
                     "asset_downtime.company_id -> company",
@@ -1046,7 +1059,6 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "floor_plan.location_id -> location",
                     "location.company_id -> company",
                     "location.parent_location_id -> location",
-                    "meter.asset_id -> asset",
                     "meter.company_id -> company",
                     "meter_category.company_settings_id -> company_settings",
                     "reading.meter_id -> meter",

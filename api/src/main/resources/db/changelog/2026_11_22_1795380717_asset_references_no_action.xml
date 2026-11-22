@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-14 (PPB-02, PPB-03, PPB-17, PPB-21, PPB-22): an asset with child assets, meters, requests, preventive
+         maintenances, tasks, meter triggers or workflows that cite it is not deleted. Those references become
+         NO ACTION; until now deleting the asset deleted its subtree, its meters with their readings, its tasks and
+         whole workflows (CASCADE), or put the reference in NULL. Each child column gets an index. NO ACTION, not
+         RESTRICT, keeps the deletion of a whole company working: the rows go in the same statement. Earlier
+         changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795380717_asset_parent_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="asset" constraintName="fk6qu6wqhpppa2w4y09l3tt4q56"/>
+        <addForeignKeyConstraint baseColumnNames="parent_asset_id" baseTableName="asset"
+                                 constraintName="fk6qu6wqhpppa2w4y09l3tt4q56" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="asset" indexName="idx_asset_parent_asset_id">
+            <column name="parent_asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_parent_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="asset" constraintName="fk6qu6wqhpppa2w4y09l3tt4q56"/>
+            <addForeignKeyConstraint baseColumnNames="parent_asset_id" baseTableName="asset"
+                                     constraintName="fk6qu6wqhpppa2w4y09l3tt4q56" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_meter_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="meter" constraintName="fkswqod52v3556tp6obl9c8lvxi"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="meter"
+                                 constraintName="fkswqod52v3556tp6obl9c8lvxi" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="meter" indexName="idx_meter_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="meter" indexName="idx_meter_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="meter" constraintName="fkswqod52v3556tp6obl9c8lvxi"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="meter"
+                                     constraintName="fkswqod52v3556tp6obl9c8lvxi" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_preventive_maintenance_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk2r1291umxjxrddelq96v3pl4n"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="preventive_maintenance"
+                                 constraintName="fk2r1291umxjxrddelq96v3pl4n" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk2r1291umxjxrddelq96v3pl4n"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="preventive_maintenance"
+                                     constraintName="fk2r1291umxjxrddelq96v3pl4n" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_request_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fkml2rlcjiurmq5rjyw1gmsstf6"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="request"
+                                 constraintName="fkml2rlcjiurmq5rjyw1gmsstf6" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fkml2rlcjiurmq5rjyw1gmsstf6"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="request"
+                                     constraintName="fkml2rlcjiurmq5rjyw1gmsstf6" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_task_base_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkfcyjas01bhns54mn9uxk3xqx8"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="task_base"
+                                 constraintName="fkfcyjas01bhns54mn9uxk3xqx8" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="task_base" indexName="idx_task_base_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task_base" indexName="idx_task_base_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkfcyjas01bhns54mn9uxk3xqx8"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="task_base"
+                                     constraintName="fkfcyjas01bhns54mn9uxk3xqx8" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_work_order_meter_trigger_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkdkxi8xmqmo48y8xtml1860nbc"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fkdkxi8xmqmo48y8xtml1860nbc" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkdkxi8xmqmo48y8xtml1860nbc"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fkdkxi8xmqmo48y8xtml1860nbc" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_workflow_action_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkufu41twy3j9sfswo2tm7nkue"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="workflow_action"
+                                 constraintName="fkufu41twy3j9sfswo2tm7nkue" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkufu41twy3j9sfswo2tm7nkue"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="workflow_action"
+                                     constraintName="fkufu41twy3j9sfswo2tm7nkue" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795380717_workflow_condition_asset_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkhsrmx7f4fbfh4g1jdo5vray90"/>
+        <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="workflow_condition"
+                                 constraintName="fkhsrmx7f4fbfh4g1jdo5vray90" referencedColumnNames="id"
+                                 referencedTableName="asset" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkhsrmx7f4fbfh4g1jdo5vray90"/>
+            <addForeignKeyConstraint baseColumnNames="asset_id" baseTableName="workflow_condition"
+                                     constraintName="fkhsrmx7f4fbfh4g1jdo5vray90" referencedColumnNames="id"
+                                     referencedTableName="asset" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

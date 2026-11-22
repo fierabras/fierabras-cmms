@@ -226,15 +226,22 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
 
         @Test
         void unknownReferencingTable_409AssetInUse_withoutBlockingTypes() {
+            // P-14 (C-2): every table of the schema that cites an asset is now a dependent of its rule, so the test
+            // owns a table that the rule does not know
             O1 o1 = newO1();
             Asset asset = records.asset(o1.company());
-            records.portalCiting(o1.company(), null, asset);
+            jdbcTemplate.execute("CREATE TABLE p14_unknown_reference (asset_id BIGINT NOT NULL REFERENCES asset (id))");
+            try {
+                jdbcTemplate.update("INSERT INTO p14_unknown_reference (asset_id) VALUES (?)", asset.getId());
 
-            Response response = api.call(delete("/assets/" + asset.getId()), api.login(o1.admin()));
+                Response response = api.call(delete("/assets/" + asset.getId()), api.login(o1.admin()));
 
-            JsonNode body = assertConflict(response, "ASSET_IN_USE");
-            assertNull(body.get("blockingTypes"), "the referencing table is not a known dependent: " + response);
-            assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", asset.getId()));
+                JsonNode body = assertConflict(response, "ASSET_IN_USE");
+                assertNull(body.get("blockingTypes"), "the referencing table is not a known dependent: " + response);
+                assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", asset.getId()));
+            } finally {
+                jdbcTemplate.execute("DROP TABLE p14_unknown_reference");
+            }
         }
     }
 

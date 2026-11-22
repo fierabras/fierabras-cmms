@@ -87,6 +87,28 @@ public class DeletionService {
                 + column + " = ?1)").setParameter(1, id).getSingleResult();
     }
 
+    /**
+     * P-14: whether a work order revision ({@code work_order_aud}) cites {@code id} in {@code column} while its work
+     * order no longer does. A work order that cites it now is already the dependent {@code WORK_ORDER}, so its
+     * revisions are not reported again. {@code column} is a constant of the caller, never input.
+     */
+    public boolean isCitedByAnEarlierRevision(String column, Long id) {
+        return (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM work_order_aud r WHERE r."
+                + column + " = ?1 AND NOT EXISTS (SELECT 1 FROM work_order w WHERE w.id = r.id AND w." + column
+                + " = ?1))").setParameter(1, id).getSingleResult();
+    }
+
+    /**
+     * P-14 (PPB §3.3 c): whether the association {@code table} links {@code id}, in {@code column}, with a disabled
+     * user ({@code id_user}). Such a row is a dependent: deleting the owner would erase the trace of a retired user.
+     * {@code table} and {@code column} are constants of the caller, never input.
+     */
+    public boolean isLinkedToRetiredUser(String table, String column, Long id) {
+        return (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM " + table + " a JOIN own_user u "
+                + "ON u.id = a.id_user WHERE a." + column + " = ?1 AND u.enabled = false)").setParameter(1, id)
+                .getSingleResult();
+    }
+
     private Map<String, Long> deletedRows() {
         @SuppressWarnings("unchecked")
         List<Object[]> rows = entityManager.createNativeQuery(DELETED_ROWS).getResultList();

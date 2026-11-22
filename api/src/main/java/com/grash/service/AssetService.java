@@ -182,17 +182,38 @@ public class AssetService {
     }
 
     /**
-     * Deletes the asset and records it in the audit log, in one transaction (P-10). An asset cited by a work order,
-     * in any status, is not deleted: 409 ASSET_IN_USE with the type WORK_ORDER (PPB-02). Its other dependents are
-     * covered by P-14; meanwhile their foreign keys answer ASSET_IN_USE without types.
+     * Deletes the asset and records it in the audit log, in one transaction (P-10). An asset with a dependent is not
+     * deleted: 409 ASSET_IN_USE with every blocking type (PPB-02, P-14). Its downtimes, custom field values and
+     * associations go with it.
      */
     @Transactional
     public void delete(Asset asset, User actor) {
-        deletionService.delete(new AuditTarget(EntityType.ASSET, asset.getId(), asset.getCustomId(), asset.getName(),
+        Long id = asset.getId();
+        deletionService.delete(new AuditTarget(EntityType.ASSET, id, asset.getCustomId(), asset.getName(),
                         asset.getCompany().getId()), actor, AuditSource.API,
                 DeletionRule.inUse(ASSET_IN_USE, ASSET_IN_USE_MESSAGE)
-                        .blockedBy(EntityType.WORK_ORDER, () -> workOrderRepository.existsByAsset_Id(asset.getId())),
-                () -> assetRepository.deleteById(asset.getId()));
+                        .blockedBy(EntityType.ASSET, () -> deletionService.isCited("asset", "parent_asset_id", id))
+                        .blockedBy(EntityType.METER, () -> deletionService.isCited("meter", "asset_id", id))
+                        .blockedBy(EntityType.WORK_ORDER, () -> workOrderRepository.existsByAsset_Id(id))
+                        // D-P14-5: work_order_aud.asset_id has no foreign key; only this check protects it
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCitedByAnEarlierRevision("asset_id", id))
+                        .blockedBy(EntityType.REQUEST, () -> deletionService.isCited("request", "asset_id", id))
+                        .blockedBy(EntityType.PREVENTIVE_MAINTENANCE,
+                                () -> deletionService.isCited("preventive_maintenance", "asset_id", id))
+                        .blockedBy(EntityType.TASK_BASE, () -> deletionService.isCited("task_base", "asset_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_METER_TRIGGER,
+                                () -> deletionService.isCited("work_order_meter_trigger", "asset_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "asset_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "asset_id", id))
+                        .blockedBy(EntityType.REQUEST_PORTAL_FIELD,
+                                () -> deletionService.isCited("request_portal_field", "asset_id", id))
+                        .blockedBy(EntityType.USER,
+                                () -> deletionService.isLinkedToRetiredUser("t_asset_user_associations", "id_asset",
+                                        id)),
+                () -> assetRepository.deleteById(id));
     }
 
     public Optional<Asset> findById(Long id) {
