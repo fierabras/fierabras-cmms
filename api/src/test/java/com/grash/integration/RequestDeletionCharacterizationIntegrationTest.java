@@ -250,8 +250,8 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
     class EditRequest {
 
         @Test
-        void rejected_200_edited() {
-            // TD-P12b-02: only the approved request is rejected
+        void rejected_409_notEdited() {
+            // TD-P12b-02 closed by P-13 (D-1): a rejected request is not edited either
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Long request = request(data.o1().admin(), null);
@@ -260,13 +260,14 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = editTitle(request, "P-13 edited", admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals("P-13 edited", jdbc.queryForObject("SELECT title FROM request WHERE id = ?",
-                            String.class, request)));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("REQUEST_CLOSED"), response.toString()),
+                    () -> assertNotEquals("P-13 edited", jdbc.queryForObject("SELECT title FROM request "
+                            + "WHERE id = ?", String.class, request)));
         }
 
         @Test
-        void approved_406_notEdited() {
+        void approved_409_notEdited() {
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Long request = request(data.o1().admin(), null);
@@ -275,14 +276,15 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = editTitle(request, "P-13 edited", admin);
 
             assertAll(
-                    () -> assertEquals(406, response.status(), response.toString()),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("REQUEST_CLOSED"), response.toString()),
                     () -> assertNotEquals("P-13 edited", jdbc.queryForObject("SELECT title FROM request "
                             + "WHERE id = ?", String.class, request)));
         }
 
         @Test
-        void approvedByTechnicianWithoutEditOther_406_beforeThe403() {
-            // the 406 of the approved request comes before the permission check
+        void approvedByTechnicianWithoutEditOther_403() {
+            // P-13 (PPB-26): the 403 comes before the 409 of the closed request
             CommonData data = data();
             String admin = api.login(data.o1().admin());
             Long request = request(data.o1().admin(), null);
@@ -290,7 +292,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
 
             Response response = editTitle(request, "P-13 edited", api.login(data.o1().technician()));
 
-            assertEquals(406, response.status(), response.toString());
+            assertEquals(403, response.status(), response.toString());
         }
     }
 

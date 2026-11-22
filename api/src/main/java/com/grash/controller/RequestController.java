@@ -192,10 +192,9 @@ public class RequestController {
 
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Can't patch an approved request", HttpStatus.NOT_ACCEPTABLE);
-            }
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.REQUESTS) || user.getId().equals(savedRequest.getCreatedBy())) {
+                // P-13 (D-1, PPB-15): an approved or rejected request is not edited; 409 after the 404 and the 403
+                RequestService.rejectIfClosed(savedRequest);
                 Request patchedRequest = requestService.update(id, request, user.getCompany());
                 return requestMapper.toShowDto(patchedRequest);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

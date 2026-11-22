@@ -290,6 +290,79 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
+     * E-6 (D-1, PPB-15, PPB-26): an approved or rejected request is not edited: 409 after the 404 and the 403.
+     */
+    @Nested
+    class Edit {
+
+        private Response editTitle(Long request, String token) {
+            return api.call(patch("/requests/" + request).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"P-13 edited\"}"), token);
+        }
+
+        private String title(Long request) {
+            return jdbc.queryForObject("SELECT title FROM request WHERE id = ?", String.class, request);
+        }
+
+        @Test
+        void rejected_409_unchanged() {
+            CommonData data = data();
+            Long request = rejected(data, data.o1().admin());
+            List<Map<String, Object>> before = row(request);
+
+            Response response = editTitle(request, api.login(data.o1().admin()));
+
+            assertConflict(response, REQUEST_CLOSED);
+            assertEquals(before, row(request));
+        }
+
+        @Test
+        void approved_409_unchanged() {
+            CommonData data = data();
+            Long request = approved(data, data.o1().admin());
+            List<Map<String, Object>> before = row(request);
+
+            Response response = editTitle(request, api.login(data.o1().admin()));
+
+            assertConflict(response, REQUEST_CLOSED);
+            assertEquals(before, row(request));
+        }
+
+        @Test
+        void approvedByATechnicianWhoIsNotItsCreator_403_beforeThe409() {
+            CommonData data = data();
+            Long request = approved(data, data.o1().admin());
+
+            Response response = editTitle(request, api.login(data.o1().technician()));
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(response.body().contains(REQUEST_CLOSED), response.toString()));
+        }
+
+        @Test
+        void pending_200_edited() {
+            CommonData data = data();
+            Long request = request(data, data.o1().admin());
+
+            Response response = editTitle(request, api.login(data.o1().admin()));
+
+            assertAll(
+                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals("P-13 edited", title(request)));
+        }
+
+        @Test
+        void unknownRequest_404() {
+            CommonData data = data();
+
+            Response response = editTitle(Long.MAX_VALUE, api.login(data.o1().admin()));
+
+            assertEquals(404, response.status(), response.toString());
+        }
+    }
+
+    /**
      * E-3 and E-4: a portal that received requests is not deleted (PPB-02); without them, it goes with its fields
      * (PPB-14) and is recorded (PPB-23).
      */

@@ -815,7 +815,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
-        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reopen a rejected request")
+        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reopen a rejected request (P-13: 409 REQUEST_CLOSED)")
         void patchRequest_onRejectedRequest_staysRejected() throws Exception {
             Tenant tenant = newTenant("T10-reopen");
             Request request = createRequest(tenant.company(), tenant.admin(), null);
@@ -829,7 +829,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     .content(json(body)), token);
 
             assertAll(
-                    () -> assertTrue(result.is2xx(), "PATCH /requests/{id}: " + result),
+                    () -> assertEquals(409, result.status(), "PATCH /requests/{id}: " + result),
+                    () -> assertTrue(result.body().contains("REQUEST_CLOSED"), "PATCH /requests/{id}: " + result),
                     () -> assertTrue(isCancelled(request.getId()), "request must stay rejected"),
                     () -> assertEquals("INC-02 rejection", inTx(() -> requestRepository.findById(request.getId())
                             .orElseThrow().getCancellationReason()), "the rejection reason must be kept"));
