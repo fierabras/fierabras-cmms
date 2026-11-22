@@ -1993,6 +1993,11 @@ const locale = {
   entity_type_TASK: 'Task',
   entity_type_PART_QUANTITY: 'Part consumption',
   entity_type_RELATION: 'Work order relation',
+  entity_type_COMPANY: 'Company',
+  entity_type_FILE: 'File',
+  entity_type_FLOOR_PLAN: 'Floor plan',
+  entity_type_LOCATION: 'Location',
+  entity_type_METER: 'Meter',
   asset_in_use:
     'This asset is in use and cannot be deleted. Archive it instead.',
   record_in_use: 'This record is used by other records and cannot be deleted.',
@@ -2011,6 +2016,8 @@ const locale = {
   time_category_in_use: 'This time category is in use and cannot be deleted.',
   customer_in_use:
     'This contractor is linked to closed, archived or disabled records and cannot be deleted.',
+  file_in_use:
+    'This file is in use and cannot be deleted. Remove it from the records that use it first.',
   in_use_blocked_by: 'It is used by: {{types}}.',
   work_order_not_deletable:
     'Work orders cannot be deleted. Archive the work order instead.',

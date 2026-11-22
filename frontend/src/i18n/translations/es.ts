@@ -2121,6 +2121,11 @@ const esJSON = {
   entity_type_TASK: 'Tarea',
   entity_type_PART_QUANTITY: 'Consumo de repuesto',
   entity_type_RELATION: 'Vínculo entre órdenes de trabajo',
+  entity_type_COMPANY: 'Empresa',
+  entity_type_FILE: 'Archivo',
+  entity_type_FLOOR_PLAN: 'Plano de planta',
+  entity_type_LOCATION: 'Localización',
+  entity_type_METER: 'Medidor',
   asset_in_use:
     'Este activo está en uso y no se puede eliminar. Archívelo en su lugar.',
   record_in_use: 'Otros registros usan este registro y no se puede eliminar.',
@@ -2141,6 +2146,8 @@ const esJSON = {
     'Esta categoría de tiempo está en uso y no se puede eliminar.',
   customer_in_use:
     'Este contratista está vinculado a registros cerrados, archivados o desactivados y no se puede eliminar.',
+  file_in_use:
+    'Este archivo está en uso y no se puede eliminar. Primero quítelo de los registros que lo usan.',
   in_use_blocked_by: 'Lo usan: {{types}}.',
   work_order_not_deletable:
     'Las órdenes de trabajo no se eliminan. Archive la orden de trabajo en su lugar.',

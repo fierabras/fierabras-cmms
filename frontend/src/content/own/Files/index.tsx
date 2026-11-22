@@ -40,6 +40,7 @@ import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import FeatureErrorMessage from '../components/FeatureErrorMessage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
+import { conflictMessage } from '../../../utils/conflicts';
 import NoRowsMessageWrapper from '../components/NoRowsMessageWrapper';
 import { useParams } from 'react-router-dom';
 import { SearchCriteria } from '../../../models/owns/page';
@@ -116,7 +117,7 @@ function Files() {
     showSnackBar(t('file_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('file_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('file_delete_failure')), 'error');
 
   const {
     hasViewPermission,
