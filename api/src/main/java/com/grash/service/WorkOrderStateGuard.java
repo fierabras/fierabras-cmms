@@ -49,9 +49,23 @@ public final class WorkOrderStateGuard {
     }
 
     public static void check(WorkOrder workOrder, Change change) {
-        if (workOrder.isArchived()) throw new ConflictException(WORK_ORDER_RETIRED, RETIRED_MESSAGE);
+        ConflictException conflict = conflict(workOrder, change);
+        if (conflict != null) throw conflict;
+    }
+
+    /**
+     * P-12c: whether the work order admits the change, for the routes that skip a write instead of rejecting the
+     * request (an automation, a replacement without difference).
+     */
+    public static boolean admits(WorkOrder workOrder, Change change) {
+        return conflict(workOrder, change) == null;
+    }
+
+    private static ConflictException conflict(WorkOrder workOrder, Change change) {
+        if (workOrder.isArchived()) return new ConflictException(WORK_ORDER_RETIRED, RETIRED_MESSAGE);
         if (workOrder.getStatus() == Status.COMPLETE && change == Change.CHILD)
-            throw new ConflictException(WORK_ORDER_CLOSED, CLOSED_MESSAGE);
+            return new ConflictException(WORK_ORDER_CLOSED, CLOSED_MESSAGE);
+        return null;
     }
 
     public static ConflictException notDeletable() {

@@ -21,6 +21,7 @@ import com.grash.service.RateLimiterService;
 import com.grash.service.RequestPortalService;
 import com.grash.service.TaskService;
 import com.grash.service.UserService;
+import com.grash.service.WorkOrderStateGuard;
 import com.grash.utils.Helper;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -72,6 +73,9 @@ public class FileController {
         }
         if (Boolean.TRUE.equals(bypass) || (user.getRole().getCreatePermissions().contains(PermissionEntity.FILES) &&
                 user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.FILE))) {
+            // P-12c (D-P12c-3, PPB-15): no image is added to a task of a closed or archived work order
+            if (taskId != null) taskService.findById(taskId.longValue()).map(Task::getWorkOrder)
+                    .ifPresent(workOrder -> WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD));
             Collection<File> result = new ArrayList<>();
             Arrays.asList(filesReq).forEach(fileReq -> {
                 String filePath = storageServiceFactory.getStorageService().upload(fileReq, folder);

@@ -55,6 +55,7 @@ import TodayTwoToneIcon from '@mui/icons-material/TodayTwoTone';
 import useDateLocale from '../../../../hooks/useDateLocale';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 import { CompanySettingsContext } from '../../../../contexts/CompanySettingsContext';
 import EditTwoToneIcon from '@mui/icons-material/EditTwoTone';
 import { getSingleUser } from 'src/slices/user';
@@ -237,6 +238,10 @@ function WorkloadView({ handleOpenDetails }: WorkloadViewProps) {
     return findWOInUnscheduled(id) ?? findWOInUserDays(id);
   };
 
+  // P-12c (W-1): a work order that cannot be planned (archived, or a disabled user) explains why, translated
+  const onScheduleFailure = (err) =>
+    showSnackBar(conflictMessage(err, t, getErrorMessage(err)), 'error');
+
   const doSchedule = useCallback(
     (
       workOrderId: number,
@@ -250,7 +255,7 @@ function WorkloadView({ handleOpenDetails }: WorkloadViewProps) {
           estimatedDuration: estimatedDuration ?? null,
           primaryUserId
         })
-      ).catch((err) => showSnackBar(getErrorMessage(err), 'error'));
+      ).catch(onScheduleFailure);
     },
     [dispatch]
   );
@@ -281,7 +286,7 @@ function WorkloadView({ handleOpenDetails }: WorkloadViewProps) {
       !isUnscheduled(source.droppableId) &&
       isUnscheduled(destination.droppableId)
     ) {
-      dispatch(unscheduleWorkOrder(wo.id, wo));
+      dispatch(unscheduleWorkOrder(wo.id, wo)).catch(onScheduleFailure);
       return;
     }
 

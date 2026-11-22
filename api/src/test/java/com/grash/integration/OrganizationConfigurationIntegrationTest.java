@@ -36,11 +36,17 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -63,6 +69,20 @@ class OrganizationConfigurationIntegrationTest extends AbstractIntegrationTest {
     private static final List<String> CONFIGURATION_TABLES = List.of("company", "company_settings",
             "general_preferences", "ui_configuration", "work_order_configuration", "work_order_request_configuration",
             "field_configuration", "user_settings", "shift_configuration");
+    /**
+     * P-12c (H1-14): the DELETE operations of the specification, reviewed on 21/11/2026, sorted.
+     */
+    private static final List<String> REVIEWED_DELETE_PATHS = List.of(
+            "/additional-costs/{id}", "/asset-categories/{id}", "/asset-downtimes/{id}", "/assets/{id}", "/auth",
+            "/auth/{username}", "/checklists/{id}", "/comments/{id}", "/cost-categories/{id}", "/currencies/{id}",
+            "/custom-fields/{id}", "/customers/{id}", "/deprecations/{id}", "/files/{id}", "/floor-plans/{id}",
+            "/labors/{id}", "/locations/{id}", "/meter-categories/{id}", "/meters/{id}", "/multi-parts/{id}",
+            "/part-categories/{id}", "/part-quantities/{id}", "/parts/{id}", "/preventive-maintenances/{id}",
+            "/purchase-order-categories/{id}", "/purchase-orders/{id}", "/readings/{id}", "/relations/{id}",
+            "/request-portals/{id}", "/requests/{id}", "/roles/{id}", "/schedules/{id}", "/subscription-plans/{id}",
+            "/tasks/{id}", "/teams/{id}", "/time-categories/{id}", "/vendors/{id}", "/webhook-endpoints/{id}",
+            "/work-order-categories/{id}", "/work-order-meter-triggers/{id}",
+            "/work-orders/files/{id}/{fileId}/remove", "/work-orders/{id}", "/workflows/{id}");
     private static final String DELETED_BODY = "{\"success\":true,\"message\":\"Deleted successfully\"}";
 
     private final TestOrganizations organizations;
@@ -365,6 +385,53 @@ class OrganizationConfigurationIntegrationTest extends AbstractIntegrationTest {
         void ca076_noOperationPurgesRetiredRecordsOrAnOrganization() {
             assertEquals(List.of(), deletePaths().stream()
                     .filter(path -> path.matches(".*(archived|retired|disabled|purge|compan).*")).toList());
+        }
+
+        /**
+         * P-12c (H1-14): every DELETE operation of the specification, whatever its path, has been reviewed against
+         * PPB-10 and PPB-28 (none deletes an organization, its configuration or retired records in bulk). A new one
+         * makes this test fail until it is reviewed and added here.
+         */
+        @Test
+        void ca030_ca076_ca126_everyDeleteOperationIsReviewed() {
+            assertEquals(REVIEWED_DELETE_PATHS, deletePaths().stream().sorted().toList());
+        }
+
+        /**
+         * P-12c (H1-14): whatever the path or the HTTP method of the operation, the organization and its
+         * configuration are deleted only by the demo job: their repositories delete only there and in their own
+         * services, and nothing calls the delete methods of those services.
+         */
+        @Test
+        void ca030_ca076_ca126_onlyTheDemoJobDeletesAnOrganizationOrItsConfiguration() throws IOException {
+            Pattern call = Pattern.compile("\\b(company|companySettings|generalPreferences|uiConfiguration|"
+                    + "workOrderConfiguration|workOrderRequestConfiguration|fieldConfiguration|userSettings|"
+                    + "shiftConfiguration)(Repository|Service)\\.delete\\w*\\(");
+            Pattern sql = Pattern.compile("(?i)delete\\s+from\\s+(" + String.join("|", CONFIGURATION_TABLES)
+                    + ")\\b");
+            List<String> found = new ArrayList<>();
+            try (Stream<Path> files = Files.walk(Path.of("src", "main", "java"))) {
+                for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                    for (String line : Files.readAllLines(file)) {
+                        Matcher matcher = call.matcher(line);
+                        while (matcher.find()) found.add(file.getFileName() + ": " + matcher.group());
+                        if (sql.matcher(line).find()) found.add(file.getFileName() + ": " + line.trim());
+                    }
+                }
+            }
+
+            assertEquals(List.of(
+                    "CompanyService.java: companyRepository.deleteById(",
+                    "CompanySettingsService.java: companySettingsRepository.deleteById(",
+                    "DeleteDemoCompaniesJob.java: companyRepository.deleteAllByDemoTrue(",
+                    "FieldConfigurationService.java: fieldConfigurationRepository.deleteById(",
+                    "GeneralPreferencesService.java: generalPreferencesRepository.deleteById(",
+                    "ShiftConfigurationService.java: shiftConfigurationRepository.deleteById(",
+                    "UiConfigurationService.java: uiConfigurationRepository.deleteById(",
+                    "UserSettingsService.java: userSettingsRepository.deleteById(",
+                    "WorkOrderConfigurationService.java: workOrderConfigurationRepository.deleteById(",
+                    "WorkOrderRequestConfigurationService.java: workOrderRequestConfigurationRepository.deleteById("),
+                    found.stream().sorted().toList());
         }
 
         @Test

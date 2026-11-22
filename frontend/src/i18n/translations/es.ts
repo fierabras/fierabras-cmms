@@ -1404,6 +1404,9 @@ const esJSON = {
   manufacturer: 'Fabricante',
   power: 'Potencia',
   import_error: 'La importación no se realizó',
+  import_rows_rejected:
+    '{{total}} filas no se importaron y sus registros no cambiaron: {{rows}}',
+  import_row_rejected: 'Fila {{row}} (ID {{id}}): {{reason}}',
   request_upgrade: 'Actualizar solicitud',
   operation_success: 'La operación fue un éxito',
   CANCELLED: 'Rechazado',

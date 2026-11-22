@@ -250,7 +250,8 @@ class WorkOrderLifecycleCharacterizationIntegrationTest extends AbstractIntegrat
         CommonData data = data();
         User t = data.o1().technician();
         Fixture f = workOrders.create(data.o1().admin(), t, Status.COMPLETE, false);
-        List<Map<String, Object>> before = children(f.id());
+        // P-12c (H1-07): every row of the work order, its children and associations, except the new comment
+        Map<String, Object> before = TestWorkOrders.rows(jdbc, f.id(), f.part());
 
         Response response = workOrders.call(post("/comments"), api.login(t), Map.of("workOrder",
                 Map.of("id", f.id()), "content", "after closing"));
@@ -258,10 +259,10 @@ class WorkOrderLifecycleCharacterizationIntegrationTest extends AbstractIntegrat
         assertEquals(200, response.status(), response.toString());
         assertEquals(Status.COMPLETE, status(f.id()));
         assertEquals(2, count("comment", "work_order_id", f.id()));
-        Map<String, Object> after = children(f.id()).get(0);
-        before.get(0).forEach((key, value) -> {
-            if (!key.equals("comment")) assertEquals(value, after.get(key), key);
-        });
+        Map<String, Object> after = TestWorkOrders.rows(jdbc, f.id(), f.part());
+        before.remove("comment");
+        after.remove("comment");
+        assertEquals(before, after);
     }
 
     @Test

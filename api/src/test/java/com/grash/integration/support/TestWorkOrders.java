@@ -15,9 +15,11 @@ import com.grash.repository.FileRepository;
 import com.grash.repository.PartRepository;
 import com.grash.repository.WorkOrderRepository;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -116,6 +118,28 @@ public final class TestWorkOrders {
         workOrder.setStatus(status);
         workOrder.setArchived(archived);
         workOrderRepository.saveAndFlush(workOrder);
+    }
+
+    /**
+     * Every row that a change to the work order {@code id} or to its children could touch, for the "no changes"
+     * checks: the work order, its children and associations, its relations, the stock of {@code part} (when not
+     * null) and the number of its revisions.
+     */
+    public static Map<String, Object> rows(JdbcTemplate jdbc, Long id, Long part) {
+        Map<String, Object> rows = new LinkedHashMap<>();
+        rows.put("work_order", jdbc.queryForList("SELECT * FROM work_order WHERE id = ?", id));
+        for (String table : List.of("labor", "additional_cost", "task", "part_quantity", "comment",
+                "work_order_files", "work_order_assigned_to", "work_order_customers", "custom_field_value",
+                "part_transaction")) {
+            rows.put(table, jdbc.queryForList("SELECT * FROM " + table + " WHERE work_order_id = ? ORDER BY 1",
+                    id));
+        }
+        rows.put("relation", jdbc.queryForList("SELECT * FROM relation WHERE parent_id = ? OR child_id = ? "
+                + "ORDER BY id", id, id));
+        if (part != null) rows.put("part", jdbc.queryForList("SELECT quantity FROM part WHERE id = ?", part));
+        rows.put("revisions", jdbc.queryForObject("SELECT count(*) FROM work_order_aud WHERE id = ?", Long.class,
+                id));
+        return rows;
     }
 
     /**

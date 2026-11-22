@@ -149,6 +149,8 @@ public class WorkloadService {
         if (!workOrder.canBeEditedBy(user)) {
             throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         }
+        // P-12c (E-1, H1-03): planning changes fields of the work order itself; an archived one does not change
+        WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.WORK_ORDER);
 
         if (assigningUser && workOrder.getEstimatedDuration() <= 0 && dto.getEstimatedDuration() == null) {
             throw new CustomException("Estimated duration must be set and greater than 0 before scheduling",
@@ -164,6 +166,9 @@ public class WorkloadService {
             assignedUser = userService.findByIdAndCompany(dto.getPrimaryUserId(), user.getCompany().getId())
                     .orElseThrow(() -> new CustomException("Assigned user not found", HttpStatus.NOT_FOUND));
         }
+        // P-12c (E-1, PPB-08): a disabled user is not assigned anew; the one already assigned is kept
+        userService.rejectRetired(Collections.singletonList(workOrder.getPrimaryUser()),
+                Collections.singletonList(assignedUser));
         workOrder.setPrimaryUser(assignedUser);
         if (assigningUser && dto.getEstimatedDuration() != null) {
             workOrder.setEstimatedDuration(dto.getEstimatedDuration());

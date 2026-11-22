@@ -1,6 +1,7 @@
 package com.grash.service;
 
 import com.grash.dto.imports.*;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.model.*;
 import com.grash.model.enums.PermissionEntity;
@@ -68,10 +69,12 @@ public class ImportService {
         }
 
         List<WorkOrder> workOrdersToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
         int created = 0;
         int updated = 0;
 
-        for (WorkOrderImportDTO dto : toImport) {
+        for (int row = 1; row <= toImport.size(); row++) {
+            WorkOrderImportDTO dto = toImport.get(row - 1);
             Long id = dto.getId();
             WorkOrder workOrder;
 
@@ -80,6 +83,15 @@ public class ImportService {
                 created++;
             } else if (existingWorkOrders.containsKey(id)) {
                 workOrder = existingWorkOrders.get(id);
+                // P-12c (E-4, PPB-20 b): a closed or archived work order is not changed by an import; the row
+                // replaces its customers (an association), so it is checked as a change to its children. The row
+                // is rejected with its reason and the other rows are imported
+                try {
+                    WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
+                } catch (ConflictException rejection) {
+                    rejected.add(new ImportRejection(row, id, rejection.getCode(), rejection.getMessage()));
+                    continue;
+                }
                 updated++;
             } else {
                 workOrder = new WorkOrder();
@@ -97,6 +109,7 @@ public class ImportService {
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
     }
 

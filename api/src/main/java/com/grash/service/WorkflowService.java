@@ -59,6 +59,9 @@ public class WorkflowService {
     }
 
     public void runWorkOrder(Workflow workflow, WorkOrder workOrder) {
+        // P-12c (E-5, H1-12): an automation does not change a work order that admits no change (archived); a
+        // closed one keeps admitting changes to its own fields (D-P12-1)
+        if (!WorkOrderStateGuard.admits(workOrder, WorkOrderStateGuard.Change.WORK_ORDER)) return;
         if (workflow.getSecondaryConditions().stream().allMatch(workflowCondition -> workflowCondition.isMetForWorkOrder(workOrder))) {
             WorkflowAction action = workflow.getAction();
             switch (action.getWorkOrderAction()) {

@@ -10,6 +10,7 @@ import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestOrganizations.O1;
 import com.grash.integration.support.TestRecords;
+import com.grash.integration.support.TestWorkOrders;
 import com.grash.model.Asset;
 import com.grash.model.Comment;
 import com.grash.model.CustomField;
@@ -459,16 +460,22 @@ class AccountsIntegrationTest extends AbstractIntegrationTest {
             WorkOrder workOrder = records.workOrder(o1.company(), null, Status.OPEN, false);
             disable(o1, o1.technician());
             String token = api.login(o1.admin());
+            // P-12c (H1-08): the whole work order and its associations, and the audit log, after each attempt
+            Map<String, Object> before = TestWorkOrders.rows(jdbcTemplate, workOrder.getId(), null);
+            List<String> records = audit(o1.company().getId());
 
             Response asAssigned = api.call(patch("/work-orders/" + workOrder.getId())
                     .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"" + workOrder.getTitle()
                             + "\",\"assignedTo\":[{\"id\":" + o1.technician().getId() + "}]}"), token);
+            assertConflict(asAssigned, "USER_RETIRED");
+            assertEquals(before, TestWorkOrders.rows(jdbcTemplate, workOrder.getId(), null));
             Response asPrimary = api.call(patch("/work-orders/" + workOrder.getId())
                     .contentType(MediaType.APPLICATION_JSON).content("{\"title\":\"" + workOrder.getTitle()
                             + "\",\"primaryUser\":{\"id\":" + o1.technician().getId() + "}}"), token);
-
-            assertConflict(asAssigned, "USER_RETIRED");
             assertConflict(asPrimary, "USER_RETIRED");
+
+            assertEquals(before, TestWorkOrders.rows(jdbcTemplate, workOrder.getId(), null));
+            assertEquals(records, audit(o1.company().getId()));
             assertEquals(List.of(), assignedIds(workOrder));
             assertNull(primaryUserId(workOrder));
         }
@@ -478,6 +485,7 @@ class AccountsIntegrationTest extends AbstractIntegrationTest {
             O1 o1 = newO1();
             disable(o1, o1.technician());
             long before = count("SELECT count(*) FROM work_order WHERE company_id = ?", o1.company().getId());
+            List<String> records = audit(o1.company().getId());
 
             Response response = api.call(post("/work-orders").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"title\":\"P-11 WO\",\"assignedTo\":[{\"id\":" + o1.technician().getId() + "}]}"),
@@ -486,6 +494,7 @@ class AccountsIntegrationTest extends AbstractIntegrationTest {
             assertConflict(response, "USER_RETIRED");
             assertEquals(before, count("SELECT count(*) FROM work_order WHERE company_id = ?",
                     o1.company().getId()));
+            assertEquals(records, audit(o1.company().getId()));
         }
 
         @Test

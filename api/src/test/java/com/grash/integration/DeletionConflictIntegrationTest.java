@@ -149,6 +149,9 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
             assertAll(
                     () -> assertEquals(List.of("WORK_ORDER"), blockingTypes(body), "only types, no counts or ids"),
                     () -> assertTrue(body.get("blockingTypes").get(0).isTextual()),
+                    // P-12c (H1-09): the message is the English one of the service
+                    () -> assertEquals("This asset is used by other records. Archive it instead of deleting it",
+                            body.get("message").asText(), "message in English"),
                     () -> assertFalse(response.body().contains(String.valueOf(closed.getId())), "no identifiers"),
                     () -> assertEquals(assets, count("SELECT count(*) FROM asset WHERE company_id = ?",
                             o1.company().getId()), "assets unchanged"),

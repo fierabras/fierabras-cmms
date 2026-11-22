@@ -37,3 +37,16 @@ export const conflictMessage = (
     ? `${t(key)} ${t('in_use_blocked_by', { types: types.join(', ') })}`
     : t(key);
 };
+
+/**
+ * Translated message of a code sent by the API outside a 409, for example for a row rejected by an import; without a
+ * known code, the fallback.
+ */
+export const conflictCodeMessage = (
+  code: string,
+  t: (key: string, options?: Record<string, string>) => string,
+  fallback: string
+): string => {
+  const key = conflictKeys[code];
+  return key ? t(key) : fallback;
+};
