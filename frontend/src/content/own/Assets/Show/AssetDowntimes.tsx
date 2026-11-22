@@ -44,6 +44,7 @@ import {
 import { CompanySettingsContext } from '../../../../contexts/CompanySettingsContext';
 import AssetDowntime from '../../../../models/owns/assetDowntime';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 interface PropsType {
   asset: AssetDTO;
@@ -70,7 +71,12 @@ const AssetDowntimes = ({ asset }: PropsType) => {
   }, [asset]);
   const handleDelete = (id: number) => {
     if (window.confirm(t('confirm_delete_asset_downtime'))) {
-      dispatch(deleteAssetDowntime(asset.id, id));
+      dispatch(deleteAssetDowntime(asset.id, id)).catch((err) =>
+        showSnackBar(
+          conflictMessage(err, t, t('downtime_delete_failure')),
+          'error'
+        )
+      );
     }
   };
   const onCreationSuccess = () => {

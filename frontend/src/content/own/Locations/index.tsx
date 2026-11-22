@@ -76,6 +76,7 @@ import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import { Pageable, SearchCriteria, Sort } from '../../../models/owns/page';
 import { googleMapsConfig } from '../../../config';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import SplitButton from '../components/SplitButton';
 import CustomDatagrid2, {
   CustomDatagridColumn2
@@ -262,7 +263,10 @@ function Locations() {
     showSnackBar(t('location_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('location_delete_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('location_delete_failure')),
+      'error'
+    );
 
   const handleOpenDetails = async (id: number) => {
     const foundLocation =
