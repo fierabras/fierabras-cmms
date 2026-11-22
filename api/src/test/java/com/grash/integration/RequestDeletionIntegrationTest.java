@@ -13,6 +13,7 @@ import com.grash.model.RequestPortalField;
 import com.grash.model.User;
 import com.grash.model.Workflow;
 import com.grash.model.WorkflowAction;
+import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.RequestAction;
@@ -33,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -414,9 +416,14 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
             return count("SELECT count(*) FROM work_order WHERE company_id = ?", data.o1().company().getId());
         }
 
+        /**
+         * The notifications of an approval (type WORK_ORDER); those of the creation of a request (type REQUEST) are
+         * written asynchronously and are not counted.
+         */
         private long notificationsOf(CommonData data) {
             return count("SELECT count(*) FROM notification n JOIN own_user u ON u.id = n.user_id "
-                    + "WHERE u.company_id = ?", data.o1().company().getId());
+                    + "WHERE u.company_id = ? AND n.notification_type = ?", data.o1().company().getId(),
+                    NotificationType.WORK_ORDER.ordinal());
         }
 
         private void assignUserWhenApproved(CommonData data, User user) {
@@ -516,6 +523,9 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(200, response.status(), response.toString());
             webhookDouble.awaitCalls(WebhookEvent.WORK_REQUEST_STATUS_CHANGE.name(), 1, Duration.ofSeconds(10));
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (notificationsOf(data) == notifications && System.nanoTime() < deadline)
+                LockSupport.parkNanos(Duration.ofMillis(50).toNanos());
             assertAll(
                     () -> assertNotNull(workOrderOf(request)),
                     () -> assertFalse(mailDouble.calls().isEmpty(), "the approval mail"),
