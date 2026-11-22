@@ -144,19 +144,7 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
      * Every row that a change to the work order or to its children could touch, for the "no changes" checks.
      */
     private Map<String, Object> snapshot(Long id, Long part) {
-        Map<String, Object> rows = new LinkedHashMap<>();
-        rows.put("work_order", jdbc.queryForList("SELECT * FROM work_order WHERE id = ?", id));
-        for (String table : List.of("labor", "additional_cost", "task", "part_quantity", "comment",
-                "work_order_files", "work_order_assigned_to", "work_order_customers", "custom_field_value",
-                "part_transaction")) {
-            rows.put(table, jdbc.queryForList("SELECT * FROM " + table + " WHERE work_order_id = ? ORDER BY 1",
-                    id));
-        }
-        rows.put("relation", jdbc.queryForList("SELECT * FROM relation WHERE parent_id = ? OR child_id = ? "
-                + "ORDER BY id", id, id));
-        rows.put("part", jdbc.queryForList("SELECT quantity FROM part WHERE id = ?", part));
-        rows.put("revisions", count("work_order_aud", "id", id));
-        return rows;
+        return TestWorkOrders.rows(jdbc, id, part);
     }
 
     private CustomField customField(CommonData data) {
