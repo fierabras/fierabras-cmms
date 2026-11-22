@@ -7,7 +7,12 @@ import com.grash.integration.support.TestApi.Response;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
+import com.grash.model.Company;
+import com.grash.model.RequestPortal;
+import com.grash.model.RequestPortalField;
 import com.grash.model.User;
+import com.grash.model.enums.PortalFieldType;
+import com.grash.repository.RequestPortalRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -20,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -41,16 +47,19 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
     private final TestApi api;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbc;
+    private final RequestPortalRepository requestPortalRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     RequestDeletionIntegrationTest(TestOrganizations organizations, TestRecords records, MockMvc mockMvc,
-                                   ObjectMapper objectMapper, JdbcTemplate jdbc) {
+                                   ObjectMapper objectMapper, JdbcTemplate jdbc,
+                                   RequestPortalRepository requestPortalRepository) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
         this.objectMapper = objectMapper;
         this.jdbc = jdbc;
+        this.requestPortalRepository = requestPortalRepository;
     }
 
     @AfterEach
@@ -277,6 +286,127 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
             assertAll(
                     () -> assertEquals("c true", key("custom_field_value", "request_id")),
                     () -> assertEquals("c true", key("request_portal_field", "request_portal_id")));
+        }
+    }
+
+    /**
+     * E-3 and E-4: a portal that received requests is not deleted (PPB-02); without them, it goes with its fields
+     * (PPB-14) and is recorded (PPB-23).
+     */
+    @Nested
+    class Portal {
+
+        private RequestPortal portal(Company company, int fields) {
+            RequestPortal portal = new RequestPortal();
+            portal.setTitle(TestRecords.unique("P-13 portal"));
+            portal.setUuid(UUID.randomUUID().toString());
+            portal.setCompany(company);
+            List<PortalFieldType> types = List.of(PortalFieldType.DESCRIPTION, PortalFieldType.CONTACT,
+                    PortalFieldType.IMAGE);
+            for (int i = 0; i < fields; i++) {
+                RequestPortalField field = new RequestPortalField();
+                field.setType(types.get(i));
+                field.setRequestPortal(portal);
+                field.setCompany(company);
+                portal.getFields().add(field);
+            }
+            return requestPortalRepository.saveAndFlush(portal);
+        }
+
+        private long portals(Long portal) {
+            return count("SELECT count(*) FROM request_portal WHERE id = ?", portal);
+        }
+
+        private long fields(Long portal) {
+            return count("SELECT count(*) FROM request_portal_field WHERE request_portal_id = ?", portal);
+        }
+
+        private Response deletePortal(Long portal, String token) {
+            return api.call(delete("/request-portals/" + portal), token);
+        }
+
+        @Test
+        void ca113_withARequest_409_requestKeepsItsPortal() {
+            CommonData data = data();
+            RequestPortal portal = portal(data.o1().company(), 1);
+            Long request = request(data, data.o1().admin());
+            jdbc.update("UPDATE request SET request_portal_id = ? WHERE id = ?", portal.getId(), request);
+            mailDouble.reset();
+            webhookDouble.reset();
+
+            Response response = deletePortal(portal.getId(), api.login(data.o1().admin()));
+
+            assertEquals(409, response.status(), response.toString());
+            JsonNode body = json(response);
+            assertAll(
+                    () -> assertFalse(body.get("success").asBoolean()),
+                    () -> assertEquals("REQUEST_PORTAL_IN_USE", body.get("code").asText()),
+                    () -> assertFalse(body.get("message").asText().isBlank()),
+                    () -> assertEquals("[\"REQUEST\"]", body.get("blockingTypes").toString()),
+                    () -> assertFalse(response.body().toLowerCase().contains("constraint"), response.toString()),
+                    () -> assertEquals(portal.getId(), jdbc.queryForObject("SELECT request_portal_id FROM request "
+                            + "WHERE id = ?", Long.class, request), "the request keeps its portal"),
+                    () -> assertEquals(1, portals(portal.getId())),
+                    () -> assertEquals(1, fields(portal.getId())),
+                    () -> assertEquals(0, auditRecords(data)),
+                    () -> assertNoSideEffects());
+        }
+
+        @Test
+        void ca114_withoutRequests_200_portalAndItsThreeFieldsDeleted_recorded() {
+            CommonData data = data();
+            RequestPortal portal = portal(data.o1().company(), 3);
+
+            Response response = deletePortal(portal.getId(), api.login(data.o1().admin()));
+
+            assertAll(
+                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals(DELETED_BODY, response.body()),
+                    () -> assertEquals(0, portals(portal.getId())),
+                    () -> assertEquals(0, fields(portal.getId())),
+                    () -> assertEquals(List.of("DELETE REQUEST_PORTAL " + portal.getId() + " " + portal.getTitle()
+                                    + " API " + data.o1().admin().getId() + " {\"request_portal_field\": 3} 0"),
+                            jdbc.queryForList("SELECT action || ' ' || entity_type || ' ' || entity_id || ' ' "
+                                    + "|| coalesce(entity_folio, '') || entity_name || ' ' || source || ' ' "
+                                    + "|| actor_id || ' ' || cascade_rows::text || ' ' || storage_objects "
+                                    + "FROM audit_log WHERE company_id = ?", String.class,
+                                    data.o1().company().getId())));
+        }
+
+        @Test
+        void withARequest_technicianWithoutSettings_403_beforeThe409() {
+            CommonData data = data();
+            RequestPortal portal = portal(data.o1().company(), 1);
+            Long request = request(data, data.o1().admin());
+            jdbc.update("UPDATE request SET request_portal_id = ? WHERE id = ?", portal.getId(), request);
+
+            Response response = deletePortal(portal.getId(), api.login(data.o1().technician()));
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(response.body().contains("REQUEST_PORTAL_IN_USE"), response.toString()),
+                    () -> assertEquals(1, portals(portal.getId())));
+        }
+
+        @Test
+        void adminOfAnotherOrganization_403_kept() {
+            CommonData data = data();
+            RequestPortal portal = portal(data.o1().company(), 1);
+
+            Response response = deletePortal(portal.getId(), api.login(data.o2().admin()));
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertEquals(1, portals(portal.getId())));
+        }
+
+        @Test
+        void unknownPortal_404() {
+            CommonData data = data();
+
+            Response response = deletePortal(Long.MAX_VALUE, api.login(data.o1().admin()));
+
+            assertEquals(404, response.status(), response.toString());
         }
     }
 

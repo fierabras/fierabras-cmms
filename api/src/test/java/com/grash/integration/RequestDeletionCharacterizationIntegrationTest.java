@@ -356,13 +356,14 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
 
             assertAll(
                     () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("REQUEST_PORTAL_IN_USE"), response.toString()),
                     () -> assertEquals(1, count("SELECT count(*) FROM request_portal WHERE id = ?", portal.getId())),
                     () -> assertEquals(1, count("SELECT count(*) FROM request WHERE id = ? "
                             + "AND request_portal_id = ?", request, portal.getId()), "P-13: the request keeps it"));
         }
 
         @Test
-        void withoutRequests_200_portalAndFieldsDeleted_notRecorded() {
+        void withoutRequests_200_portalAndFieldsDeleted_recorded() {
             CommonData data = data();
             RequestPortal portal = portal(data.o1().company(), 3);
 
@@ -373,7 +374,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
                     () -> assertEquals(0, count("SELECT count(*) FROM request_portal WHERE id = ?", portal.getId())),
                     () -> assertEquals(0, count("SELECT count(*) FROM request_portal_field WHERE request_portal_id = ?",
                             portal.getId())),
-                    () -> assertEquals(0, auditRecords(data), "today the deletion is not recorded"));
+                    () -> assertEquals(1, auditRecords(data), "P-13: the deletion is recorded"));
         }
 
         @Test

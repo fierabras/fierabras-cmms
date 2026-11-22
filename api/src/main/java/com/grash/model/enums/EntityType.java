@@ -26,6 +26,7 @@ public enum EntityType {
     PREVENTIVE_MAINTENANCE("preventive_maintenance"),
     RELATION("relation"),
     REQUEST("request"),
+    REQUEST_PORTAL("request_portal"),
     ROLE("role"),
     TASK("task"),
     TASK_BASE("task_base"),

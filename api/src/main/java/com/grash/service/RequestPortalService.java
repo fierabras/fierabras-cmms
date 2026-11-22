@@ -9,6 +9,8 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.RequestPortalMapper;
 import com.grash.model.RequestPortal;
 import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PlanFeatures;
 import com.grash.repository.RequestPortalRepository;
@@ -32,6 +34,11 @@ public class RequestPortalService {
     private final RequestPortalRepository requestPortalRepository;
     private final RequestPortalMapper requestPortalMapper;
     private final LicenseService licenseService;
+    private final DeletionService deletionService;
+
+    public static final String REQUEST_PORTAL_IN_USE = "REQUEST_PORTAL_IN_USE";
+    private static final String REQUEST_PORTAL_IN_USE_MESSAGE = "This request portal has received requests and "
+            + "cannot be deleted";
 
     public RequestPortal create(@Valid RequestPortalPostDTO requestPortalReq, User user) {
         if (!user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.REQUEST_PORTAL) || !user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || !licenseService.hasEntitlement(LicenseEntitlement.REQUEST_PORTAL))
@@ -49,8 +56,17 @@ public class RequestPortalService {
         return requestPortalRepository.findAll();
     }
 
-    public void delete(Long id) {
-        requestPortalRepository.deleteById(id);
+    /**
+     * P-13 (PPB-02, PPB-14, PPB-23): a portal that received requests is not deleted; otherwise it goes with its
+     * fields and the deletion is recorded.
+     */
+    public void delete(RequestPortal requestPortal, User actor) {
+        Long id = requestPortal.getId();
+        deletionService.delete(new AuditTarget(EntityType.REQUEST_PORTAL, id, null, requestPortal.getTitle(),
+                        requestPortal.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(REQUEST_PORTAL_IN_USE, REQUEST_PORTAL_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.REQUEST, () -> deletionService.isCited("request", "request_portal_id", id)),
+                () -> requestPortalRepository.delete(requestPortal));
     }
 
     public Optional<RequestPortal> findById(Long id) {
