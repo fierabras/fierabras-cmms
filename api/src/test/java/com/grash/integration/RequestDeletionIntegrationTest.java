@@ -11,8 +11,14 @@ import com.grash.model.Company;
 import com.grash.model.RequestPortal;
 import com.grash.model.RequestPortalField;
 import com.grash.model.User;
+import com.grash.model.Workflow;
+import com.grash.model.WorkflowAction;
 import com.grash.model.enums.PortalFieldType;
+import com.grash.model.enums.webhook.WebhookEvent;
+import com.grash.model.enums.workflow.RequestAction;
+import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.repository.RequestPortalRepository;
+import com.grash.repository.WorkflowRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -22,6 +28,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -48,18 +55,21 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbc;
     private final RequestPortalRepository requestPortalRepository;
+    private final WorkflowRepository workflowRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     RequestDeletionIntegrationTest(TestOrganizations organizations, TestRecords records, MockMvc mockMvc,
                                    ObjectMapper objectMapper, JdbcTemplate jdbc,
-                                   RequestPortalRepository requestPortalRepository) {
+                                   RequestPortalRepository requestPortalRepository,
+                                   WorkflowRepository workflowRepository) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
         this.objectMapper = objectMapper;
         this.jdbc = jdbc;
         this.requestPortalRepository = requestPortalRepository;
+        this.workflowRepository = workflowRepository;
     }
 
     @AfterEach
@@ -110,6 +120,11 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
         Long request = json(response).get("id").asLong();
         jdbc.update("UPDATE request SET created_by = ? WHERE id = ?", creator.getId(), request);
         return request;
+    }
+
+    private Long id(Response response) {
+        assertTrue(response.is2xx(), response.toString());
+        return json(response).get("id").asLong();
     }
 
     private Long approved(CommonData data, User creator) {
@@ -359,6 +374,191 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
             Response response = editTitle(Long.MAX_VALUE, api.login(data.o1().admin()));
 
             assertEquals(404, response.status(), response.toString());
+        }
+    }
+
+    /**
+     * E-7 (D-2, PPB-08): a disabled user is not assigned when a request is created, edited or approved. C-1: the
+     * rejected approval reverts everything, the changes of the automation included, and has no external effect.
+     */
+    @Nested
+    class DisabledUser {
+
+        private static final String USER_RETIRED = "USER_RETIRED";
+
+        private void disable(User user) {
+            jdbc.update("UPDATE own_user SET enabled = false WHERE id = ?", user.getId());
+        }
+
+        private Response create(CommonData data, String users) {
+            return api.call(post("/requests").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"" + TestRecords.unique("P-13 request") + "\"," + users + "}"),
+                    api.login(data.o1().admin()));
+        }
+
+        private Response edit(Long request, String users, CommonData data) {
+            return api.call(patch("/requests/" + request).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"P-13 edited\"," + users + "}"), api.login(data.o1().admin()));
+        }
+
+        private Response approve(Long request, CommonData data) {
+            return api.call(patch("/requests/" + request + "/approve").contentType(MediaType.APPLICATION_JSON)
+                    .content("{}"), api.login(data.o1().admin()));
+        }
+
+        private long requestsOf(CommonData data) {
+            return count("SELECT count(*) FROM request WHERE company_id = ?", data.o1().company().getId());
+        }
+
+        private long workOrdersOf(CommonData data) {
+            return count("SELECT count(*) FROM work_order WHERE company_id = ?", data.o1().company().getId());
+        }
+
+        private long notificationsOf(CommonData data) {
+            return count("SELECT count(*) FROM notification n JOIN own_user u ON u.id = n.user_id "
+                    + "WHERE u.company_id = ?", data.o1().company().getId());
+        }
+
+        private void assignUserWhenApproved(CommonData data, User user) {
+            WorkflowAction action = new WorkflowAction();
+            action.setCompany(data.o1().company());
+            action.setRequestAction(RequestAction.ASSIGN_USER);
+            action.setUser(user);
+            Workflow workflow = new Workflow();
+            workflow.setCompany(data.o1().company());
+            workflow.setTitle(TestRecords.unique("P-13 workflow"));
+            workflow.setMainCondition(WFMainCondition.REQUEST_APPROVED);
+            workflow.setAction(action);
+            workflowRepository.saveAndFlush(workflow);
+        }
+
+        /**
+         * C-1: the 409 of the approval leaves the request as it was and creates nothing, with no mail, webhook nor
+         * notification.
+         */
+        private void assertApprovalReverted(CommonData data, Long request, List<Map<String, Object>> before,
+                                            long workOrders, long notifications, Response response) {
+            assertConflict(response, USER_RETIRED);
+            assertAll(
+                    () -> assertEquals(before, row(request), "the request row is identical"),
+                    () -> assertNull(workOrderOf(request), "the request stays pending"),
+                    () -> assertEquals(workOrders, workOrdersOf(data), "no work order"),
+                    () -> assertEquals(notifications, notificationsOf(data), "no notification"),
+                    () -> assertNoSideEffects());
+        }
+
+        @Test
+        void createdWithADisabledPrimaryUser_409_notCreated() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            disable(technician);
+            long requests = requestsOf(data);
+
+            Response response = create(data, "\"primaryUser\":{\"id\":" + technician.getId() + "}");
+
+            assertConflict(response, USER_RETIRED);
+            assertEquals(requests, requestsOf(data));
+        }
+
+        @Test
+        void createdWithADisabledAssignedUser_409_notCreated() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            disable(technician);
+            long requests = requestsOf(data);
+
+            Response response = create(data, "\"assignedTo\":[{\"id\":" + technician.getId() + "}]");
+
+            assertConflict(response, USER_RETIRED);
+            assertEquals(requests, requestsOf(data));
+        }
+
+        @Test
+        void editedToADisabledPrimaryUser_409_unchanged() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Long request = request(data, data.o1().admin());
+            disable(technician);
+            List<Map<String, Object>> before = row(request);
+
+            Response response = edit(request, "\"primaryUser\":{\"id\":" + technician.getId() + "}", data);
+
+            assertConflict(response, USER_RETIRED);
+            assertEquals(before, row(request));
+        }
+
+        @Test
+        void editedKeepingAUserDisabledAfterItsAssignment_200() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Long request = id(create(data, "\"primaryUser\":{\"id\":" + technician.getId() + "}"));
+            disable(technician);
+
+            Response response = edit(request, "\"primaryUser\":{\"id\":" + technician.getId() + "}", data);
+
+            assertAll(
+                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals("P-13 edited", jdbc.queryForObject("SELECT title FROM request WHERE id = ?",
+                            String.class, request)));
+        }
+
+        @Test
+        void approvedWithAnActiveUser_200_effectsSeen() {
+            // control of C-1: the doubles and the notifications see the effects of an approval
+            CommonData data = data();
+            records.endpoint(data.o1().company(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE);
+            Long request = id(create(data, "\"primaryUser\":{\"id\":" + data.o1().technician().getId() + "}"));
+            long notifications = notificationsOf(data);
+            mailDouble.reset();
+            webhookDouble.reset();
+
+            Response response = approve(request, data);
+
+            assertEquals(200, response.status(), response.toString());
+            webhookDouble.awaitCalls(WebhookEvent.WORK_REQUEST_STATUS_CHANGE.name(), 1, Duration.ofSeconds(10));
+            assertAll(
+                    () -> assertNotNull(workOrderOf(request)),
+                    () -> assertFalse(mailDouble.calls().isEmpty(), "the approval mail"),
+                    () -> assertTrue(notificationsOf(data) > notifications, "the approval notifications"));
+        }
+
+        @Test
+        void c1_approvedWithADisabledUserOfTheRequest_409_everythingReverted() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            records.endpoint(data.o1().company(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE);
+            Long request = id(create(data, "\"primaryUser\":{\"id\":" + technician.getId() + "}"));
+            disable(technician);
+            List<Map<String, Object>> before = row(request);
+            long workOrders = workOrdersOf(data);
+            long notifications = notificationsOf(data);
+            mailDouble.reset();
+            webhookDouble.reset();
+
+            Response response = approve(request, data);
+
+            assertApprovalReverted(data, request, before, workOrders, notifications, response);
+        }
+
+        @Test
+        void c1_approvedWithADisabledUserAssignedByTheAutomation_409_everythingReverted() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            records.endpoint(data.o1().company(), WebhookEvent.WORK_REQUEST_STATUS_CHANGE);
+            assignUserWhenApproved(data, technician);
+            Long request = request(data, data.o1().admin());
+            disable(technician);
+            List<Map<String, Object>> before = row(request);
+            long workOrders = workOrdersOf(data);
+            long notifications = notificationsOf(data);
+            mailDouble.reset();
+            webhookDouble.reset();
+
+            Response response = approve(request, data);
+
+            assertApprovalReverted(data, request, before, workOrders, notifications, response);
+            assertNull(jdbc.queryForObject("SELECT primary_user_id FROM request WHERE id = ?", Long.class, request),
+                    "the user that the automation set is reverted");
         }
     }
 

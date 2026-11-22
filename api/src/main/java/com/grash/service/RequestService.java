@@ -74,6 +74,9 @@ public class RequestService {
                 setRequestCustomFields(request, requestPostDTO.getCustomFields(), company);
             }
         }
+        // P-13 (D-2, PPB-08): a disabled user is not assigned to a new request
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(request.getPrimaryUser(),
+                request.getAssignedTo()));
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
         startPending(request);
@@ -133,6 +136,10 @@ public class RequestService {
     public Request update(Long id, RequestPatchDTO request, Company company) {
         if (requestRepository.existsById(id)) {
             Request savedRequest = requestRepository.findById(id).get();
+            // P-13 (D-2, PPB-08): a disabled user is not assigned anew; those already assigned are kept
+            userService.rejectRetired(WorkOrderService.assignedUsers(savedRequest.getPrimaryUser(),
+                    savedRequest.getAssignedTo()), WorkOrderService.assignedUsers(request.getPrimaryUser(),
+                    request.getAssignedTo()));
             if (!request.getCustomFields().isEmpty()) {
                 setRequestCustomFields(savedRequest, request.getCustomFields(), company);
             }
@@ -216,6 +223,10 @@ public class RequestService {
             User primaryUser = workOrder.getPrimaryUser();
             workOrder.setPrimaryUser(primaryUser == null ? creator : primaryUser);
         }
+        // P-13 (D-2, D-P13-2, PPB-08): every user of the new work order, those set by an automation included, is
+        // active; otherwise the whole approval is rejected and reverted
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(workOrder.getPrimaryUser(),
+                workOrder.getAssignedTo()));
         workOrder.setParentRequest(request);
         WorkOrder savedWorkOrder = workOrderService.create(workOrder, creator.getCompany());
         request.setWorkOrder(savedWorkOrder);

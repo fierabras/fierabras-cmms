@@ -296,7 +296,7 @@ public class WorkOrderService {
     /**
      * The primary user and the assigned users, without nulls.
      */
-    private static List<User> assignedUsers(User primaryUser, Collection<User> assignedTo) {
+    static List<User> assignedUsers(User primaryUser, Collection<User> assignedTo) {
         List<User> users = new ArrayList<>();
         if (primaryUser != null) users.add(primaryUser);
         if (assignedTo != null) users.addAll(assignedTo);

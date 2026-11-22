@@ -300,7 +300,8 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
     class DisabledUser {
 
         @Test
-        void approvedWithADisabledPrimaryUser_200_workOrderAssignedToHim() {
+        void approvedWithADisabledPrimaryUser_409_noWorkOrder() {
+            // P-13 (D-2): the disabled user is not assigned to the new work order
             CommonData data = data();
             User technician = data.o1().technician();
             Long request = request(data.o1().admin(), technician);
@@ -309,25 +310,28 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = approve(request, api.login(data.o1().admin()));
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(technician.getId(), jdbc.queryForObject("SELECT primary_user_id "
-                            + "FROM work_order WHERE id = ?", Long.class, workOrderOf(request))));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("USER_RETIRED"), response.toString()),
+                    () -> assertNull(workOrderOf(request), "the request stays pending"));
         }
 
         @Test
-        void createdWithADisabledPrimaryUser_200() {
+        void createdWithADisabledPrimaryUser_409() {
             CommonData data = data();
             User technician = data.o1().technician();
             disable(technician);
 
-            Long request = request(data.o1().admin(), technician);
+            Response response = api.call(post("/requests").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"P-13\",\"primaryUser\":{\"id\":" + technician.getId() + "}}"),
+                    api.login(data.o1().admin()));
 
-            assertEquals(technician.getId(), jdbc.queryForObject("SELECT primary_user_id FROM request WHERE id = ?",
-                    Long.class, request));
+            assertAll(
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("USER_RETIRED"), response.toString()));
         }
 
         @Test
-        void editedWithADisabledPrimaryUser_200() {
+        void editedWithADisabledPrimaryUser_409() {
             CommonData data = data();
             User technician = data.o1().technician();
             String admin = api.login(data.o1().admin());
@@ -338,9 +342,10 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
                     .content("{\"title\":\"P-13\",\"primaryUser\":{\"id\":" + technician.getId() + "}}"), admin);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(technician.getId(), jdbc.queryForObject("SELECT primary_user_id "
-                            + "FROM request WHERE id = ?", Long.class, request)));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("USER_RETIRED"), response.toString()),
+                    () -> assertNull(jdbc.queryForObject("SELECT primary_user_id FROM request WHERE id = ?",
+                            Long.class, request)));
         }
     }
 
