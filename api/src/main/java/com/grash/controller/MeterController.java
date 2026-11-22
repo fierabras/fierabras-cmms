@@ -156,7 +156,7 @@ public class MeterController {
             Meter savedMeter = optionalMeter.get();
             if (user.getId().equals(savedMeter.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.METERS)) {
-                meterService.delete(id);
+                meterService.delete(savedMeter, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

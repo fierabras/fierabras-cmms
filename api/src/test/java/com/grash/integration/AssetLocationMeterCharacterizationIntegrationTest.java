@@ -606,7 +606,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class MeterDeletion {
 
         @Test
-        void readingTriggerAndTaskBase_200_deletedInCascade_noAuditRecord() {
+        void readingTriggerAndTaskBase_409_allKept_noAuditRecord() {
+            // before P-14: 200, the reading, the trigger and the task deleted in cascade, no audit record
             CommonData data = data();
             Meter meter = meter(data.o1().company(), records.asset(data.o1().company()));
             Reading reading = reading(meter, 10);
@@ -616,10 +617,14 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = call(delete("/meters/" + meter.getId()), data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("reading", reading.getId())),
-                    () -> assertEquals(0, rows("work_order_meter_trigger", trigger.getId())),
-                    () -> assertEquals(0, rows("task_base", taskBase.getId())),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("\"code\":\"METER_IN_USE\""), response.toString()),
+                    () -> assertTrue(response.body().contains("\"READING\""), response.toString()),
+                    () -> assertTrue(response.body().contains("\"WORK_ORDER_METER_TRIGGER\""), response.toString()),
+                    () -> assertTrue(response.body().contains("\"TASK_BASE\""), response.toString()),
+                    () -> assertEquals(1, rows("reading", reading.getId())),
+                    () -> assertEquals(1, rows("work_order_meter_trigger", trigger.getId())),
+                    () -> assertEquals(1, rows("task_base", taskBase.getId())),
                     () -> assertEquals(0, auditRecords(data)));
         }
 
@@ -680,7 +685,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class Readings {
 
         @Test
-        void patch_200_valueChanged_triggersEvaluated() {
+        void patch_409HistoryImmutable_valueKept_noTriggerEvaluated() {
+            // before P-14: 200, the value changed and the trigger created a work order
             CommonData data = data();
             Meter meter = meter(data.o1().company(), records.asset(data.o1().company()));
             Reading reading = reading(meter, 100);
@@ -691,15 +697,17 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = send(patch("/readings/" + reading.getId()), "{\"value\":98}", data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(98.0, jdbc.queryForObject("SELECT value FROM reading WHERE id = ?",
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("HISTORY_IMMUTABLE"), response.toString()),
+                    () -> assertEquals(100.0, jdbc.queryForObject("SELECT value FROM reading WHERE id = ?",
                             Double.class, reading.getId())),
-                    () -> assertEquals(workOrders + 1, count("SELECT count(*) FROM work_order WHERE company_id = ?",
-                            data.o1().company().getId()), "the trigger created a work order"));
+                    () -> assertEquals(workOrders, count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                            data.o1().company().getId())));
         }
 
         @Test
-        void delete_200_deleted() {
+        void delete_409HistoryImmutable_kept() {
+            // before P-14: 200, the reading deleted
             CommonData data = data();
             Meter meter = meter(data.o1().company(), records.asset(data.o1().company()));
             Reading reading = reading(meter, 100);
@@ -707,8 +715,9 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Response response = call(delete("/readings/" + reading.getId()), data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, rows("reading", reading.getId())));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("HISTORY_IMMUTABLE"), response.toString()),
+                    () -> assertEquals(1, rows("reading", reading.getId())));
         }
 
         @Test
@@ -730,22 +739,20 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
         }
 
         @Test
-        void otherOrganization_patchAndDelete_200_meterNeverLoaded() {
-            // isAccessibleBy stops at viewOther before reading the meter, so CompanyAudit.afterLoad never runs
+        void otherOrganization_patchAndDelete_403_kept() {
+            // before P-14: 200 on both, the reading of O1 changed and deleted from O2 (D-P14-6)
             CommonData data = data();
             Meter meter = meter(data.o1().company(), records.asset(data.o1().company()));
             Reading reading = reading(meter, 100);
 
             Response patchOther = send(patch("/readings/" + reading.getId()), "{\"value\":1}", data.o2().admin());
-            double value = jdbc.queryForObject("SELECT value FROM reading WHERE id = ?", Double.class,
-                    reading.getId());
             Response deleteOther = call(delete("/readings/" + reading.getId()), data.o2().admin());
 
             assertAll(
-                    () -> assertEquals(200, patchOther.status(), patchOther.toString()),
-                    () -> assertEquals(1.0, value),
-                    () -> assertEquals(200, deleteOther.status(), deleteOther.toString()),
-                    () -> assertEquals(0, rows("reading", reading.getId())));
+                    () -> assertEquals(403, patchOther.status(), patchOther.toString()),
+                    () -> assertEquals(403, deleteOther.status(), deleteOther.toString()),
+                    () -> assertEquals(100.0, jdbc.queryForObject("SELECT value FROM reading WHERE id = ?",
+                            Double.class, reading.getId())));
         }
 
         @Test
@@ -946,7 +953,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
     class DemoPurge {
 
         @Test
-        void demoHierarchiesAndMeterWithReading_200_allDeleted() {
+        void demoHierarchies_200_allDeleted() {
+            // the hierarchies keep working with the protected references: Hibernate unlinks the child first
             CommonData data = data();
             Company company = data.o1().company();
             Location parentLocation = records.location(company);
@@ -954,7 +962,6 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
             Asset parentAsset = records.asset(company, null, true);
             Asset childAsset = records.asset(company, null, true);
             Meter meter = meter(company, parentAsset);
-            Reading reading = reading(meter, 10);
             jdbc.update("UPDATE location SET is_demo = true WHERE id IN (?, ?)", parentLocation.getId(),
                     childLocation.getId());
             jdbc.update("UPDATE location SET parent_location_id = ? WHERE id = ?", parentLocation.getId(),
@@ -971,8 +978,28 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                             parentLocation.getId(), childLocation.getId())),
                     () -> assertEquals(0, count("SELECT count(*) FROM asset WHERE id IN (?, ?)",
                             parentAsset.getId(), childAsset.getId())),
-                    () -> assertEquals(0, rows("meter", meter.getId())),
-                    () -> assertEquals(0, rows("reading", reading.getId())));
+                    () -> assertEquals(0, rows("meter", meter.getId())));
+        }
+
+        @Test
+        void demoMeterWithAReading_409RecordInUse_nothingDeleted() {
+            // before P-14: 200, the reading deleted with its meter. D-P14-9: the reading is not demo, so the whole
+            // purge is rejected (PPB-20 d); P-18 gives the code DEMO_DATA_IN_USE
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = records.asset(company, null, true);
+            Meter meter = meter(company, asset);
+            Reading reading = reading(meter, 10);
+            jdbc.update("UPDATE meter SET is_demo = true WHERE id = ?", meter.getId());
+
+            Response response = call(delete("/demo/demo-data"), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("RECORD_IN_USE"), response.toString()),
+                    () -> assertEquals(1, rows("asset", asset.getId())),
+                    () -> assertEquals(1, rows("meter", meter.getId())),
+                    () -> assertEquals(1, rows("reading", reading.getId())));
         }
     }
 
@@ -1011,7 +1038,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "own_user.location_id -> location fktmprdfwe8axkp8cobywe2gc1d a true",
                     "preventive_maintenance.asset_id -> asset fk2r1291umxjxrddelq96v3pl4n a true",
                     "preventive_maintenance.location_id -> location fk53hdmxmgd3fjb2fjsh43d1irf a true",
-                    "reading.meter_id -> meter fkrk4bo4tq59pfymwvx2jnjvlae c false",
+                    "reading.meter_id -> meter fkrk4bo4tq59pfymwvx2jnjvlae a true",
                     "request.asset_id -> asset fkml2rlcjiurmq5rjyw1gmsstf6 a true",
                     "request.location_id -> location fkj7y0rwrqngdydkkdcohwisqq6 a true",
                     "request_portal_field.asset_id -> asset fk_request_portal_field_asset a false",
@@ -1029,7 +1056,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "t_location_vendor_associations.id_location -> location fkb6alk3ojlofcs76q4hnce764b c true",
                     "t_meter_user_associations.id_meter -> meter fk8ikpoqiwcc3i40wdfjl2dynv7 c true",
                     "task_base.asset_id -> asset fkfcyjas01bhns54mn9uxk3xqx8 a true",
-                    "task_base.meter_id -> meter fkgtij68ko3kykqk1od01ahoudg c false",
+                    "task_base.meter_id -> meter fkgtij68ko3kykqk1od01ahoudg a true",
                     "work_order.asset_id -> asset fkp4hbmaa9hcp6myymsfyxg6fo2 a true",
                     "work_order.location_id -> location fkdbtdl51i4yup1hs6ek3ecqros a true",
                     "work_order_aud.location_id -> location FK_work_order_AUD_location_id a true",
@@ -1068,7 +1095,6 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "location.company_id -> company",
                     "meter.company_id -> company",
                     "meter_category.company_settings_id -> company_settings",
-                    "reading.meter_id -> meter",
                     "work_order_meter_trigger.company_id -> company",
                     "work_order_meter_trigger.meter_id -> meter"), keys);
         }

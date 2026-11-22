@@ -24,6 +24,7 @@ public enum EntityType {
     PART("part"),
     PART_QUANTITY("part_quantity"),
     PREVENTIVE_MAINTENANCE("preventive_maintenance"),
+    READING("reading"),
     RELATION("relation"),
     REQUEST("request"),
     REQUEST_PORTAL("request_portal"),

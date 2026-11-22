@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -39,6 +40,8 @@ import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * P-14: deletion of assets, locations, meters and their categories is rejected while a dependent exists (PPB-02,
@@ -605,6 +608,242 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
                     "workflow_action.location_id", "workflow_condition.location_id").stream().map(key ->
                     (Executable) () -> assertEquals("a true", schemaOf(key.split("\\.")[0], key.split("\\.")[1]),
                             key)));
+        }
+    }
+
+    // =====================================================================================================
+    // E-3: meter
+    // =====================================================================================================
+
+    @Nested
+    class MeterDeletion {
+
+        private static final String METER_IN_USE = "METER_IN_USE";
+        private static final String PATH = "/meters/";
+
+        private Meter meter(CommonData data) {
+            return module.meter(data.o1().company(), records.asset(data.o1().company()));
+        }
+
+        @Test
+        void ca010_reading_409WithReading_readingKept() {
+            CommonData data = data();
+            Meter meter = meter(data);
+            Long reading = module.reading(meter, 10).getId();
+            assertBlockedBy(data, PATH, "meter", meter.getId(), METER_IN_USE, "READING", "reading", reading);
+        }
+
+        @Test
+        void taskBase_409WithTaskBase() {
+            CommonData data = data();
+            Meter meter = meter(data);
+            Long taskBase = module.taskBase(data.o1().company(), null, meter).getId();
+            assertBlockedBy(data, PATH, "meter", meter.getId(), METER_IN_USE, "TASK_BASE", "task_base", taskBase);
+        }
+
+        @Test
+        void meterTrigger_409WithWorkOrderMeterTrigger() {
+            // D-P14-3: checked by the application; work_order_meter_trigger.meter_id stays CASCADE
+            CommonData data = data();
+            Meter meter = meter(data);
+            Long trigger = module.trigger(meter, WorkOrderMeterTriggerCondition.MORE_THAN, 10).getId();
+            assertBlockedBy(data, PATH, "meter", meter.getId(), METER_IN_USE, "WORK_ORDER_METER_TRIGGER",
+                    "work_order_meter_trigger", trigger);
+        }
+
+        @Test
+        void disabledUser_409WithUser() {
+            // D-P14-4, §3.3 (c)
+            CommonData data = data();
+            Meter meter = meter(data);
+            User technician = data.o1().technician();
+            jdbc.update("INSERT INTO t_meter_user_associations (id_meter, id_user) VALUES (?, ?)", meter.getId(),
+                    technician.getId());
+            disable(technician);
+            assertBlockedBy(data, PATH, "meter", meter.getId(), METER_IN_USE, "USER", "own_user",
+                    technician.getId());
+        }
+
+        @Test
+        void readingAddedBetweenCheckAndDeletion_409WithReading_never500() {
+            CommonData data = data();
+            Meter meter = meter(data);
+            faults.runBefore("meter", Operation.DELETE, "INSERT INTO reading (id, created_at, updated_at, value, "
+                    + "meter_id) SELECT coalesce(max(id), 0) + 1000000, now(), now(), 1, " + meter.getId()
+                    + " FROM reading");
+
+            Response response = call(delete(PATH + meter.getId()), data.o1().admin());
+
+            assertEquals(List.of("READING"), assertInUse(response, METER_IN_USE));
+            assertAll(
+                    () -> assertEquals(1, rows("meter", meter.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void withoutDependentsWithAnEnabledUser_200_recorded() {
+            CommonData data = data();
+            Meter meter = meter(data);
+            jdbc.update("INSERT INTO t_meter_user_associations (id_meter, id_user) VALUES (?, ?)", meter.getId(),
+                    data.o1().technician().getId());
+
+            assertDeleted(call(delete(PATH + meter.getId()), data.o1().admin()));
+            assertAll(
+                    () -> assertEquals(0, rows("meter", meter.getId())),
+                    () -> assertEquals(List.of("DELETE METER - " + meter.getName()
+                            + " {\"t_meter_user_associations\": 1} 0"), audit(data)));
+        }
+
+        @Test
+        void technicianNotCreator_403_otherOrganization_403_unknown_404_noAuditRecord() {
+            CommonData data = data();
+            Meter meter = meter(data);
+
+            Response technician = call(delete(PATH + meter.getId()), data.o1().technician());
+            Response otherOrganization = call(delete(PATH + meter.getId()), data.o2().admin());
+            Response unknown = call(delete(PATH + Long.MAX_VALUE), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(403, technician.status(), technician.toString()),
+                    () -> assertEquals(403, otherOrganization.status(), otherOrganization.toString()),
+                    () -> assertEquals(404, unknown.status(), unknown.toString()),
+                    () -> assertEquals(1, rows("meter", meter.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void schema_referencesToMeterAreNoActionWithIndex_triggerStaysCascade() {
+            assertAll(
+                    () -> assertEquals("a true", schemaOf("reading", "meter_id")),
+                    () -> assertEquals("a true", schemaOf("task_base", "meter_id")),
+                    () -> assertEquals("c false", schemaOf("work_order_meter_trigger", "meter_id")));
+        }
+    }
+
+    // =====================================================================================================
+    // E-5: readings are immutable (PPB-35)
+    // =====================================================================================================
+
+    @Nested
+    class Readings {
+
+        private static final String HISTORY_IMMUTABLE = "HISTORY_IMMUTABLE";
+
+        private Response patchReading(Long id, User user) {
+            return call(patch("/readings/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"value\":98}"),
+                    user);
+        }
+
+        private long workOrders() {
+            return count("SELECT count(*) FROM work_order");
+        }
+
+        /**
+         * A meter of O1 with a reading of 100 and a trigger «less than 99»: changing the reading to 98 would fire it.
+         */
+        private Long readingWithTrigger(CommonData data) {
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            module.trigger(meter, WorkOrderMeterTriggerCondition.LESS_THAN, 99);
+            return module.reading(meter, 100).getId();
+        }
+
+        private void assertUnchanged(Long reading, List<Map<String, Object>> before, long workOrdersBefore) {
+            assertAll(
+                    () -> assertEquals(before, row("reading", reading)),
+                    () -> assertEquals(workOrdersBefore, workOrders(), "no trigger was evaluated"),
+                    () -> assertTrue(webhookDouble.calls().isEmpty(), "no webhook"));
+        }
+
+        @Test
+        void ca014_patch_409HistoryImmutable_unchanged_noTriggerEvaluated() {
+            CommonData data = data();
+            Long reading = readingWithTrigger(data);
+            List<Map<String, Object>> before = row("reading", reading);
+            long workOrdersBefore = workOrders();
+
+            Response response = patchReading(reading, data.o1().admin());
+
+            assertEquals(List.of(), assertInUse(response, HISTORY_IMMUTABLE));
+            assertUnchanged(reading, before, workOrdersBefore);
+        }
+
+        @Test
+        void ca014_delete_409HistoryImmutable_unchanged_noTriggerEvaluated() {
+            CommonData data = data();
+            Long reading = readingWithTrigger(data);
+            List<Map<String, Object>> before = row("reading", reading);
+            long workOrdersBefore = workOrders();
+
+            Response response = call(delete("/readings/" + reading), data.o1().admin());
+
+            assertEquals(List.of(), assertInUse(response, HISTORY_IMMUTABLE));
+            assertUnchanged(reading, before, workOrdersBefore);
+        }
+
+        @Test
+        void c1_otherOrganization_403OnPatchAndDelete_unchanged_noTriggerEvaluated() {
+            // D-P14-6 (C-1): isolation between organizations, checked before the 409
+            CommonData data = data();
+            Long reading = readingWithTrigger(data);
+            List<Map<String, Object>> before = row("reading", reading);
+            long workOrdersBefore = workOrders();
+
+            Response patched = patchReading(reading, data.o2().admin());
+            Response deleted = call(delete("/readings/" + reading), data.o2().admin());
+
+            assertAll(
+                    () -> assertEquals(403, patched.status(), patched.toString()),
+                    () -> assertEquals(403, deleted.status(), deleted.toString()));
+            assertUnchanged(reading, before, workOrdersBefore);
+        }
+
+        @Test
+        void withoutAccessToTheMeter_403BeforeThe409() {
+            CommonData data = data();
+            Long reading = readingWithTrigger(data);
+
+            Response patched = patchReading(reading, data.o1().technician());
+            Response deleted = call(delete("/readings/" + reading), data.o1().technician());
+
+            assertAll(
+                    () -> assertEquals(403, patched.status(), patched.toString()),
+                    () -> assertEquals(403, deleted.status(), deleted.toString()),
+                    () -> assertEquals(1, rows("reading", reading)));
+        }
+
+        @Test
+        void unknownReading_404() {
+            CommonData data = data();
+
+            Response patched = patchReading(Long.MAX_VALUE, data.o1().admin());
+            Response deleted = call(delete("/readings/" + Long.MAX_VALUE), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(404, patched.status(), patched.toString()),
+                    () -> assertEquals(404, deleted.status(), deleted.toString()));
+        }
+
+        @Test
+        void ca013_correctionAsANewReading_200_bothKept_newOneEvaluated() {
+            // guard (D-P14-7): passed before P-14
+            CommonData data = data();
+            Meter meter = module.meter(data.o1().company(), records.asset(data.o1().company()));
+            module.trigger(meter, WorkOrderMeterTriggerCondition.LESS_THAN, 99);
+            Long r1 = module.reading(meter, 100).getId();
+            jdbc.update("UPDATE reading SET created_at = now() - interval '2 days' WHERE id = ?", r1);
+            long workOrdersBefore = count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                    data.o1().company().getId());
+
+            Response response = call(post("/readings").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"value\":98,\"meter\":{\"id\":" + meter.getId() + "}}"), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertAll(
+                    () -> assertEquals(100.0, jdbc.queryForObject("SELECT value FROM reading WHERE id = ?",
+                            Double.class, r1)),
+                    () -> assertEquals(2, count("SELECT count(*) FROM reading WHERE meter_id = ?", meter.getId())),
+                    () -> assertEquals(workOrdersBefore + 1, count("SELECT count(*) FROM work_order WHERE "
+                            + "company_id = ?", data.o1().company().getId()), "R2 fired the trigger"));
         }
     }
 }
