@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-13 (PPB-05, PPB-21, PPB-22): a request that a work order came from, or that its revisions cite, is not
+         deleted, and a request portal that received requests is not deleted. Those references become NO ACTION;
+         until now deleting the request or the portal put them in NULL. The custom field values of a request and the
+         fields of a portal are part of their parent and go with it (CASCADE). Each child column gets an index;
+         custom_field_value.request_id already has one. NO ACTION, not RESTRICT, keeps the deletion of a whole
+         company working: the rows go in the same statement. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795371305_work_order_parent_request_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fko87wf45c2qbyn4jhgjv8s4s5d"/>
+        <addForeignKeyConstraint baseColumnNames="parent_request_id" baseTableName="work_order"
+                                 constraintName="fko87wf45c2qbyn4jhgjv8s4s5d" referencedColumnNames="id"
+                                 referencedTableName="request" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_parent_request_id">
+            <column name="parent_request_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_parent_request_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fko87wf45c2qbyn4jhgjv8s4s5d"/>
+            <addForeignKeyConstraint baseColumnNames="parent_request_id" baseTableName="work_order"
+                                     constraintName="fko87wf45c2qbyn4jhgjv8s4s5d" referencedColumnNames="id"
+                                     referencedTableName="request" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795371305_work_order_aud_parent_request_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_parentRequest_id"/>
+        <addForeignKeyConstraint baseColumnNames="parent_request_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_parentRequest_id" referencedColumnNames="id"
+                                 referencedTableName="request" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_parent_request_id">
+            <column name="parent_request_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_parent_request_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud"
+                                      constraintName="FK_work_order_AUD_parentRequest_id"/>
+            <addForeignKeyConstraint baseColumnNames="parent_request_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_parentRequest_id" referencedColumnNames="id"
+                                     referencedTableName="request" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795371305_custom_field_value_request_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="custom_field_value" constraintName="fk_custom_field_value_request"/>
+        <addForeignKeyConstraint baseColumnNames="request_id" baseTableName="custom_field_value"
+                                 constraintName="fk_custom_field_value_request" referencedColumnNames="id"
+                                 referencedTableName="request" onDelete="CASCADE"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="custom_field_value"
+                                      constraintName="fk_custom_field_value_request"/>
+            <addForeignKeyConstraint baseColumnNames="request_id" baseTableName="custom_field_value"
+                                     constraintName="fk_custom_field_value_request" referencedColumnNames="id"
+                                     referencedTableName="request" onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795371305_request_request_portal_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fk_request_request_portal"/>
+        <addForeignKeyConstraint baseColumnNames="request_portal_id" baseTableName="request"
+                                 constraintName="fk_request_request_portal" referencedColumnNames="id"
+                                 referencedTableName="request_portal" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_request_portal_id">
+            <column name="request_portal_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_request_portal_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fk_request_request_portal"/>
+            <addForeignKeyConstraint baseColumnNames="request_portal_id" baseTableName="request"
+                                     constraintName="fk_request_request_portal" referencedColumnNames="id"
+                                     referencedTableName="request_portal" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795371305_request_portal_field_request_portal_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request_portal_field"
+                                  constraintName="fk_request_portal_field_request_portal"/>
+        <addForeignKeyConstraint baseColumnNames="request_portal_id" baseTableName="request_portal_field"
+                                 constraintName="fk_request_portal_field_request_portal" referencedColumnNames="id"
+                                 referencedTableName="request_portal" onDelete="CASCADE"/>
+        <createIndex tableName="request_portal_field" indexName="idx_request_portal_field_request_portal_id">
+            <column name="request_portal_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_portal_field" indexName="idx_request_portal_field_request_portal_id"/>
+            <dropForeignKeyConstraint baseTableName="request_portal_field"
+                                      constraintName="fk_request_portal_field_request_portal"/>
+            <addForeignKeyConstraint baseColumnNames="request_portal_id" baseTableName="request_portal_field"
+                                     constraintName="fk_request_portal_field_request_portal"
+                                     referencedColumnNames="id" referencedTableName="request_portal"
+                                     onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

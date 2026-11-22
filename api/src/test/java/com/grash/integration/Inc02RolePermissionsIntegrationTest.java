@@ -1561,7 +1561,9 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
 
                 assertCreatedPending(new HttpResult(200, json(Map.of("id", created.getId()))), existing);
             } finally {
-                // request_portal.company_id has no ON DELETE CASCADE; request.request_portal_id is SET NULL.
+                // request_portal.company_id has no ON DELETE CASCADE; request.request_portal_id is NO ACTION (P-13)
+                jdbcTemplate.update("UPDATE request SET request_portal_id = NULL WHERE request_portal_id = ?",
+                        portal.getId());
                 jdbcTemplate.update("DELETE FROM request_portal WHERE id = ?", portal.getId());
             }
         }

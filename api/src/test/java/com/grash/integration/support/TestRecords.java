@@ -81,10 +81,12 @@ public class TestRecords {
 
     /**
      * Deletes the request portals of the organizations: {@code request_portal.company_id} is {@code NO ACTION},
-     * so they block {@link TestOrganizations#delete}. Call it before that.
+     * so they block {@link TestOrganizations#delete}. Call it before that. P-13: {@code request.request_portal_id}
+     * is {@code NO ACTION} too, so the requests of the organizations are unlinked from their portal first.
      */
     public void deleteRequestPortals(TestOrganizations.CommonData data) {
         for (Company company : List.of(data.o1().company(), data.o2().company())) {
+            jdbcTemplate.update("UPDATE request SET request_portal_id = NULL WHERE company_id = ?", company.getId());
             jdbcTemplate.update("DELETE FROM request_portal_field WHERE company_id = ?", company.getId());
             jdbcTemplate.update("DELETE FROM request_portal WHERE company_id = ?", company.getId());
         }

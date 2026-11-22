@@ -246,4 +246,59 @@ class RequestDeletionIntegrationTest extends AbstractIntegrationTest {
             assertEquals(404, response.status(), response.toString());
         }
     }
+
+    /**
+     * E-5 (PPB-21, PPB-22): the five keys of P-13 in their target rule, each with an index, read from the catalog.
+     */
+    @Nested
+    class Schema {
+
+        private String key(String table, String column) {
+            return jdbc.queryForObject("""
+                    SELECT c.confdeltype::text || ' ' || (EXISTS (SELECT 1 FROM pg_index i
+                           WHERE i.indrelid = c.conrelid AND i.indkey[0] = c.conkey[1] AND i.indisvalid
+                             AND i.indpred IS NULL))::text
+                    FROM pg_constraint c
+                    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+                    WHERE c.contype = 'f' AND c.conrelid = ?::regclass AND a.attname = ?""", String.class,
+                    table, column);
+        }
+
+        @Test
+        void referencesToARequestAndToAPortalAreProtected_noAction_indexed() {
+            assertAll(
+                    () -> assertEquals("a true", key("work_order", "parent_request_id")),
+                    () -> assertEquals("a true", key("work_order_aud", "parent_request_id")),
+                    () -> assertEquals("a true", key("request", "request_portal_id")));
+        }
+
+        @Test
+        void compositionChildrenOfARequestAndOfAPortal_cascade_indexed() {
+            assertAll(
+                    () -> assertEquals("c true", key("custom_field_value", "request_id")),
+                    () -> assertEquals("c true", key("request_portal_field", "request_portal_id")));
+        }
+    }
+
+    /**
+     * V-4: an approved request does not go back to pending; its work order is not deleted.
+     */
+    @Nested
+    class ApprovedStaysApproved {
+
+        @Test
+        void v4_deletingItsWorkOrder_409_requestStaysApproved() {
+            CommonData data = data();
+            Long request = approved(data, data.o1().admin());
+            Long workOrder = workOrderOf(request);
+
+            Response response = api.call(delete("/work-orders/" + workOrder), api.login(data.o1().admin()));
+
+            assertAll(
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(workOrder, workOrderOf(request), "the request stays approved"),
+                    () -> assertEquals(request, jdbc.queryForObject("SELECT parent_request_id FROM work_order "
+                            + "WHERE id = ?", Long.class, workOrder)));
+        }
+    }
 }

@@ -346,7 +346,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
     class DeletePortal {
 
         @Test
-        void withARequest_200_deleted_requestLosesItsPortal() {
+        void withARequest_409_requestKeepsItsPortal() {
             CommonData data = data();
             RequestPortal portal = portal(data.o1().company(), 1);
             Long request = request(data.o1().admin(), null);
@@ -355,10 +355,10 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = deletePortal(portal.getId(), api.login(data.o1().admin()));
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, count("SELECT count(*) FROM request_portal WHERE id = ?", portal.getId())),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM request_portal WHERE id = ?", portal.getId())),
                     () -> assertEquals(1, count("SELECT count(*) FROM request WHERE id = ? "
-                            + "AND request_portal_id IS NULL", request), "request.request_portal_id is SET NULL"));
+                            + "AND request_portal_id = ?", request, portal.getId()), "P-13: the request keeps it"));
         }
 
         @Test
@@ -431,7 +431,8 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
         }
 
         @Test
-        void approvedDemoRequest_200_deleted_workOrderThatIsNotDemoLosesItsRequest() {
+        void approvedDemoRequest_409_wholePurgeRejected_workOrderKeepsItsRequest() {
+            // P-13 (D-P13-6): the work order that is not demo cites the demo request (NO ACTION); P-18 gives the code
             CommonData data = data();
             Long request = request(data.o1().admin(), null);
             jdbc.update("UPDATE request SET is_demo = true WHERE id = ?", request);
@@ -441,10 +442,11 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             Response response = purge(data);
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, requests(request)),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("RECORD_IN_USE"), response.toString()),
+                    () -> assertEquals(1, requests(request)),
                     () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ? AND is_demo = false "
-                            + "AND parent_request_id IS NULL", workOrder), "the work order stays, without request"));
+                            + "AND parent_request_id = ?", workOrder, request), "the work order keeps its request"));
         }
     }
 
@@ -464,15 +466,15 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
                     ORDER BY 1""", String.class);
 
             assertEquals(List.of(
-                    "custom_field_value.request_id fk_custom_field_value_request a true",
-                    "request.request_portal_id fk_request_request_portal n false",
+                    "custom_field_value.request_id fk_custom_field_value_request c true",
+                    "request.request_portal_id fk_request_request_portal a true",
                     "request_assigned_to.request_id fkeg8mmectqp7vcxgxw7k64wt1h c false",
                     "request_customers.request_id fklbeh6vh70b2pqoj6lri2ua4fk c false",
                     "request_files.request_id fkd3vswlusjseoo7lpwb0697w2o c false",
-                    "request_portal_field.request_portal_id fk_request_portal_field_request_portal a false",
+                    "request_portal_field.request_portal_id fk_request_portal_field_request_portal c true",
                     "t_request_file_associations.id_request fki27xearjt3x6ralbb0of1jmmd c true",
-                    "work_order.parent_request_id fko87wf45c2qbyn4jhgjv8s4s5d n false",
-                    "work_order_aud.parent_request_id FK_work_order_AUD_parentRequest_id n false"), keys);
+                    "work_order.parent_request_id fko87wf45c2qbyn4jhgjv8s4s5d a true",
+                    "work_order_aud.parent_request_id FK_work_order_AUD_parentRequest_id a true"), keys);
         }
 
         @Test
