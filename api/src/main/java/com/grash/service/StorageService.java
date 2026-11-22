@@ -38,4 +38,12 @@ public interface StorageService {
     }
 
     String upload(byte[] data, String fileName, String folder);
+
+    /**
+     * P-17 (PPB-19): deletes the object stored at {@code filePath}. Deleting an object that does not exist is not a
+     * failure.
+     *
+     * @param filePath The path of the object, as {@link #upload} returned it.
+     */
+    void delete(String filePath);
 }

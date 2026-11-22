@@ -111,6 +111,16 @@ public class GCPService implements StorageService {
         return download(file.getPath());
     }
 
+    public void delete(String filePath) {
+        checkIfConfigured();
+        try {
+            // false: the object did not exist, which is not a failure
+            storage.delete(BlobId.of(gcpBucketName, filePath));
+        } catch (StorageException e) {
+            throw new CustomException("Error deleting file", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     private Blob getBlob(String filePath) {
         Blob blob = storage.get(BlobId.of(gcpBucketName, filePath));
 

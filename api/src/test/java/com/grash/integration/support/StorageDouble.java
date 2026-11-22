@@ -63,6 +63,12 @@ public class StorageDouble extends CallRecorder implements StorageService {
         return SIGNED_URL_PREFIX + filePath;
     }
 
+    @Override
+    public void delete(String filePath) {
+        record("delete", filePath);
+        objects.remove(filePath);
+    }
+
     public boolean contains(String filePath) {
         return objects.containsKey(filePath);
     }

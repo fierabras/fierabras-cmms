@@ -115,7 +115,7 @@ created should be created by another user.
 | Field | Replaces | Call names |
 |---|---|---|
 | `mailDouble` | the mail service returned by `MailServiceFactory` | `MailService` methods (`sendSimpleMessage`, ...) |
-| `storageDouble` | the storage service returned by `StorageServiceFactory`; keeps the objects in memory | `upload`, `download`, `generateSignedUrl` |
+| `storageDouble` | the storage service returned by `StorageServiceFactory`; keeps the objects in memory | `upload`, `download`, `generateSignedUrl`, `delete` |
 | `webhookDouble` | the HTTP client of `WebhookDispatchService` (the real dispatch runs; nothing leaves the JVM) | the event, for example `NEW_REQUEST`; arguments `[url, body]` |
 
 ```java
