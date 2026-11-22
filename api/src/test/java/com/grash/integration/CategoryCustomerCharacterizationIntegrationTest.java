@@ -45,8 +45,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * P-12b characterization: fixes how the deletion of a work order category, a cost category, a time category and a
- * customer behaves before any change. The 403 and 404 answers must keep passing after P-12b; the tests that show a
- * category or customer in use being deleted are replaced by the new contract (step 8 of the order).
+ * customer behaves before any change. The 403 and 404 answers must keep passing after P-12b. The tests that showed
+ * a category or customer in use being deleted (200) now fix the contract of P-12b (409, nothing changed), as step 8
+ * of the order allows.
  */
 @AutoConfigureMockMvc
 class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegrationTest {
@@ -142,7 +143,7 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
     class WorkOrderCategories {
 
         @Test
-        void usedByClosedWorkOrderWorkflowAndWebhook_200_referenceNulled_workflowDeleted_filterRemoved() {
+        void usedByClosedWorkOrderWorkflowAndWebhook_409_referenceWorkflowAndFilterKept() {
             CommonData data = data();
             WorkOrderCategory category = workOrderCategory(data, data.o1().admin());
             WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
@@ -164,18 +165,19 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
             Response response = api.call(delete("/work-order-categories/" + category.getId()),
                     api.login(data.o1().admin()));
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(DELETED_BODY, response.body());
+            // P-12b: before, 200 with the category nulled, the workflow deleted and the filter removed
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("WORK_ORDER_CATEGORY_IN_USE"), response.body());
             Long workflowId = workflow.getId();
             assertAll(
-                    () -> assertEquals(0, count("SELECT count(*) FROM work_order_category WHERE id = ?",
+                    () -> assertEquals(1, count("SELECT count(*) FROM work_order_category WHERE id = ?",
                             category.getId())),
-                    () -> assertNull(jdbc.queryForObject("SELECT category_id FROM work_order WHERE id = ?",
-                            Long.class, closed.getId()), "the closed work order loses its category"),
-                    () -> assertEquals(0, count("SELECT count(*) FROM workflow WHERE id = ?", workflowId),
-                            "the whole workflow is deleted in cascade"),
-                    () -> assertEquals(0, count("SELECT count(*) FROM webhook_endpoint_work_order_categories "
-                            + "WHERE webhook_endpoint_id = ?", endpoint.getId()), "the filter loses it"),
+                    () -> assertEquals(category.getId(), jdbc.queryForObject("SELECT category_id FROM work_order "
+                            + "WHERE id = ?", Long.class, closed.getId()), "the closed work order keeps it"),
+                    () -> assertEquals(1, count("SELECT count(*) FROM workflow WHERE id = ?", workflowId),
+                            "the workflow is kept"),
+                    () -> assertEquals(1, count("SELECT count(*) FROM webhook_endpoint_work_order_categories "
+                            + "WHERE webhook_endpoint_id = ?", endpoint.getId()), "the filter keeps it"),
                     () -> assertEquals(0, auditRecords(data), "no audit record"));
         }
 
@@ -218,7 +220,7 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
     class CostAndTimeCategories {
 
         @Test
-        void costCategoryOfCostOfClosedWorkOrder_200_categoryNulled() {
+        void costCategoryOfCostOfClosedWorkOrder_409_categoryKept() {
             CommonData data = data();
             Fixture fixture = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
             CostCategory category = costCategory(data, data.o1().admin());
@@ -228,15 +230,16 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
             Response response = api.call(delete("/cost-categories/" + category.getId()),
                     api.login(data.o1().admin()));
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(DELETED_BODY, response.body());
-            assertNull(jdbc.queryForObject("SELECT category_id FROM additional_cost WHERE id = ?", Long.class,
-                    fixture.cost()));
+            // P-12b: before, 200 with the category nulled
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("COST_CATEGORY_IN_USE"), response.body());
+            assertEquals(category.getId(), jdbc.queryForObject("SELECT category_id FROM additional_cost WHERE id = ?",
+                    Long.class, fixture.cost()));
             assertEquals(0, auditRecords(data));
         }
 
         @Test
-        void timeCategoryOfLaborOfClosedWorkOrder_200_categoryNulled() {
+        void timeCategoryOfLaborOfClosedWorkOrder_409_categoryKept() {
             CommonData data = data();
             Fixture fixture = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
             TimeCategory category = timeCategory(data, data.o1().admin());
@@ -246,10 +249,11 @@ class CategoryCustomerCharacterizationIntegrationTest extends AbstractIntegratio
             Response response = api.call(delete("/time-categories/" + category.getId()),
                     api.login(data.o1().admin()));
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(DELETED_BODY, response.body());
-            assertNull(jdbc.queryForObject("SELECT time_category_id FROM labor WHERE id = ?", Long.class,
-                    fixture.labor()));
+            // P-12b: before, 200 with the category nulled
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("TIME_CATEGORY_IN_USE"), response.body());
+            assertEquals(category.getId(), jdbc.queryForObject("SELECT time_category_id FROM labor WHERE id = ?",
+                    Long.class, fixture.labor()));
             assertEquals(0, auditRecords(data));
         }
 

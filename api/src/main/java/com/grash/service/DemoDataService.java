@@ -435,6 +435,9 @@ public class DemoDataService {
 
     @Transactional
     public void deleteDemoData(Long companyId) {
+        // P-12b (D-P12b-1): the revisions cite the categories, which are protected references; a revision of a
+        // work order that is not demo is kept, so a demo category it cites rejects the whole purge
+        workOrderRepository.deleteRevisionsOfDemoWorkOrders(companyId);
         additionalCostRepository.deleteByWorkOrder_Company_IdAndIsDemoTrue(companyId);
         partQuantityRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
         laborRepository.deleteByCompany_IdAndIsDemoTrue(companyId);

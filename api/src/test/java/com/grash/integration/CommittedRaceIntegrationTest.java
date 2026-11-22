@@ -11,9 +11,11 @@ import com.grash.integration.support.TestWorkOrders.Fixture;
 import com.grash.model.Asset;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
+import com.grash.model.WorkOrderCategory;
 import com.grash.model.enums.Status;
 import com.grash.repository.FileRepository;
 import com.grash.repository.PartRepository;
+import com.grash.repository.WorkOrderCategoryRepository;
 import com.grash.repository.WorkOrderRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +55,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
     private final TestWorkOrders workOrders;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final WorkOrderCategoryRepository workOrderCategoryRepository;
     private CommonData data;
     private User superAdmin;
     private String admin;
@@ -61,7 +64,8 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
     CommittedRaceIntegrationTest(TestOrganizations organizations, TestRecords records, MockMvc mockMvc,
                                  ObjectMapper objectMapper, JdbcTemplate jdbc, TransactionTemplate transaction,
                                  WorkOrderRepository workOrderRepository, PartRepository partRepository,
-                                 FileRepository fileRepository) {
+                                 FileRepository fileRepository,
+                                 WorkOrderCategoryRepository workOrderCategoryRepository) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -69,6 +73,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
                 fileRepository);
         this.jdbc = jdbc;
         this.transaction = transaction;
+        this.workOrderCategoryRepository = workOrderCategoryRepository;
     }
 
     @BeforeEach
@@ -181,5 +186,25 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         } finally {
             worker.shutdownNow();
         }
+    }
+
+    @Test
+    void workOrderGivenTheCategory_whileTheCategoryIsDeleted_409_referenceCommitted() throws Exception {
+        // P-12b: the check of the rule does not see the uncommitted reference; the foreign key (NO ACTION) does
+        WorkOrderCategory category = workOrderCategoryRepository.saveAndFlush(new WorkOrderCategory(
+                TestRecords.unique("P-12b category"), data.o1().company().getCompanySettings()));
+        WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+
+        Response result = compete(() -> jdbc.update("UPDATE work_order SET category_id = ? WHERE id = ?",
+                        category.getId(), workOrder.getId()),
+                () -> api.call(delete("/work-order-categories/" + category.getId()), admin));
+
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("WORK_ORDER_CATEGORY_IN_USE"), result.toString());
+        assertTrue(result.body().contains("\"blockingTypes\":[\"WORK_ORDER\"]"), result.toString());
+        assertEquals(category.getId(), jdbc.queryForObject("SELECT category_id FROM work_order WHERE id = ?",
+                Long.class, workOrder.getId()));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
     }
 }

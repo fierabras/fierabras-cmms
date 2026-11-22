@@ -99,7 +99,7 @@ public class CostCategoryController {
             if (user.getCompany().getCompanySettings().getId().equals(optionalCostCategory.get().getCompanySettings().getId())
                     &&
                     (optionalCostCategory.get().getCreatedBy() == null || optionalCostCategory.get().getCreatedBy().equals(user.getId()) || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.CATEGORIES))) {
-                costCategoryService.delete(id);
+                costCategoryService.delete(optionalCostCategory.get(), user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

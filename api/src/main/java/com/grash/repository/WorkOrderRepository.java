@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -101,6 +102,15 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
     Collection<WorkOrder> findByCategory_IdAndCreatedAtBetween(Long id, Date start, Date end);
 
     void deleteByCompany_IdAndIsDemoTrue(Long companyId);
+
+    /**
+     * P-12b (PPB-04, PPB-28): the revisions of the demo work orders of a company, which the demo purge deletes with
+     * them; the revisions of any other work order are kept.
+     */
+    @Modifying
+    @Query(value = "DELETE FROM work_order_aud WHERE id IN (SELECT id FROM work_order WHERE company_id = :companyId "
+            + "AND is_demo)", nativeQuery = true)
+    void deleteRevisionsOfDemoWorkOrders(@Param("companyId") Long companyId);
 
     @Query(value = """
             SELECT a.id, a.name, COUNT(wo.id) AS cnt,

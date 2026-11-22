@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-12b (PPB-02, PPB-21, PPB-22): a work order, cost or time category that other records cite is not
+         deleted; the category services answer 409 <ENTITY>_IN_USE first. Each foreign key gets its target rule and an
+         index on its child column. NO ACTION, not RESTRICT, keeps the deletion of a whole company working: the rows
+         go in the same statement. The work order revisions (work_order_aud) have no company: a purge deletes them
+         first. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_21_1795315315_preventive_maintenance_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkp1wj9d43qdhi19swp3ab00r4e"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="preventive_maintenance"
+                                 constraintName="fkp1wj9d43qdhi19swp3ab00r4e" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_category_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fkp1wj9d43qdhi19swp3ab00r4e"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="preventive_maintenance"
+                                     constraintName="fkp1wj9d43qdhi19swp3ab00r4e" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_request_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request" constraintName="fkfweq9owhxrrcsowk9w12qgmrb"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="request"
+                                 constraintName="fkfweq9owhxrrcsowk9w12qgmrb" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="request" indexName="idx_request_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request" indexName="idx_request_category_id"/>
+            <dropForeignKeyConstraint baseTableName="request" constraintName="fkfweq9owhxrrcsowk9w12qgmrb"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="request"
+                                     constraintName="fkfweq9owhxrrcsowk9w12qgmrb" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_work_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fk4b1ej5p5dfnnqb68te2pd9hx4"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order"
+                                 constraintName="fk4b1ej5p5dfnnqb68te2pd9hx4" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fk4b1ej5p5dfnnqb68te2pd9hx4"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order"
+                                     constraintName="fk4b1ej5p5dfnnqb68te2pd9hx4" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_work_order_aud_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_category_id"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_category_id" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_category_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_category_id"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_category_id" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_work_order_meter_trigger_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkt8pkfck219uufrehqu9k8ekh5"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order_meter_trigger"
+                                 constraintName="fkt8pkfck219uufrehqu9k8ekh5" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_category_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_meter_trigger" constraintName="fkt8pkfck219uufrehqu9k8ekh5"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="work_order_meter_trigger"
+                                     constraintName="fkt8pkfck219uufrehqu9k8ekh5" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_workflow_action_work_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fklujtc6kod27c7hqhtuvfx5nx6"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_category_id" baseTableName="workflow_action"
+                                 constraintName="fklujtc6kod27c7hqhtuvfx5nx6" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_work_order_category_id">
+            <column name="work_order_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_work_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fklujtc6kod27c7hqhtuvfx5nx6"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_category_id" baseTableName="workflow_action"
+                                     constraintName="fklujtc6kod27c7hqhtuvfx5nx6" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_workflow_condition_work_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fktqo77yorjst58d6j6rovs4yi7"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_category_id" baseTableName="workflow_condition"
+                                 constraintName="fktqo77yorjst58d6j6rovs4yi7" referencedColumnNames="id"
+                                 referencedTableName="work_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_work_order_category_id">
+            <column name="work_order_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_work_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fktqo77yorjst58d6j6rovs4yi7"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_category_id" baseTableName="workflow_condition"
+                                     constraintName="fktqo77yorjst58d6j6rovs4yi7" referencedColumnNames="id"
+                                     referencedTableName="work_order_category" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_additional_cost_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="additional_cost" constraintName="fkhw3t1120mikcf9ajl5tvqb4le"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="additional_cost"
+                                 constraintName="fkhw3t1120mikcf9ajl5tvqb4le" referencedColumnNames="id"
+                                 referencedTableName="cost_category" onDelete="NO ACTION"/>
+        <createIndex tableName="additional_cost" indexName="idx_additional_cost_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="additional_cost" indexName="idx_additional_cost_category_id"/>
+            <dropForeignKeyConstraint baseTableName="additional_cost" constraintName="fkhw3t1120mikcf9ajl5tvqb4le"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="additional_cost"
+                                     constraintName="fkhw3t1120mikcf9ajl5tvqb4le" referencedColumnNames="id"
+                                     referencedTableName="cost_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_21_1795315315_labor_time_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="labor" constraintName="fk4p8pded3s0v3w690dfbv829im"/>
+        <addForeignKeyConstraint baseColumnNames="time_category_id" baseTableName="labor"
+                                 constraintName="fk4p8pded3s0v3w690dfbv829im" referencedColumnNames="id"
+                                 referencedTableName="time_category" onDelete="NO ACTION"/>
+        <createIndex tableName="labor" indexName="idx_labor_time_category_id">
+            <column name="time_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="labor" indexName="idx_labor_time_category_id"/>
+            <dropForeignKeyConstraint baseTableName="labor" constraintName="fk4p8pded3s0v3w690dfbv829im"/>
+            <addForeignKeyConstraint baseColumnNames="time_category_id" baseTableName="labor"
+                                     constraintName="fk4p8pded3s0v3w690dfbv829im" referencedColumnNames="id"
+                                     referencedTableName="time_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
