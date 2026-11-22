@@ -30,9 +30,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,6 +43,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 
 /**
@@ -556,6 +560,51 @@ class WorkOrderIndirectRoutesIntegrationTest extends AbstractIntegrationTest {
             assertEquals(Status.COMPLETE, status(workOrder.getId()));
             assertEquals(data.o1().technician().getId(), jdbc.queryForObject(
                     "SELECT primary_user_id FROM work_order WHERE id = ?", Long.class, workOrder.getId()));
+        }
+    }
+
+    // =====================================================================================================
+    // D-P12c-3: an image added to a task of a closed or archived work order (E-6, point 21)
+    // =====================================================================================================
+
+    @Nested
+    class TaskImages {
+
+        private Response upload(String token, Long task) {
+            MockMultipartFile file = new MockMultipartFile("files", "p12c.png", MediaType.IMAGE_PNG_VALUE,
+                    "P-12c".getBytes(StandardCharsets.UTF_8));
+            return api.call(multipart("/files/upload").file(file).param("folder", "p12c").param("hidden", "false")
+                    .param("type", "IMAGE").param("taskId", String.valueOf(task)), token);
+        }
+
+        private long images(Long task) {
+            return jdbc.queryForObject("SELECT count(*) FROM file WHERE task_id = ?", Long.class, task);
+        }
+
+        @Test
+        void closedAndArchived_409_noImageNorStoredObject() {
+            CommonData data = data();
+            String admin = api.login(data.o1().admin());
+            Fixture closed = workOrders.create(data.o1().admin(), data.o1().technician(), Status.COMPLETE, false);
+            Fixture archived = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, true);
+
+            assertConflict(upload(admin, closed.task()), CLOSED);
+            assertConflict(upload(admin, archived.task()), RETIRED);
+
+            assertEquals(0, images(closed.task()));
+            assertEquals(0, images(archived.task()));
+            assertEquals(List.of(), storageDouble.calls("upload"));
+        }
+
+        @Test
+        void open_200_imageAdded() {
+            CommonData data = data();
+            Fixture open = workOrders.create(data.o1().admin(), data.o1().technician(), Status.OPEN, false);
+
+            Response response = upload(api.login(data.o1().admin()), open.task());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(1, images(open.task()));
         }
     }
 }
