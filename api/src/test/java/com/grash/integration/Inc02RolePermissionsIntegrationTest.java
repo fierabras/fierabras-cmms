@@ -815,7 +815,7 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
-        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reopen a rejected request")
+        @DisplayName("INC-02 C6 (T-10): the generic PATCH cannot reopen a rejected request (P-13: 409 REQUEST_CLOSED)")
         void patchRequest_onRejectedRequest_staysRejected() throws Exception {
             Tenant tenant = newTenant("T10-reopen");
             Request request = createRequest(tenant.company(), tenant.admin(), null);
@@ -829,7 +829,8 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
                     .content(json(body)), token);
 
             assertAll(
-                    () -> assertTrue(result.is2xx(), "PATCH /requests/{id}: " + result),
+                    () -> assertEquals(409, result.status(), "PATCH /requests/{id}: " + result),
+                    () -> assertTrue(result.body().contains("REQUEST_CLOSED"), "PATCH /requests/{id}: " + result),
                     () -> assertTrue(isCancelled(request.getId()), "request must stay rejected"),
                     () -> assertEquals("INC-02 rejection", inTx(() -> requestRepository.findById(request.getId())
                             .orElseThrow().getCancellationReason()), "the rejection reason must be kept"));
@@ -1561,7 +1562,9 @@ class Inc02RolePermissionsIntegrationTest extends AbstractIntegrationTest {
 
                 assertCreatedPending(new HttpResult(200, json(Map.of("id", created.getId()))), existing);
             } finally {
-                // request_portal.company_id has no ON DELETE CASCADE; request.request_portal_id is SET NULL.
+                // request_portal.company_id has no ON DELETE CASCADE; request.request_portal_id is NO ACTION (P-13)
+                jdbcTemplate.update("UPDATE request SET request_portal_id = NULL WHERE request_portal_id = ?",
+                        portal.getId());
                 jdbcTemplate.update("DELETE FROM request_portal WHERE id = ?", portal.getId());
             }
         }

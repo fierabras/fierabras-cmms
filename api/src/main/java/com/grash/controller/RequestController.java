@@ -192,10 +192,9 @@ public class RequestController {
 
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
-            if (savedRequest.getWorkOrder() != null) {
-                throw new CustomException("Can't patch an approved request", HttpStatus.NOT_ACCEPTABLE);
-            }
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.REQUESTS) || user.getId().equals(savedRequest.getCreatedBy())) {
+                // P-13 (D-1, PPB-15): an approved or rejected request is not edited; 409 after the 404 and the 403
+                RequestService.rejectIfClosed(savedRequest);
                 Request patchedRequest = requestService.update(id, request, user.getCompany());
                 return requestMapper.toShowDto(patchedRequest);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
@@ -339,12 +338,13 @@ public class RequestController {
     public ResponseEntity<SuccessResponse> delete(@PathVariable("id") Long id, HttpServletRequest req) {
         User user = userService.whoami(req);
 
-        Optional<Request> optionalRequest = requestService.findById(id);
+        // P-13 (D-P13-1): locked as a review is, so that deleting and approving the same request do not overlap
+        Optional<Request> optionalRequest = requestService.findByIdForReview(id);
         if (optionalRequest.isPresent()) {
             Request savedRequest = optionalRequest.get();
             if (user.getId().equals(savedRequest.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.REQUESTS)) {
-                requestService.delete(id);
+                requestService.delete(savedRequest, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

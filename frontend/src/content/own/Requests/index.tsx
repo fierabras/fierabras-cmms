@@ -82,6 +82,7 @@ import CircleTwoToneIcon from '@mui/icons-material/CircleTwoTone';
 import SearchInput from '../components/SearchInput';
 import * as React from 'react';
 import WorkOrder from '../../../models/owns/workOrder';
+import { conflictMessage } from '../../../utils/conflicts';
 import {
   getRequestFieldType,
   isRequestFieldHidden
@@ -260,12 +261,12 @@ function Requests() {
     showSnackBar(t('changes_saved_success'), 'success');
   };
   const onEditFailure = (err) =>
-    showSnackBar(t('request_edit_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('request_edit_failure')), 'error');
   const onDeleteSuccess = () => {
     showSnackBar(t('request_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('request_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('request_delete_failure')), 'error');
 
   const handleOpenDetails = (id: number) => {
     const foundRequest = requests.content.find((request) => request.id === id);

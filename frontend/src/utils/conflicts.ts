@@ -15,7 +15,10 @@ const conflictKeys: Record<string, string> = {
   FILE_IN_USE: 'file_in_use',
   WORK_ORDER_NOT_DELETABLE: 'work_order_not_deletable',
   WORK_ORDER_CLOSED: 'work_order_closed',
-  WORK_ORDER_RETIRED: 'work_order_retired'
+  WORK_ORDER_RETIRED: 'work_order_retired',
+  REQUEST_CLOSED: 'request_closed',
+  REQUEST_PORTAL_IN_USE: 'request_portal_in_use',
+  REQUEST_UNDER_REVIEW: 'request_under_review'
 };
 
 /**

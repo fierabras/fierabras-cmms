@@ -29,6 +29,7 @@ import ConfirmDialog from '../../../../components/ConfirmDialog';
 import PermissionErrorMessage from '../../../../components/PermissionErrorMessage';
 import CustomDataGrid from '../../../../components/CustomDatagrid';
 import NoRowsMessageWrapper from '../../../../components/NoRowsMessageWrapper';
+import { conflictMessage } from '../../../../../../utils/conflicts';
 import { CompanySettingsContext } from '../../../../../../contexts/CompanySettingsContext';
 import FeatureErrorMessage from '../../../../components/FeatureErrorMessage';
 import { PlanFeature } from '../../../../../../models/owns/subscriptionPlan';
@@ -102,7 +103,10 @@ export default function RequestPortalTable({
       setConfirmDeleteOpen(false);
       setSelectedPortal(null);
     } catch (err) {
-      showSnackBar(t('request_portal_delete_failure'), 'error');
+      showSnackBar(
+        conflictMessage(err, t, t('request_portal_delete_failure')),
+        'error'
+      );
     }
   };
 

@@ -93,7 +93,7 @@ public class RequestPortalController {
         RequestPortal savedRequestPortal =
                 requestPortalService.findById(id).orElseThrow(() -> new CustomException("Not found",
                         HttpStatus.NOT_FOUND));
-        requestPortalService.delete(id);
+        requestPortalService.delete(savedRequestPortal, user);
         return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"), HttpStatus.OK);
     }
 }

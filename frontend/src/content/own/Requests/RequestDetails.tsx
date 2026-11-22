@@ -46,6 +46,8 @@ import { editAsset } from '../../../slices/asset';
 import { AssetStatus, assetStatuses } from '../../../models/owns/asset';
 import { getCustomFieldValuesForDetails } from '../type';
 import { isRequestFieldHidden } from './requestFieldConfiguration';
+import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
+import { conflictMessage } from '../../../utils/conflicts';
 
 interface RequestDetailsProps {
   request: Request;
@@ -85,6 +87,7 @@ export default function RequestDetails({
   const { getFormattedDate, getUserNameById } = useContext(
     CompanySettingsContext
   );
+  const { showSnackBar } = useContext(CustomSnackBarContext);
   const [isImageViewerOpen, setIsImageViewerOpen] = useState<boolean>(false);
   const [openCancellationModal, setOpenCancellationModal] =
     useState<boolean>(false);
@@ -96,6 +99,12 @@ export default function RequestDetails({
       .then((workOrderId) => {
         navigate(`/app/work-orders/${workOrderId}`);
       })
+      .catch((err) =>
+        showSnackBar(
+          conflictMessage(err, t, t('request_approve_failure')),
+          'error'
+        )
+      )
       .finally(() => setApproving(false));
   };
 
@@ -174,7 +183,9 @@ export default function RequestDetails({
           )}
         </Box>
         <Box>
+          {/* P-13: an approved or rejected request is closed; it is neither edited nor deleted */}
           {!request.cancelled &&
+            !request.workOrder &&
             hasEditPermission(PermissionEntity.REQUESTS, request) && (
               <IconButton
                 style={{ marginRight: 10 }}
@@ -183,11 +194,13 @@ export default function RequestDetails({
                 <EditTwoToneIcon color="primary" />
               </IconButton>
             )}
-          {hasDeletePermission(PermissionEntity.REQUESTS, request) && (
-            <IconButton onClick={handleOpenDelete}>
-              <DeleteTwoToneIcon color="error" />
-            </IconButton>
-          )}
+          {!request.cancelled &&
+            !request.workOrder &&
+            hasDeletePermission(PermissionEntity.REQUESTS, request) && (
+              <IconButton onClick={handleOpenDelete}>
+                <DeleteTwoToneIcon color="error" />
+              </IconButton>
+            )}
         </Box>
       </Grid>
       {!showAssetStatuses ? (

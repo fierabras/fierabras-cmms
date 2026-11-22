@@ -10,10 +10,13 @@ import com.grash.dto.RequestShowDTO;
 import com.grash.dto.cutomField.CustomFieldValuePostDTO;
 import com.grash.dto.license.LicenseEntitlement;
 import com.grash.dto.workOrder.WorkOrderPostDTO;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.RequestMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.Priority;
@@ -56,6 +59,11 @@ public class RequestService {
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final OrderedIdQuery orderedIdQuery;
+    private final DeletionService deletionService;
+
+    public static final String REQUEST_CLOSED = "REQUEST_CLOSED";
+    private static final String REQUEST_CLOSED_MESSAGE = "This request is already approved or rejected and cannot be "
+            + "changed or deleted";
 
 
     @Transactional
@@ -66,6 +74,9 @@ public class RequestService {
                 setRequestCustomFields(request, requestPostDTO.getCustomFields(), company);
             }
         }
+        // P-13 (D-2, PPB-08): a disabled user is not assigned to a new request
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(request.getPrimaryUser(),
+                request.getAssignedTo()));
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
         startPending(request);
@@ -125,6 +136,10 @@ public class RequestService {
     public Request update(Long id, RequestPatchDTO request, Company company) {
         if (requestRepository.existsById(id)) {
             Request savedRequest = requestRepository.findById(id).get();
+            // P-13 (D-2, PPB-08): a disabled user is not assigned anew; those already assigned are kept
+            userService.rejectRetired(WorkOrderService.assignedUsers(savedRequest.getPrimaryUser(),
+                    savedRequest.getAssignedTo()), WorkOrderService.assignedUsers(request.getPrimaryUser(),
+                    request.getAssignedTo()));
             if (!request.getCustomFields().isEmpty()) {
                 setRequestCustomFields(savedRequest, request.getCustomFields(), company);
             }
@@ -150,8 +165,24 @@ public class RequestService {
         return requestRepository.findAll();
     }
 
-    public void delete(Long id) {
-        requestRepository.deleteById(id);
+    /**
+     * P-13 (PPB-05, PPB-23): only a pending request is deleted, and its deletion is recorded. Call it with the
+     * request locked ({@link #findByIdForReview}), so that a concurrent review either waits or finds it gone.
+     */
+    @Transactional
+    public void delete(Request request, User actor) {
+        rejectIfClosed(request);
+        deletionService.delete(new AuditTarget(EntityType.REQUEST, request.getId(), request.getCustomId(),
+                        request.getTitle(), request.getCompany().getId()), actor, AuditSource.API, null,
+                () -> requestRepository.delete(request));
+    }
+
+    /**
+     * P-13 (PPB-05, PPB-15): an approved or rejected request is closed: it is neither changed nor deleted.
+     */
+    public static void rejectIfClosed(Request request) {
+        if (request.getWorkOrder() != null || request.isCancelled())
+            throw new ConflictException(REQUEST_CLOSED, REQUEST_CLOSED_MESSAGE);
     }
 
     public Optional<Request> findById(Long id) {
@@ -192,6 +223,10 @@ public class RequestService {
             User primaryUser = workOrder.getPrimaryUser();
             workOrder.setPrimaryUser(primaryUser == null ? creator : primaryUser);
         }
+        // P-13 (D-2, D-P13-2, PPB-08): every user of the new work order, those set by an automation included, is
+        // active; otherwise the whole approval is rejected and reverted
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(workOrder.getPrimaryUser(),
+                workOrder.getAssignedTo()));
         workOrder.setParentRequest(request);
         WorkOrder savedWorkOrder = workOrderService.create(workOrder, creator.getCompany());
         request.setWorkOrder(savedWorkOrder);
