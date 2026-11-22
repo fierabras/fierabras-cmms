@@ -23,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,12 +35,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * P-12c (H1-13): races between two real transactions, from the independent audit H-1. Unlike the tests that insert
@@ -59,6 +62,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
     private final TransactionTemplate transaction;
     private final WorkOrderCategoryRepository workOrderCategoryRepository;
     private final FileRepository fileRepository;
+    private final ObjectMapper objectMapper;
     private CommonData data;
     private User superAdmin;
     private String admin;
@@ -78,6 +82,7 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         this.transaction = transaction;
         this.workOrderCategoryRepository = workOrderCategoryRepository;
         this.fileRepository = fileRepository;
+        this.objectMapper = objectMapper;
     }
 
     @BeforeEach
@@ -235,5 +240,61 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
                 data.o1().company().getId()));
         assertEquals(List.of(), storageDouble.calls("delete"));
+    }
+
+    private Long pendingRequest() throws Exception {
+        Response created = api.call(post("/requests").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"" + TestRecords.unique("P-13 request") + "\"}"), admin);
+        assertTrue(created.is2xx(), created.toString());
+        return objectMapper.readTree(created.body()).get("id").asLong();
+    }
+
+    private Response approve(Long request) {
+        return api.call(patch("/requests/" + request + "/approve").contentType(MediaType.APPLICATION_JSON)
+                .content("{}"), admin);
+    }
+
+    private long workOrdersCiting(Long request) {
+        return jdbc.queryForObject("SELECT count(*) FROM work_order WHERE parent_request_id = ?", Long.class,
+                request);
+    }
+
+    @Test
+    void pendingRequestDeleted_whileItIsBeingApproved_409RequestClosed_linkKept() throws Exception {
+        // P-13 (R-1): the approval holds the review lock; the deletion waits for it and then reads it approved
+        Long request = pendingRequest();
+        AtomicReference<Response> approval = new AtomicReference<>();
+
+        Response result = compete(() -> approval.set(approve(request)),
+                () -> api.call(delete("/requests/" + request), admin));
+
+        assertEquals(200, approval.get().status(), approval.get().toString());
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("REQUEST_CLOSED"), result.toString());
+        Long workOrder = jdbc.queryForObject("SELECT work_order_id FROM request WHERE id = ?", Long.class, request);
+        assertNotNull(workOrder, "the request stays approved");
+        assertEquals(request, jdbc.queryForObject("SELECT parent_request_id FROM work_order WHERE id = ?",
+                Long.class, workOrder), "the work order keeps its request");
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
+    }
+
+    @Test
+    void pendingRequestApproved_whileItIsBeingDeleted_404_noWorkOrder() throws Exception {
+        // P-13 (R-2): the deletion holds the review lock; the approval waits for it and then finds no request
+        Long request = pendingRequest();
+        AtomicReference<Response> deletion = new AtomicReference<>();
+
+        Response result = compete(() -> deletion.set(api.call(delete("/requests/" + request), admin)),
+                () -> approve(request));
+
+        assertEquals(200, deletion.get().status(), deletion.get().toString());
+        assertEquals(404, result.status(), result.toString());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM request WHERE id = ?", Integer.class, request));
+        assertEquals(0, workOrdersCiting(request));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM work_order WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()), "no work order was created");
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? "
+                + "AND entity_type = 'REQUEST'", Integer.class, data.o1().company().getId()));
     }
 }
