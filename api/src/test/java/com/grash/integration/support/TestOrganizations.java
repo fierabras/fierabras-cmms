@@ -106,6 +106,7 @@ public class TestOrganizations {
             List<Long> subscriptionIds = jdbcTemplate.queryForList(
                     "SELECT subscription_id FROM company WHERE id = ?", Long.class, company.getId());
             deleteWorkOrderRevisions(jdbcTemplate, company.getId());
+            deleteReadings(jdbcTemplate, company.getId());
             jdbcTemplate.update("DELETE FROM company WHERE id = ?", company.getId());
             subscriptionIds.stream().filter(Objects::nonNull)
                     .forEach(id -> jdbcTemplate.update("DELETE FROM subscription WHERE id = ?", id));
@@ -123,6 +124,16 @@ public class TestOrganizations {
                         + "OR completed_by_id IN (SELECT id FROM own_user WHERE company_id = ?) "
                         + "OR team_id IN (SELECT id FROM team WHERE company_id = ?)",
                 companyId, companyId, companyId, companyId);
+    }
+
+    /**
+     * P-14 (D-P14-8): the readings of a meter have no company and are not removed in cascade, while
+     * {@code reading.meter_id} is a protected reference (NO ACTION). Deleting a company therefore needs the readings
+     * of its meters deleted first.
+     */
+    public static void deleteReadings(JdbcTemplate jdbcTemplate, Long companyId) {
+        jdbcTemplate.update("DELETE FROM reading WHERE meter_id IN (SELECT id FROM meter WHERE company_id = ?)",
+                companyId);
     }
 
     /**

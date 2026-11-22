@@ -7,7 +7,9 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.exception.CustomException;
 import com.grash.mapper.WorkOrderMeterTriggerMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 
 import com.grash.repository.WorkOrderMeterTriggerRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class WorkOrderMeterTriggerService {
     private final EntityManager em;
     private final LicenseService licenseService;
     private final CustomFieldValueService customFieldValueService;
+    private final DeletionService deletionService;
 
     @Transactional
     public WorkOrderMeterTrigger create(WorkOrderMeterTrigger workOrderMeterTrigger, Company company) {
@@ -79,8 +82,16 @@ public class WorkOrderMeterTriggerService {
         return workOrderMeterTriggerRepository.findAll();
     }
 
-    public void delete(Long id) {
-        workOrderMeterTriggerRepository.deleteById(id);
+    /**
+     * P-14 (PPB-14, PPB-23): deletes the meter trigger with its associations and custom field values, and records it
+     * in the audit log, in one transaction.
+     */
+    @Transactional
+    public void delete(WorkOrderMeterTrigger trigger, User actor) {
+        Long id = trigger.getId();
+        deletionService.delete(new AuditTarget(EntityType.WORK_ORDER_METER_TRIGGER, id, null, trigger.getName(),
+                        trigger.getCompany().getId()), actor, AuditSource.API, null,
+                () -> workOrderMeterTriggerRepository.deleteById(id));
     }
 
     public Optional<WorkOrderMeterTrigger> findById(Long id) {

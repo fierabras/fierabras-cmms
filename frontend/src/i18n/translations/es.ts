@@ -2127,6 +2127,21 @@ const esJSON = {
   entity_type_FLOOR_PLAN: 'Plano de planta',
   entity_type_LOCATION: 'Localización',
   entity_type_METER: 'Medidor',
+  entity_type_READING: 'Lectura de medidor',
+  entity_type_REQUEST_PORTAL_FIELD: 'Campo de portal de solicitudes',
+  entity_type_ASSET_CATEGORY: 'Categoría de activo',
+  entity_type_METER_CATEGORY: 'Categoría de medidor',
+  entity_type_ASSET_DOWNTIME: 'Paro de activo',
+  entity_type_DEPRECATION: 'Depreciación',
+  location_in_use: 'Esta localización está en uso y no se puede eliminar.',
+  meter_in_use: 'Este medidor está en uso y no se puede eliminar.',
+  asset_category_in_use:
+    'Esta categoría de activo está en uso y no se puede eliminar.',
+  meter_category_in_use:
+    'Esta categoría de medidor está en uso y no se puede eliminar.',
+  history_immutable:
+    'Las lecturas no se modifican ni se eliminan. Para corregir un valor, registre una lectura nueva.',
+  downtime_delete_failure: 'El paro no pudo ser eliminado',
   asset_in_use:
     'Este activo está en uso y no se puede eliminar. Archívelo en su lugar.',
   record_in_use: 'Otros registros usan este registro y no se puede eliminar.',

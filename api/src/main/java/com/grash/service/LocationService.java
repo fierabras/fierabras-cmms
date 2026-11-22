@@ -11,7 +11,9 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.exception.CustomException;
 import com.grash.mapper.LocationMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.LocationRepository;
@@ -51,6 +53,11 @@ public class LocationService {
     private final LicenseService licenseService;
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final DeletionService deletionService;
+
+    public static final String LOCATION_IN_USE = "LOCATION_IN_USE";
+    private static final String LOCATION_IN_USE_MESSAGE = "This location is used by other records and cannot be "
+            + "deleted";
 
     @Transactional
     public Location create(Location location, Company company) {
@@ -101,8 +108,41 @@ public class LocationService {
         return locationRepository.findAll();
     }
 
-    public void delete(Long id) {
-        locationRepository.deleteById(id);
+    /**
+     * P-14 (PPB-02, PPB-23): deletes the location and records it in the audit log, in one transaction. A location
+     * with a dependent is not deleted: 409 LOCATION_IN_USE with every blocking type. Its floor plans, custom field
+     * values and associations go with it.
+     */
+    @Transactional
+    public void delete(Location location, User actor) {
+        Long id = location.getId();
+        deletionService.delete(new AuditTarget(EntityType.LOCATION, id, location.getCustomId(), location.getName(),
+                        location.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(LOCATION_IN_USE, LOCATION_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.LOCATION,
+                                () -> deletionService.isCited("location", "parent_location_id", id))
+                        .blockedBy(EntityType.ASSET, () -> deletionService.isCited("asset", "location_id", id))
+                        .blockedBy(EntityType.METER, () -> deletionService.isCited("meter", "location_id", id))
+                        // own_user.location_id, or a disabled worker (PPB §3.3 c): one check per type
+                        .blockedBy(EntityType.USER, () -> deletionService.isCited("own_user", "location_id", id)
+                                || deletionService.isLinkedToRetiredUser("t_location_user_associations",
+                                "id_location", id))
+                        .blockedBy(EntityType.PREVENTIVE_MAINTENANCE,
+                                () -> deletionService.isCited("preventive_maintenance", "location_id", id))
+                        .blockedBy(EntityType.REQUEST, () -> deletionService.isCited("request", "location_id", id))
+                        .blockedBy(EntityType.WORK_ORDER,
+                                () -> deletionService.isCited("work_order", "location_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCitedByAnEarlierRevision("location_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_METER_TRIGGER,
+                                () -> deletionService.isCited("work_order_meter_trigger", "location_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "location_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "location_id", id))
+                        .blockedBy(EntityType.REQUEST_PORTAL_FIELD,
+                                () -> deletionService.isCited("request_portal_field", "location_id", id)),
+                () -> locationRepository.deleteById(id));
     }
 
     public Optional<Location> findById(Long id) {

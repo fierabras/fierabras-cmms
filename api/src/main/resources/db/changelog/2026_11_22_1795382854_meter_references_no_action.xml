@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-14 (PPB-03, PPB-04, PPB-17, PPB-21, PPB-22): a meter with readings or tasks is not deleted. Those
+         references become NO ACTION; until now deleting the meter deleted its readings and its tasks (CASCADE).
+         Readings have no company: a purge of a company must delete the readings of its meters first. Each child
+         column gets an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795382854_reading_meter_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="reading" constraintName="fkrk4bo4tq59pfymwvx2jnjvlae"/>
+        <addForeignKeyConstraint baseColumnNames="meter_id" baseTableName="reading"
+                                 constraintName="fkrk4bo4tq59pfymwvx2jnjvlae" referencedColumnNames="id"
+                                 referencedTableName="meter" onDelete="NO ACTION"/>
+        <createIndex tableName="reading" indexName="idx_reading_meter_id">
+            <column name="meter_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="reading" indexName="idx_reading_meter_id"/>
+            <dropForeignKeyConstraint baseTableName="reading" constraintName="fkrk4bo4tq59pfymwvx2jnjvlae"/>
+            <addForeignKeyConstraint baseColumnNames="meter_id" baseTableName="reading"
+                                     constraintName="fkrk4bo4tq59pfymwvx2jnjvlae" referencedColumnNames="id"
+                                     referencedTableName="meter" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_22_1795382854_task_base_meter_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkgtij68ko3kykqk1od01ahoudg"/>
+        <addForeignKeyConstraint baseColumnNames="meter_id" baseTableName="task_base"
+                                 constraintName="fkgtij68ko3kykqk1od01ahoudg" referencedColumnNames="id"
+                                 referencedTableName="meter" onDelete="NO ACTION"/>
+        <createIndex tableName="task_base" indexName="idx_task_base_meter_id">
+            <column name="meter_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task_base" indexName="idx_task_base_meter_id"/>
+            <dropForeignKeyConstraint baseTableName="task_base" constraintName="fkgtij68ko3kykqk1od01ahoudg"/>
+            <addForeignKeyConstraint baseColumnNames="meter_id" baseTableName="task_base"
+                                     constraintName="fkgtij68ko3kykqk1od01ahoudg" referencedColumnNames="id"
+                                     referencedTableName="meter" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

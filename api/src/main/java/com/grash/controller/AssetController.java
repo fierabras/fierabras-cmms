@@ -196,6 +196,9 @@ public class AssetController {
                     throw new CustomException("Asset with same nfc code exists", HttpStatus.NOT_ACCEPTABLE);
                 }
             }
+            // P-14 (E-8): a disabled user is not accepted as a new reference
+            userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(assetReq.getPrimaryUser(),
+                    assetReq.getAssignedTo()));
             Asset createdAsset = assetService.create(assetReq, user);
             String message = messageSource.getMessage("notification_asset_assigned",
                     new Object[]{createdAsset.getName()}, Helper.getLocale(user));
@@ -215,9 +218,14 @@ public class AssetController {
 
         if (optionalAsset.isPresent()) {
             Asset savedAsset = optionalAsset.get();
+            List<User> previousUsers = WorkOrderService.assignedUsers(savedAsset.getPrimaryUser(),
+                    savedAsset.getAssignedTo());
             em.detach(savedAsset);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.ASSETS) || user.getId().equals(savedAsset.getCreatedBy())
             ) {
+                // P-14 (E-8): a disabled user is not accepted as a new reference
+                userService.rejectRetired(previousUsers, WorkOrderService.assignedUsers(asset.getPrimaryUser(),
+                        asset.getAssignedTo()));
                 // P-20 (E-5): checked before any change, the downtime ones included
                 if (asset.getCustomId() != null && !asset.getCustomId().equals(savedAsset.getCustomId())
                         && assetService.existsByCustomIdAndCompany(asset.getCustomId(), user.getCompany().getId())) {

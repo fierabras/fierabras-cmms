@@ -18,7 +18,12 @@ const conflictKeys: Record<string, string> = {
   WORK_ORDER_RETIRED: 'work_order_retired',
   REQUEST_CLOSED: 'request_closed',
   REQUEST_PORTAL_IN_USE: 'request_portal_in_use',
-  REQUEST_UNDER_REVIEW: 'request_under_review'
+  REQUEST_UNDER_REVIEW: 'request_under_review',
+  LOCATION_IN_USE: 'location_in_use',
+  METER_IN_USE: 'meter_in_use',
+  ASSET_CATEGORY_IN_USE: 'asset_category_in_use',
+  METER_CATEGORY_IN_USE: 'meter_category_in_use',
+  HISTORY_IMMUTABLE: 'history_immutable'
 };
 
 /**

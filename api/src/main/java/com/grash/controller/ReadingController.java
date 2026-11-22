@@ -5,6 +5,7 @@ import com.grash.dto.ReadingHistogramDTO;
 import com.grash.dto.ReadingPatchDTO;
 import com.grash.dto.SuccessResponse;
 import com.grash.dto.workOrder.WorkOrderPostDTO;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.mapper.WorkOrderMapper;
 import com.grash.model.*;
@@ -40,6 +41,10 @@ import java.util.stream.Collectors;
 @Tag(name = "Readings", description = "Operations on meter readings")
 @RequiredArgsConstructor
 public class ReadingController {
+
+    public static final String HISTORY_IMMUTABLE = "HISTORY_IMMUTABLE";
+    private static final String HISTORY_IMMUTABLE_MESSAGE = "A reading cannot be changed or deleted. Record a new "
+            + "reading to correct it";
 
     private final MeterService meterService;
     private final ReadingService readingService;
@@ -127,12 +132,8 @@ public class ReadingController {
         Optional<Reading> optionalReading = readingService.findById(id);
 
         if (optionalReading.isPresent()) {
-            Reading savedReading = optionalReading.get();
-            if (!meterService.isAccessibleBy(user, savedReading.getMeter()))
-                throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            Reading updated = readingService.update(id, reading);
-            processMeterTriggers(savedReading.getMeter(), updated.getValue(), user);
-            return updated;
+            checkAccess(optionalReading.get(), user);
+            throw historyImmutable();
         } else throw new CustomException("Reading not found", HttpStatus.NOT_FOUND);
     }
 
@@ -143,12 +144,28 @@ public class ReadingController {
 
         Optional<Reading> optionalReading = readingService.findById(id);
         if (optionalReading.isPresent()) {
-            if (!meterService.isAccessibleBy(user, optionalReading.get().getMeter()))
-                throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            readingService.delete(id);
-            return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
-                    HttpStatus.OK);
+            checkAccess(optionalReading.get(), user);
+            throw historyImmutable();
         } else throw new CustomException("Reading not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * The 403 of an edition or deletion of a reading. P-14 (D-P14-6): the reading of another organization is
+     * rejected first; {@code isAccessibleBy} alone stops at the view-other permission without reading the meter.
+     */
+    private void checkAccess(Reading reading, User user) {
+        Meter meter = reading.getMeter();
+        if (!meter.getCompany().getId().equals(user.getCompany().getId())
+                || !meterService.isAccessibleBy(user, meter))
+            throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * P-14 (PPB-35): a reading records a fact and is never changed or deleted; a correction is a new reading, which
+     * is evaluated against the meter triggers like any other.
+     */
+    private static ConflictException historyImmutable() {
+        return new ConflictException(HISTORY_IMMUTABLE, HISTORY_IMMUTABLE_MESSAGE);
     }
 
     private void processMeterTriggers(Meter meter, double readingValue, User user) {

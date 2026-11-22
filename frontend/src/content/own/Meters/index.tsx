@@ -71,6 +71,7 @@ import SearchInput from '../components/SearchInput';
 import { createColumnHelper } from '@tanstack/react-table';
 import useTableState from '../../../hooks/useTableState';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import { getMeterUrl } from '../../../utils/urlPaths';
 import SplitButton from '../components/SplitButton';
 
@@ -299,7 +300,7 @@ function Meters() {
     showSnackBar(t('meter_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('meter_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('meter_delete_failure')), 'error');
 
   const columnHelper = createColumnHelper<Meter>();
 

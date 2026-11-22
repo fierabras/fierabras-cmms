@@ -6,10 +6,13 @@ import com.grash.mapper.MeterCategoryMapper;
 import com.grash.model.CompanySettings;
 import com.grash.model.MeterCategory;
 import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.MeterCategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -21,6 +24,11 @@ public class MeterCategoryService {
 
     private final CompanySettingsService companySettingsService;
     private final MeterCategoryMapper meterCategoryMapper;
+    private final DeletionService deletionService;
+
+    public static final String METER_CATEGORY_IN_USE = "METER_CATEGORY_IN_USE";
+    private static final String METER_CATEGORY_IN_USE_MESSAGE = "This meter category is used by other records and "
+            + "cannot be deleted";
     private final LicenseService licenseService;
 
     public MeterCategory create(MeterCategory meterCategory, User user) {
@@ -45,8 +53,18 @@ public class MeterCategoryService {
         return meterCategoryRepository.findAll();
     }
 
-    public void delete(Long id) {
-        meterCategoryRepository.deleteById(id);
+    /**
+     * P-14 (PPB-02, PPB-23): deletes the category and records it in the audit log, in one transaction. A category
+     * used by a meter is not deleted: 409 METER_CATEGORY_IN_USE.
+     */
+    @Transactional
+    public void delete(MeterCategory category, User actor) {
+        Long id = category.getId();
+        deletionService.delete(new AuditTarget(EntityType.METER_CATEGORY, id, null, category.getName(),
+                        category.getCompanySettings().getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(METER_CATEGORY_IN_USE, METER_CATEGORY_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.METER, () -> deletionService.isCited("meter", "meter_category_id", id)),
+                () -> meterCategoryRepository.deleteById(id));
     }
 
     public Optional<MeterCategory> findById(Long id) {

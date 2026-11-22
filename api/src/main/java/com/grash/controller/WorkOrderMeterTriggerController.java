@@ -11,6 +11,7 @@ import com.grash.model.User;
 import com.grash.model.WorkOrderMeterTrigger;
 import com.grash.service.MeterService;
 import com.grash.service.UserService;
+import com.grash.service.WorkOrderService;
 import com.grash.service.WorkOrderMeterTriggerService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,6 +25,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -60,6 +62,9 @@ public class WorkOrderMeterTriggerController {
         if (optionalMeter.isPresent()) {
             checkAccessToMeter(optionalMeter.get(), user, false);
         } else throw new CustomException("Meter not found", HttpStatus.NOT_FOUND);
+        // P-14 (E-8): a disabled user is not accepted as a new reference
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(workOrderMeterTriggerReq.getPrimaryUser(),
+                workOrderMeterTriggerReq.getAssignedTo()));
         return workOrderMeterTriggerMapper.toShowDto(workOrderMeterTriggerService.create(workOrderMeterTriggerReq,
                 user.getCompany()));
     }
@@ -89,6 +94,10 @@ public class WorkOrderMeterTriggerController {
         if (optionalWorkOrderMeterTrigger.isPresent()) {
             WorkOrderMeterTrigger savedWorkOrderMeterTrigger = optionalWorkOrderMeterTrigger.get();
             checkAccessToMeter(savedWorkOrderMeterTrigger.getMeter(), user, false);
+            // P-14 (E-8): a disabled user is not accepted as a new reference
+            userService.rejectRetired(WorkOrderService.assignedUsers(savedWorkOrderMeterTrigger.getPrimaryUser(),
+                    savedWorkOrderMeterTrigger.getAssignedTo()), WorkOrderService.assignedUsers(
+                    workOrderMeterTrigger.getPrimaryUser(), workOrderMeterTrigger.getAssignedTo()));
             return workOrderMeterTriggerMapper.toShowDto(workOrderMeterTriggerService.update(id,
                     workOrderMeterTrigger, user.getCompany()));
         } else throw new CustomException("WorkOrderMeterTrigger not found", HttpStatus.NOT_FOUND);
@@ -103,7 +112,7 @@ public class WorkOrderMeterTriggerController {
         if (optionalWorkOrderMeterTrigger.isPresent()) {
             WorkOrderMeterTrigger savedWorkOrderMeterTrigger = optionalWorkOrderMeterTrigger.get();
             checkAccessToMeter(savedWorkOrderMeterTrigger.getMeter(), user, false);
-            workOrderMeterTriggerService.delete(id);
+            workOrderMeterTriggerService.delete(savedWorkOrderMeterTrigger, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("WorkOrderMeterTrigger not found", HttpStatus.NOT_FOUND);

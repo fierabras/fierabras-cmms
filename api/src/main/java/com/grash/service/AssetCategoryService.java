@@ -6,10 +6,13 @@ import com.grash.mapper.AssetCategoryMapper;
 import com.grash.model.AssetCategory;
 import com.grash.model.CompanySettings;
 import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.AssetCategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -20,6 +23,11 @@ public class AssetCategoryService {
     private final AssetCategoryRepository assetCategoryRepository;
     private final CompanySettingsService companySettingsService;
     private final AssetCategoryMapper assetCategoryMapper;
+    private final DeletionService deletionService;
+
+    public static final String ASSET_CATEGORY_IN_USE = "ASSET_CATEGORY_IN_USE";
+    private static final String ASSET_CATEGORY_IN_USE_MESSAGE = "This asset category is used by other records and "
+            + "cannot be deleted";
 
     public AssetCategory create(AssetCategory assetCategory, User user) {
         Optional<AssetCategory> categoryWithSameName =
@@ -43,8 +51,18 @@ public class AssetCategoryService {
         return assetCategoryRepository.findAll();
     }
 
-    public void delete(Long id) {
-        assetCategoryRepository.deleteById(id);
+    /**
+     * P-14 (PPB-02, PPB-23): deletes the category and records it in the audit log, in one transaction. A category
+     * used by an asset is not deleted: 409 ASSET_CATEGORY_IN_USE.
+     */
+    @Transactional
+    public void delete(AssetCategory category, User actor) {
+        Long id = category.getId();
+        deletionService.delete(new AuditTarget(EntityType.ASSET_CATEGORY, id, null, category.getName(),
+                        category.getCompanySettings().getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(ASSET_CATEGORY_IN_USE, ASSET_CATEGORY_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.ASSET, () -> deletionService.isCited("asset", "category_id", id)),
+                () -> assetCategoryRepository.deleteById(id));
     }
 
     public Optional<AssetCategory> findById(Long id) {

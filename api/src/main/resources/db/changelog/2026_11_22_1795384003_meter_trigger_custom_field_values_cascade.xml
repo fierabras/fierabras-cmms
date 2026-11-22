@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-14 (PPB-14, PPB-21): the custom field values of a meter trigger are part of it and go with it (CASCADE);
+         until now the reference was NO ACTION. custom_field_value.work_order_meter_trigger_id already leads an
+         index, so none is created. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_22_1795384003_custom_field_value_work_order_meter_trigger_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="custom_field_value"
+                                  constraintName="fk_custom_field_value_work_order_meter_trigger"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_meter_trigger_id" baseTableName="custom_field_value"
+                                 constraintName="fk_custom_field_value_work_order_meter_trigger"
+                                 referencedColumnNames="id" referencedTableName="work_order_meter_trigger"
+                                 onDelete="CASCADE"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="custom_field_value"
+                                      constraintName="fk_custom_field_value_work_order_meter_trigger"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_meter_trigger_id" baseTableName="custom_field_value"
+                                     constraintName="fk_custom_field_value_work_order_meter_trigger"
+                                     referencedColumnNames="id" referencedTableName="work_order_meter_trigger"
+                                     onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

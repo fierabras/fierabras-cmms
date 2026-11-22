@@ -11,7 +11,9 @@ import com.grash.dto.license.LicenseEntitlement;
 import com.grash.exception.CustomException;
 import com.grash.mapper.MeterMapper;
 import com.grash.model.*;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.repository.MeterRepository;
@@ -49,6 +51,10 @@ public class MeterService {
     private final ReadingService readingService;
     private final LicenseService licenseService;
     private final CustomFieldValueService customFieldValueService;
+    private final DeletionService deletionService;
+
+    public static final String METER_IN_USE = "METER_IN_USE";
+    private static final String METER_IN_USE_MESSAGE = "This meter is used by other records and cannot be deleted";
 
     @Transactional
     public Meter create(Meter meter, User user) {
@@ -103,8 +109,25 @@ public class MeterService {
         return meterRepository.findAll();
     }
 
-    public void delete(Long id) {
-        meterRepository.deleteById(id);
+    /**
+     * P-14 (PPB-02, PPB-23): deletes the meter and records it in the audit log, in one transaction. A meter with
+     * readings, tasks or meter triggers (D-P14-3), or assigned to a disabled user, is not deleted: 409 METER_IN_USE
+     * with every blocking type. Its custom field values and associations go with it.
+     */
+    @Transactional
+    public void delete(Meter meter, User actor) {
+        Long id = meter.getId();
+        deletionService.delete(new AuditTarget(EntityType.METER, id, null, meter.getName(),
+                        meter.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(METER_IN_USE, METER_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.READING, () -> deletionService.isCited("reading", "meter_id", id))
+                        .blockedBy(EntityType.TASK_BASE, () -> deletionService.isCited("task_base", "meter_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_METER_TRIGGER,
+                                () -> deletionService.isCited("work_order_meter_trigger", "meter_id", id))
+                        .blockedBy(EntityType.USER,
+                                () -> deletionService.isLinkedToRetiredUser("t_meter_user_associations", "id_meter",
+                                        id)),
+                () -> meterRepository.deleteById(id));
     }
 
     public Optional<Meter> findById(Long id) {

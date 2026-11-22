@@ -109,6 +109,8 @@ public class MeterController {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.METERS)
                 && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.METER)) {
+            // P-14 (E-8): a disabled user is not accepted as a new reference
+            userService.rejectRetired(List.of(), meterReq.getUsers());
             Meter savedMeter = meterService.create(meterReq, user);
             meterService.notify(savedMeter, Helper.getLocale(user));
             return meterMapper.toShowDto(savedMeter, readingService);
@@ -125,8 +127,11 @@ public class MeterController {
 
         if (optionalMeter.isPresent()) {
             Meter savedMeter = optionalMeter.get();
+            List<User> previousUsers = new ArrayList<>(savedMeter.getUsers());
             em.detach(savedMeter);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.METERS) || user.getId().equals(savedMeter.getCreatedBy())) {
+                // P-14 (E-8): a disabled user is not accepted as a new reference
+                userService.rejectRetired(previousUsers, meter.getUsers());
                 Meter patchedMeter = meterService.update(id, meter, user.getCompany());
                 meterService.patchNotify(savedMeter, patchedMeter, Helper.getLocale(user));
                 return meterMapper.toShowDto(patchedMeter, readingService);
@@ -156,7 +161,7 @@ public class MeterController {
             Meter savedMeter = optionalMeter.get();
             if (user.getId().equals(savedMeter.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.METERS)) {
-                meterService.delete(id);
+                meterService.delete(savedMeter, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
