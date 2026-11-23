@@ -54,8 +54,6 @@ public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecific
 
     boolean existsByCompany_IdAndCustomId(Long companyId, String customId);
 
-    boolean existsByIdInAndArchivedTrue(Collection<Long> ids);
-
     @Query("SELECT a FROM Asset a " +
             "LEFT JOIN FETCH a.location " +
             "LEFT JOIN FETCH a.parentAsset " +

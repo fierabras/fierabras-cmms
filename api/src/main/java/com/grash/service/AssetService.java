@@ -193,7 +193,9 @@ public class AssetService {
         Set<Long> newIds = new HashSet<>();
         requested.stream().filter(Objects::nonNull).map(Asset::getId).filter(Objects::nonNull)
                 .filter(assetId -> !previousIds.contains(assetId)).forEach(newIds::add);
-        if (!newIds.isEmpty() && assetRepository.existsByIdInAndArchivedTrue(newIds))
+        // INV-10: the assets are loaded, so that an asset of another organization answers 403 (CompanyAudit
+        // .afterLoad) before any 409, and its state is not disclosed
+        if (!newIds.isEmpty() && assetRepository.findAllById(newIds).stream().anyMatch(Asset::isArchived))
             throw AssetStateGuard.notAssignable();
     }
 

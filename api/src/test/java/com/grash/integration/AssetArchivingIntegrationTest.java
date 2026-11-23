@@ -486,6 +486,34 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void inv10_otherOrganizationCitesAnArchivedAsset_neverAConflict_nothingCreated() {
+            CommonData data = data();
+            Asset archived = archivedAsset(data.o1().company());
+            long workOrders = count("SELECT count(*) FROM work_order WHERE asset_id = ?", archived.getId());
+
+            Response workOrder = send(post("/work-orders"), "{\"title\":\"" + TestRecords.unique("P-14b WO")
+                    + "\",\"asset\":" + ref(archived) + "}", data.o2().admin());
+            Response child = send(post("/assets"), "{\"name\":\"" + TestRecords.unique("P-14b child")
+                    + "\",\"parentAsset\":" + ref(archived) + "}", data.o2().admin());
+            Response request = send(post("/requests"), "{\"title\":\"P-14b\",\"asset\":" + ref(archived) + "}",
+                    data.o2().admin());
+            Response meter = send(post("/meters"), "{\"name\":\"" + TestRecords.unique("P-14b meter")
+                    + "\",\"updateFrequency\":1,\"asset\":" + ref(archived) + "}", data.o2().admin());
+            Response workflow = send(post("/workflows"), workflowBody(archived, null), data.o2().admin());
+
+            // the 403 of the organization comes before the 409: O2 does not learn that the asset is archived
+            assertEquals(403, workOrder.status(), workOrder.toString());
+            assertEquals(403, child.status(), child.toString());
+            assertEquals(403, request.status(), request.toString());
+            assertEquals(403, meter.status(), meter.toString());
+            assertEquals(403, workflow.status(), workflow.toString());
+            assertEquals(0, count("SELECT count(*) FROM request WHERE asset_id = ?", archived.getId()));
+            assertEquals(0, count("SELECT count(*) FROM meter WHERE asset_id = ?", archived.getId()));
+            assertEquals(workOrders, count("SELECT count(*) FROM work_order WHERE asset_id = ?", archived.getId()));
+            assertEquals(0, count("SELECT count(*) FROM asset WHERE parent_asset_id = ?", archived.getId()));
+        }
+
+        @Test
         void workOrderChangedToArchivedAsset_409_unchanged_alreadyCiting_editedKeepingIt_200() {
             CommonData data = data();
             Company company = data.o1().company();
