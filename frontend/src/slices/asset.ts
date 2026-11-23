@@ -224,6 +224,17 @@ export const editAsset =
     const assetResponse = await api.patch<AssetDTO>(`${basePath}/${id}`, asset);
     dispatch(slice.actions.editAsset({ asset: assetResponse }));
   };
+/**
+ * P-14b (E-1, D-5): archiving and restoring send only `archived`; the API changes nothing else.
+ */
+export const archiveAsset =
+  (id: number, archived: boolean): AppThunk =>
+  async (dispatch) => {
+    const assetResponse = await api.patch<AssetDTO>(`${basePath}/${id}`, {
+      archived
+    });
+    dispatch(slice.actions.editAsset({ asset: assetResponse }));
+  };
 export const getSingleAsset =
   (id: number): AppThunk =>
   async (dispatch) => {

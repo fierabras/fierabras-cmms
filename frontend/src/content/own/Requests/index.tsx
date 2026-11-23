@@ -255,7 +255,7 @@ function Requests() {
     showSnackBar(t('request_create_success'), 'success');
   };
   const onCreationFailure = (err) =>
-    showSnackBar(t('request_create_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('request_create_failure')), 'error');
   const onEditSuccess = () => {
     setOpenUpdateModal(false);
     showSnackBar(t('changes_saved_success'), 'success');

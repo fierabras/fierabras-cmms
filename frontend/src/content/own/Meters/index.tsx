@@ -289,7 +289,10 @@ function Meters() {
     setCopyMeterData(null);
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('meter_create_failure')), 'error');
+    showSnackBar(
+      conflictMessage(err, t, getErrorMessage(err, t('meter_create_failure'))),
+      'error'
+    );
   const onEditSuccess = () => {
     setOpenUpdateModal(false);
     showSnackBar(t('changes_saved_success'), 'success');

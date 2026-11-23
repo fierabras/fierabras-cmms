@@ -227,7 +227,8 @@ const AssetDetails = ({ asset, loading, onCopy }: PropsType) => {
                           )
                         }
                         disabled={
-                          !hasEditPermission(PermissionEntity.ASSETS, asset)
+                          !hasEditPermission(PermissionEntity.ASSETS, asset) ||
+                          asset.archived
                         }
                       />
                     )}

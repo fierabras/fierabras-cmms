@@ -51,6 +51,7 @@ export interface AssetDTO extends Audit {
   openWorkOrders: number;
   additionalInfos: string;
   hasChildren?: boolean;
+  archived?: boolean;
   warrantyExpirationDate?: string;
   acquisitionCost: number;
   inServiceDate?: string;
