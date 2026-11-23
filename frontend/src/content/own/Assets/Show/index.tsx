@@ -11,7 +11,9 @@ import AssetFiles from './AssetFiles';
 import { isNumeric } from 'src/utils/validators';
 import { IField } from '../../type';
 import {
+  Alert,
   Box,
+  Button,
   Dialog,
   DialogContent,
   DialogTitle,
@@ -21,6 +23,7 @@ import Form from '../../components/form';
 import * as Yup from 'yup';
 import {
   addAsset,
+  archiveAsset,
   deleteAsset,
   editAsset,
   getAssetDetails
@@ -33,6 +36,8 @@ import { PermissionEntity } from '../../../../models/owns/role';
 import PermissionErrorMessage from '../../components/PermissionErrorMessage';
 import useAuth from '../../../../hooks/useAuth';
 import DeleteTwoToneIcon from '@mui/icons-material/DeleteTwoTone';
+import ArchiveTwoToneIcon from '@mui/icons-material/ArchiveTwoTone';
+import UnarchiveTwoToneIcon from '@mui/icons-material/UnarchiveTwoTone';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import AssetMeters from './AssetMeters';
 import { handleFileUpload } from '../../../../utils/overall';
@@ -64,6 +69,7 @@ const ShowAsset = ({}: PropsType) => {
   const asset: AssetDTO = assetInfos[assetId]?.asset;
   const navigate = useNavigate();
   const [openDelete, setOpenDelete] = useState<boolean>(false);
+  const [openArchive, setOpenArchive] = useState<boolean>(false);
   const {
     hasViewPermission,
     hasEditPermission,
@@ -96,6 +102,28 @@ const ShowAsset = ({}: PropsType) => {
     dispatch(deleteAsset(asset.id))
       .then(onDeleteSuccess)
       .catch(onDeleteFailure);
+  };
+  // P-14b (E-1, E-8): archiving and restoring change only `archived`
+  const handleArchive = () => {
+    const archived = !asset.archived;
+    setOpenArchive(false);
+    dispatch(archiveAsset(asset.id, archived))
+      .then(() =>
+        showSnackBar(
+          t(archived ? 'asset_archive_success' : 'asset_restore_success'),
+          'success'
+        )
+      )
+      .catch((err) =>
+        showSnackBar(
+          conflictMessage(
+            err,
+            t,
+            t(archived ? 'asset_archive_failure' : 'asset_restore_failure')
+          ),
+          'error'
+        )
+      );
   };
   const getAssetFormValues = (entity: AssetDTO) => ({
     ...entity,
@@ -378,14 +406,14 @@ const ShowAsset = ({}: PropsType) => {
     showSnackBar(t('changes_saved_success'), 'success');
   };
   const onEditFailure = (err) =>
-    showSnackBar(t('asset_update_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('asset_update_failure')), 'error');
   const onCopySuccess = (id: number) => {
     setOpenUpdateModal(false);
     setCopyAssetData(null);
     navigate(getAssetUrl(id));
   };
   const onCopyFailure = (err) =>
-    showSnackBar(t('asset_create_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('asset_create_failure')), 'error');
 
   const renderAssetUpdateModal = () => (
     <Dialog
@@ -473,23 +501,49 @@ const ShowAsset = ({}: PropsType) => {
         tabIndex={tabIndex}
         title={`Asset`}
         action={
-          hasEditPermission(PermissionEntity.ASSETS, asset)
+          hasEditPermission(PermissionEntity.ASSETS, asset) && !asset?.archived
             ? handleOpenUpdateModal
             : null
         }
         actionTitle={t('edit')}
         secondAction={() => {
-          setOpenDelete(true);
+          // P-14b (E-8): an archived asset is only restored
+          if (asset?.archived) setOpenArchive(true);
+          else setOpenDelete(true);
         }}
         secondActionTitle={
-          hasDeletePermission(PermissionEntity.ASSETS, asset)
+          asset?.archived
+            ? hasEditPermission(PermissionEntity.ASSETS, asset)
+              ? t('restore')
+              : null
+            : hasDeletePermission(PermissionEntity.ASSETS, asset)
             ? t('to_delete')
             : null
         }
-        secondActionIcon={<DeleteTwoToneIcon />}
+        secondActionIcon={
+          asset?.archived ? <UnarchiveTwoToneIcon /> : <DeleteTwoToneIcon />
+        }
+        rawAction={
+          asset &&
+          !asset.archived &&
+          hasEditPermission(PermissionEntity.ASSETS, asset) ? (
+            <Button
+              startIcon={<ArchiveTwoToneIcon />}
+              variant="outlined"
+              onClick={() => setOpenArchive(true)}
+            >
+              {t('to_archive')}
+            </Button>
+          ) : null
+        }
         withoutCard
         editAction
       >
+        {asset?.archived && (
+          <Alert severity="info" sx={{ mx: 4, mb: 2 }}>
+            {t('asset_archived_notice')}
+          </Alert>
+        )}
         {isNumeric(assetId) ? (
           tabIndex === 0 ? (
             <AssetDetails
@@ -519,6 +573,15 @@ const ShowAsset = ({}: PropsType) => {
           onConfirm={handleDelete}
           confirmText={t('to_delete')}
           question={t('confirm_delete_asset')}
+        />
+        <ConfirmDialog
+          open={openArchive}
+          onCancel={() => setOpenArchive(false)}
+          onConfirm={handleArchive}
+          confirmText={asset?.archived ? t('restore') : t('to_archive')}
+          question={t(
+            asset?.archived ? 'asset_restore_confirm' : 'asset_archive_confirm'
+          )}
         />
         {renderAssetUpdateModal()}
       </MultipleTabsLayout>

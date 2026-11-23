@@ -72,6 +72,7 @@ import SearchInput from '../components/SearchInput';
 import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import AssetStatusTag from './components/AssetStatusTag';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import SplitButton from '../components/SplitButton';
 import {
   createColumnHelper,
@@ -302,7 +303,10 @@ function Assets() {
     }
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('asset_create_failure')), 'error');
+    showSnackBar(
+      conflictMessage(err, t, getErrorMessage(err, t('asset_create_failure'))),
+      'error'
+    );
   const handleCloseFilterDrawer = () => setOpenFilterDrawer(false);
 
   const renderMenu = () => (

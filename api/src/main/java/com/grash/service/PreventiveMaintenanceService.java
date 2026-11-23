@@ -71,6 +71,8 @@ public class PreventiveMaintenanceService {
                     HttpStatus.FORBIDDEN);
         }
         checkUsageBasedLimit(user.getCompany());
+        // P-14b (E-3, PPB-08): an archived asset is not given to a new preventive maintenance
+        assetService.rejectRetired(List.of(), Collections.singletonList(preventiveMaintenancePost.getAsset()));
         Company company = user.getCompany();
         Long nextSequence = customSequenceService.getNextPreventiveMaintenanceSequence(company);
         preventiveMaintenance.setCustomId("PM" + String.format("%06d", nextSequence));
@@ -91,6 +93,9 @@ public class PreventiveMaintenanceService {
         }
         if (preventiveMaintenanceRepository.existsById(id)) {
             PreventiveMaintenance savedPreventiveMaintenance = preventiveMaintenanceRepository.findById(id).get();
+            // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
+            assetService.rejectRetired(Collections.singletonList(savedPreventiveMaintenance.getAsset()),
+                    Collections.singletonList(preventiveMaintenance.getAsset()));
             if (!preventiveMaintenance.getCustomFields().isEmpty()) {
                 setPMCustomFields(savedPreventiveMaintenance, preventiveMaintenance.getCustomFields(),
                         user.getCompany());

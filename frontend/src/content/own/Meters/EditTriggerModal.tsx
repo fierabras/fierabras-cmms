@@ -16,6 +16,7 @@ import { useContext, useEffect } from 'react';
 import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext';
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import { handleFileUpload } from '../../../utils/overall';
+import { conflictMessage } from '../../../utils/conflicts';
 
 interface EditTriggerProps {
   open: boolean;
@@ -78,7 +79,10 @@ export default function EditTriggerModal({
     showSnackBar(t('wo_trigger_edit_success'), 'success');
   };
   const onEditFailure = (err) =>
-    showSnackBar(t('wo_trigger_edit_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('wo_trigger_edit_failure')),
+      'error'
+    );
 
   const shape = {
     name: Yup.string().required(t('Trequired_trigger_name')),

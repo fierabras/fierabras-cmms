@@ -62,6 +62,9 @@ const AssetDowntimes = ({ asset }: PropsType) => {
   const { showSnackBar } = useContext(CustomSnackBarContext);
   const { getFormattedDate } = useContext(CompanySettingsContext);
   const [loading, setLoading] = useState<boolean>(true);
+  // P-14b (E-8): the downtimes and the status of an archived asset do not change
+  const canChange =
+    hasEditPermission(PermissionEntity.ASSETS, asset) && !asset?.archived;
 
   useEffect(() => {
     if (asset) {
@@ -146,7 +149,7 @@ const AssetDowntimes = ({ asset }: PropsType) => {
             label={t('remove_downtime')}
           />
         ];
-        if (!hasEditPermission(PermissionEntity.ASSETS, asset)) actions = [];
+        if (!canChange) actions = [];
         return actions;
       }
     }
@@ -290,9 +293,9 @@ const AssetDowntimes = ({ asset }: PropsType) => {
                       })
                     );
                   }}
-                  disabled={!hasEditPermission(PermissionEntity.ASSETS, asset)}
+                  disabled={!canChange}
                 />
-                {hasEditPermission(PermissionEntity.ASSETS, asset) && (
+                {canChange && (
                   <Button
                     startIcon={<AddTwoToneIcon />}
                     variant="contained"

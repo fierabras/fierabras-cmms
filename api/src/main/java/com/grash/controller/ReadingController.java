@@ -22,6 +22,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/readings")
 @Tag(name = "Readings", description = "Operations on meter readings")
 @RequiredArgsConstructor
+@Slf4j
 public class ReadingController {
 
     public static final String HISTORY_IMMUTABLE = "HISTORY_IMMUTABLE";
@@ -187,7 +189,12 @@ public class ReadingController {
                 message.append(messageSource.getMessage("notification_reading_more_than", notificationArgs,
                         locale));
             }
-            if (error) {
+            // P-14b (D-1): a trigger of an archived asset generates no work order, and so no notice of it; the
+            // reading is kept
+            if (error && !AssetStateGuard.admits(meterTrigger.getAsset())) {
+                log.info("P-14b: meter trigger {} generated no work order: asset {} is archived", meterTrigger.getId(),
+                        meterTrigger.getAsset().getId());
+            } else if (error) {
                 notificationService.createMultiple(meter.getUsers().stream().map(user1 ->
                         new Notification(message.toString(), user1, NotificationType.METER, meter.getId())
                 ).collect(Collectors.toList()), true, title);

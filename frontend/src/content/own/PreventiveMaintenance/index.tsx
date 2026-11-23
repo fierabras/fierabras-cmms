@@ -98,6 +98,7 @@ import MoreVertTwoToneIcon from '@mui/icons-material/MoreVertTwoTone';
 import { useExport } from '../../../hooks/useExport';
 import { PlanFeature } from '../../../models/owns/subscriptionPlan';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import { getPreventiveMaintenanceUrl } from '../../../utils/urlPaths';
 import useDateLocale from '../../../hooks/useDateLocale';
 
@@ -299,13 +300,19 @@ function PMs() {
     setCopyPmData(null);
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('wo_schedule_failure')), 'error');
+    showSnackBar(
+      conflictMessage(err, t, getErrorMessage(err, t('wo_schedule_failure'))),
+      'error'
+    );
   const onEditSuccess = () => {
     setOpenUpdateModal(false);
     showSnackBar(t('changes_saved_success'), 'success');
   };
   const onEditFailure = (err) =>
-    showSnackBar(t('wo_trigger_edit_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('wo_trigger_edit_failure')),
+      'error'
+    );
   const onDeleteSuccess = () => {
     showSnackBar(t('wo_trigger_delete_success'), 'success');
   };

@@ -111,6 +111,8 @@ public class MeterController {
                 && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.METER)) {
             // P-14 (E-8): a disabled user is not accepted as a new reference
             userService.rejectRetired(List.of(), meterReq.getUsers());
+            // P-14b (E-3, PPB-08): an archived asset is not given to a new meter
+            assetService.rejectRetired(List.of(), Collections.singletonList(meterReq.getAsset()));
             Meter savedMeter = meterService.create(meterReq, user);
             meterService.notify(savedMeter, Helper.getLocale(user));
             return meterMapper.toShowDto(savedMeter, readingService);

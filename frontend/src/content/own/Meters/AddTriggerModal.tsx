@@ -16,6 +16,7 @@ import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import { getImageAndFiles } from '../../../utils/overall';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 
 interface AddTriggerProps {
   open: boolean;
@@ -99,7 +100,14 @@ export default function AddTriggerModal({
     showSnackBar(t('wo_trigger_create_success'), 'success');
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('wo_trigger_create_failure')), 'error');
+    showSnackBar(
+      conflictMessage(
+        err,
+        t,
+        getErrorMessage(err, t('wo_trigger_create_failure'))
+      ),
+      'error'
+    );
 
   return (
     <Dialog fullWidth maxWidth="sm" open={open} onClose={onClose}>

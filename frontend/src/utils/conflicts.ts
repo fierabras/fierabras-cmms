@@ -23,7 +23,8 @@ const conflictKeys: Record<string, string> = {
   METER_IN_USE: 'meter_in_use',
   ASSET_CATEGORY_IN_USE: 'asset_category_in_use',
   METER_CATEGORY_IN_USE: 'meter_category_in_use',
-  HISTORY_IMMUTABLE: 'history_immutable'
+  HISTORY_IMMUTABLE: 'history_immutable',
+  ASSET_RETIRED: 'asset_retired'
 };
 
 /**

@@ -2181,7 +2181,19 @@ const esJSON = {
   restore: 'Restaurar',
   wo_restore_confirm: '¿Está seguro de que desea restaurar esta orden de trabajo ',
   wo_restore_success: 'La orden de trabajo ha sido restaurada.',
-  wo_restore_failure: 'La orden de trabajo no pudo ser restaurada.'
+  wo_restore_failure: 'La orden de trabajo no pudo ser restaurada.',
+  asset_retired:
+    'Este activo está archivado: no puede cambiar ni asignarse. Restáurelo primero.',
+  to_archive: 'Archivar',
+  asset_archive_confirm:
+    '¿Está seguro de que desea archivar este activo? Ya no se ofrecerá en listados ni selectores.',
+  asset_archive_success: 'El activo ha sido archivado.',
+  asset_archive_failure: 'El activo no pudo ser archivado.',
+  asset_restore_confirm: '¿Está seguro de que desea restaurar este activo?',
+  asset_restore_success: 'El activo ha sido restaurado.',
+  asset_restore_failure: 'El activo no pudo ser restaurado.',
+  asset_archived_notice:
+    'Este activo está archivado. Restáurelo para modificarlo.'
 };
 
 export default esJSON;

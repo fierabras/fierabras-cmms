@@ -455,7 +455,10 @@ function WorkOrders() {
     showSnackBar(t('wo_create_success'), 'success');
   };
   const onCreationFailure = (err) =>
-    showSnackBar(getErrorMessage(err, t('wo_create_failure')), 'error');
+    showSnackBar(
+      conflictMessage(err, t, getErrorMessage(err, t('wo_create_failure'))),
+      'error'
+    );
   const onEditSuccess = () => {
     setOpenUpdateModal(false);
     showSnackBar(t('changes_saved_success'), 'success');

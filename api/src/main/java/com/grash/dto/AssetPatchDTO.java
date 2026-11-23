@@ -17,8 +17,9 @@ import java.util.List;
 @NoArgsConstructor
 @Schema(description = "DTO for partially updating an existing asset")
 public class AssetPatchDTO {
-    @Schema(description = "Indicates whether the asset is archived")
-    private boolean archived;
+    @Schema(description = "true archives the asset and false restores it; nothing else in the request changes then. "
+            + "Omitted, the state does not change")
+    private Boolean archived;
 
     @Schema(description = "Image file associated with the asset", implementation = IdDTO.class)
     private File image;

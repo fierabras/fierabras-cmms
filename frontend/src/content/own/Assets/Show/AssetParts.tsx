@@ -68,7 +68,12 @@ const AssetParts = ({ asset }: PropsType) => {
             label="Remove part"
           />
         ];
-        if (!hasEditPermission(PermissionEntity.ASSETS, asset)) actions.shift();
+        // P-14b (E-8): nothing is removed from an archived asset
+        if (
+          !hasEditPermission(PermissionEntity.ASSETS, asset) ||
+          asset?.archived
+        )
+          actions.shift();
         return actions;
       }
     }

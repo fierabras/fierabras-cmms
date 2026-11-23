@@ -2049,7 +2049,18 @@ const locale = {
   restore: 'Restore',
   wo_restore_confirm: 'Are you sure you want to restore this Work Order ',
   wo_restore_success: 'The Work Order has been restored',
-  wo_restore_failure: "The Work Order couldn't be restored"
+  wo_restore_failure: "The Work Order couldn't be restored",
+  asset_retired:
+    'This asset is archived: it cannot change or be assigned. Restore it first.',
+  to_archive: 'Archive',
+  asset_archive_confirm:
+    'Are you sure you want to archive this asset? It will no longer be offered in lists and selectors.',
+  asset_archive_success: 'The asset has been archived',
+  asset_archive_failure: "The asset couldn't be archived",
+  asset_restore_confirm: 'Are you sure you want to restore this asset?',
+  asset_restore_success: 'The asset has been restored',
+  asset_restore_failure: "The asset couldn't be restored",
+  asset_archived_notice: 'This asset is archived. Restore it to change it.'
 };
 
 export default locale;

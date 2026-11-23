@@ -283,6 +283,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
             "AND (wo.primaryUser.id = :userId " +
             "     OR assigned.id = :userId " +
             "     OR :userId IN (SELECT tu.id FROM team.users tu)) " +
+            // P-14b (D-8, PPB-09): an archived work order is not planned
+            "AND wo.archived = false " +
             "AND wo.estimatedStartDate BETWEEN :start AND :end")
     Collection<WorkOrder> findByUserAndEstimatedStartDateBetween(
             @Param("userId") Long userId,
@@ -292,6 +294,8 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
 
     @Query("SELECT wo FROM WorkOrder wo WHERE wo.company.id = :companyId " +
             "AND wo.status <> com.grash.model.enums.Status.COMPLETE " +
+            // P-14b (E-7, PPB-09): an archived work order is not left to plan
+            "AND wo.archived = false " +
             "AND (wo.estimatedStartDate IS NULL " +
             "     OR wo.estimatedDuration = 0 " +
             "     OR (wo.primaryUser IS NULL " +

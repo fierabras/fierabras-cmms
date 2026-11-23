@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.advancedsearch.FilterField;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.advancedsearch.SpecificationBuilder;
 import com.grash.dto.AssetPatchDTO;
@@ -12,12 +13,14 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.AssetMapper;
 import com.grash.model.*;
 import com.grash.model.enums.AssetStatus;
+import com.grash.model.enums.AuditAction;
 import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
 import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.AssetRepository;
+import com.grash.repository.DeprecationRepository;
 import com.grash.repository.WorkOrderRepository;
 import com.grash.service.CustomFieldValueService;
 import com.grash.utils.Helper;
@@ -72,6 +75,8 @@ public class AssetService {
     private final LicenseService licenseService;
     private WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final AuditLogService auditLogService;
+    private final DeprecationRepository deprecationRepository;
 
     @Autowired
     public void setDeps(@Lazy LocationService locationService, @Lazy LaborService laborService,
@@ -160,6 +165,50 @@ public class AssetService {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-14b (E-1, D-5, PPB-07, PPB-23): archives the asset and records it, in one transaction. Only {@code archived}
+     * changes: its work orders, meters, readings, children and its own fields stay as they are.
+     */
+    @Transactional
+    public Asset archive(Long id, User actor) {
+        return changeArchived(id, true, AuditAction.RETIRE, actor);
+    }
+
+    /**
+     * P-14b (E-1, E-2, D-5): the inverse of {@link #archive}; nothing else changes either.
+     */
+    @Transactional
+    public Asset restore(Long id, User actor) {
+        return changeArchived(id, false, AuditAction.RESTORE, actor);
+    }
+
+    /**
+     * P-14b (E-3, PPB-08): an archived asset is not accepted as a new reference. {@code requested} are the assets a
+     * request sets; those already in {@code previous} are kept even if archived. Null elements are ignored.
+     */
+    public void rejectRetired(Collection<Asset> previous, Collection<Asset> requested) {
+        if (requested == null) return;
+        Set<Long> previousIds = new HashSet<>();
+        if (previous != null) previous.stream().filter(Objects::nonNull).map(Asset::getId).forEach(previousIds::add);
+        Set<Long> newIds = new HashSet<>();
+        requested.stream().filter(Objects::nonNull).map(Asset::getId).filter(Objects::nonNull)
+                .filter(assetId -> !previousIds.contains(assetId)).forEach(newIds::add);
+        // INV-10: the assets are loaded, so that an asset of another organization answers 403 (CompanyAudit
+        // .afterLoad) before any 409, and its state is not disclosed
+        if (!newIds.isEmpty() && assetRepository.findAllById(newIds).stream().anyMatch(Asset::isArchived))
+            throw AssetStateGuard.notAssignable();
+    }
+
+    private Asset changeArchived(Long id, boolean archived, AuditAction action, User actor) {
+        Asset asset = assetRepository.findById(id).orElseThrow(() -> new CustomException("Not found",
+                HttpStatus.NOT_FOUND));
+        asset.setArchived(archived);
+        Asset saved = assetRepository.saveAndFlush(asset);
+        auditLogService.record(new AuditTarget(EntityType.ASSET, saved.getId(), saved.getCustomId(), saved.getName(),
+                saved.getCompany().getId()), actor, action, AuditSource.API, Map.of(), 0);
+        return saved;
+    }
+
     private void checkUsageBasedLimit(Company company) {
         Integer threshold = usageBasedLicenseLimits.get(LicenseEntitlement.UNLIMITED_ASSETS);
         if (!licenseService.hasEntitlement(LicenseEntitlement.UNLIMITED_ASSETS)
@@ -189,6 +238,7 @@ public class AssetService {
     @Transactional
     public void delete(Asset asset, User actor) {
         Long id = asset.getId();
+        Long deprecationId = asset.getDeprecation() == null ? null : asset.getDeprecation().getId();
         deletionService.delete(new AuditTarget(EntityType.ASSET, id, asset.getCustomId(), asset.getName(),
                         asset.getCompany().getId()), actor, AuditSource.API,
                 DeletionRule.inUse(ASSET_IN_USE, ASSET_IN_USE_MESSAGE)
@@ -213,7 +263,15 @@ public class AssetService {
                         .blockedBy(EntityType.USER,
                                 () -> deletionService.isLinkedToRetiredUser("t_asset_user_associations", "id_asset",
                                         id)),
-                () -> assetRepository.deleteById(id));
+                () -> {
+                    assetRepository.deleteById(id);
+                    // P-14b (E-6, TD-P14-05): its depreciation goes with it, unless another asset cites it
+                    if (deprecationId != null) {
+                        em.flush();
+                        if (assetRepository.findByDeprecation_Id(deprecationId).isEmpty())
+                            deprecationRepository.deleteById(deprecationId);
+                    }
+                });
     }
 
     public Optional<Asset> findById(Long id) {
@@ -238,6 +296,26 @@ public class AssetService {
 
     public List<Asset> findByCompanyAndParentAssetNull(Long id, Pageable pageable) {
         return assetRepository.findByCompany_IdAndParentAssetIsNull(id, pageable).toList();
+    }
+
+    /**
+     * P-14b (E-4, D-3, PPB-09): the assets that the selectors and the operational lists offer leave out the archived
+     * ones; the detail by id, the history and the exports keep them.
+     */
+    public List<Asset> findActiveByCompany(Long companyId) {
+        return assetRepository.findByCompany_IdAndArchivedFalse(companyId);
+    }
+
+    public List<Asset> findActiveByLocation(Long locationId) {
+        return assetRepository.findByLocation_IdAndArchivedFalse(locationId);
+    }
+
+    public Page<Asset> findActiveRoots(Long companyId, Pageable pageable) {
+        return assetRepository.findByCompany_IdAndParentAssetIsNullAndArchivedFalse(companyId, pageable);
+    }
+
+    public Page<Asset> findActiveChildren(Long id, Pageable pageable) {
+        return assetRepository.findByParentAsset_IdAndArchivedFalse(id, pageable);
     }
 
 
@@ -271,6 +349,8 @@ public class AssetService {
     }
 
     private void stopAssetDowntime(Asset asset) {
+        // P-14b (E-5, PPB-15): an archived asset keeps its downtimes and its status
+        if (!AssetStateGuard.admits(asset)) return;
         Collection<AssetDowntime> assetDowntimes = assetDowntimeService.findByAsset(asset.getId());
         Optional<AssetDowntime> optionalRunningDowntime =
                 assetDowntimes.stream().filter(downtime -> downtime.getDuration() == 0).findFirst();
@@ -315,6 +395,11 @@ public class AssetService {
         createAssetDowntime(asset, now, asset.getCompany());
         Asset parentAsset = asset.getParentAsset();
         while (parentAsset != null) {
+            // P-14b (E-5, PPB-15): no downtime is opened on an archived parent, and its status stays
+            if (!AssetStateGuard.admits(parentAsset)) {
+                parentAsset = parentAsset.getParentAsset();
+                continue;
+            }
             createAssetDowntime(parentAsset, now, asset.getCompany());
             if (!parentAsset.getStatus().isReallyDown()) {
                 AssetStatus previousParentStatus = parentAsset.getStatus();
@@ -352,6 +437,10 @@ public class AssetService {
     }
 
     public Page<AssetShowDTO> findBySearchCriteria(SearchCriteria searchCriteria) {
+        // P-14b (E-4, PPB-09): without a filter on archived, the archived assets are left out
+        if (searchCriteria.getFilterFields().stream().noneMatch(filter -> "archived".equals(filter.getField())))
+            searchCriteria.getFilterFields().add(FilterField.builder().field("archived").operation("eq").value(false)
+                    .values(new ArrayList<>()).build());
         SpecificationBuilder<Asset> builder = new SpecificationBuilder<>();
         searchCriteria.getFilterFields().forEach(builder::with);
         Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
@@ -527,8 +616,11 @@ public class AssetService {
     }
 
 
+    /**
+     * P-14b (D-3): whether the hierarchy shows children under the asset; archived children are not shown.
+     */
     public Boolean hasChildren(Long assetId) {
-        return assetRepository.countByParentAsset_Id(assetId) > 0;
+        return assetRepository.countByParentAsset_IdAndArchivedFalse(assetId) > 0;
     }
 
     public long getMTBF(Long assetId, Date start, Date end) {
