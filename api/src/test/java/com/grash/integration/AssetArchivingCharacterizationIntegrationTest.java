@@ -631,7 +631,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void deletingAnAssetWithADepreciation_leavesTheDepreciation() {
+        void deletingAnAssetWithADepreciation_deletesItsDepreciation() {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Deprecation deprecation = deprecationOf(asset);
@@ -639,8 +639,8 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = call(delete("/assets/" + asset.getId()), data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            // before P-14b (TD-P14-05): the depreciation is left without asset
-            assertEquals(1, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
+            // P-14b (E-6, TD-P14-05): before, the depreciation was left without asset
+            assertEquals(0, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
         }
     }
 
@@ -652,7 +652,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class Planning {
 
         @Test
-        void archivedWorkOrder_isListedAsUnscheduled() {
+        void archivedWorkOrder_isNotListedAsUnscheduled() {
             CommonData data = data();
             WorkOrder archived = records.workOrder(data.o1().company(), null, Status.OPEN, false);
             jdbc.update("UPDATE work_order SET archived = true WHERE id = ?", archived.getId());
@@ -660,7 +660,8 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = call(get("/workload/unscheduled"), data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertTrue(ids(json(response).get("workOrders")).contains(archived.getId()));
+            // P-14b (E-7): before, the archived work order was listed
+            assertFalse(ids(json(response).get("workOrders")).contains(archived.getId()));
         }
     }
 }

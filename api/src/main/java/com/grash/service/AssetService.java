@@ -20,6 +20,7 @@ import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.AssetRepository;
+import com.grash.repository.DeprecationRepository;
 import com.grash.repository.WorkOrderRepository;
 import com.grash.service.CustomFieldValueService;
 import com.grash.utils.Helper;
@@ -75,6 +76,7 @@ public class AssetService {
     private WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final AuditLogService auditLogService;
+    private final DeprecationRepository deprecationRepository;
 
     @Autowired
     public void setDeps(@Lazy LocationService locationService, @Lazy LaborService laborService,
@@ -234,6 +236,7 @@ public class AssetService {
     @Transactional
     public void delete(Asset asset, User actor) {
         Long id = asset.getId();
+        Long deprecationId = asset.getDeprecation() == null ? null : asset.getDeprecation().getId();
         deletionService.delete(new AuditTarget(EntityType.ASSET, id, asset.getCustomId(), asset.getName(),
                         asset.getCompany().getId()), actor, AuditSource.API,
                 DeletionRule.inUse(ASSET_IN_USE, ASSET_IN_USE_MESSAGE)
@@ -258,7 +261,15 @@ public class AssetService {
                         .blockedBy(EntityType.USER,
                                 () -> deletionService.isLinkedToRetiredUser("t_asset_user_associations", "id_asset",
                                         id)),
-                () -> assetRepository.deleteById(id));
+                () -> {
+                    assetRepository.deleteById(id);
+                    // P-14b (E-6, TD-P14-05): its depreciation goes with it, unless another asset cites it
+                    if (deprecationId != null) {
+                        em.flush();
+                        if (assetRepository.findByDeprecation_Id(deprecationId).isEmpty())
+                            deprecationRepository.deleteById(deprecationId);
+                    }
+                });
     }
 
     public Optional<Asset> findById(Long id) {

@@ -1084,4 +1084,84 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
             assertEquals(AssetStatus.OPERATIONAL.ordinal(), status(grandchild));
         }
     }
+
+    // =====================================================================================================
+    // B5 · E-6: the depreciation goes with its asset; E-7, D-8: planning without archived work orders
+    // =====================================================================================================
+
+    private WorkOrder plannedWorkOrder(CommonData data, boolean archived) {
+        WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+        jdbc.update("UPDATE work_order SET archived = ?, primary_user_id = ?, estimated_start_date = "
+                + "'2026-11-03 10:00:00' WHERE id = ?", archived, data.o1().admin().getId(), workOrder.getId());
+        return workOrder;
+    }
+
+    @Nested
+    class DepreciationAndPlanning {
+
+        @Test
+        void e6_deletingAnAssetDeletesItsDepreciation_inTheSummary() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company(), TestRecords.unique("A-P14b"), false);
+            Deprecation deprecation = deprecationOf(asset);
+
+            Response response = call(delete("/assets/" + asset.getId()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
+            assertEquals(List.of("{\"deprecation\": 1}"), jdbc.queryForList("SELECT cascade_rows::text FROM audit_log "
+                    + "WHERE company_id = ? AND action = 'DELETE' AND entity_type = 'ASSET'", String.class,
+                    data.o1().company().getId()));
+        }
+
+        @Test
+        void e6_aDepreciationCitedByAnotherAsset_isKept() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset deleted = records.asset(company);
+            Asset other = records.asset(company);
+            Deprecation deprecation = deprecationOf(deleted);
+            jdbc.update("UPDATE asset SET deprecation_id = ? WHERE id = ?", deprecation.getId(), other.getId());
+
+            Response response = call(delete("/assets/" + deleted.getId()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
+            assertEquals(deprecation.getId(), jdbc.queryForObject("SELECT deprecation_id FROM asset WHERE id = ?",
+                    Long.class, other.getId()));
+        }
+
+        @Test
+        void e7_archivedWorkOrder_isNotUnscheduled_activeOneIs() {
+            CommonData data = data();
+            WorkOrder active = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            WorkOrder archived = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            jdbc.update("UPDATE work_order SET archived = true WHERE id = ?", archived.getId());
+
+            Response response = call(get("/workload/unscheduled"), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            List<Long> unscheduled = ids(json(response).get("workOrders"));
+            assertTrue(unscheduled.contains(active.getId()));
+            assertFalse(unscheduled.contains(archived.getId()));
+        }
+
+        @Test
+        void d8_overview_leavesOutTheArchivedWorkOrders() {
+            CommonData data = data();
+            WorkOrder active = plannedWorkOrder(data, false);
+            WorkOrder archived = plannedWorkOrder(data, true);
+
+            Response response = call(get("/workload/overview").param("startDate", "2026-11-01")
+                    .param("endDate", "2026-11-07").param("userIds", data.o1().admin().getId().toString()),
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            List<Long> planned = new ArrayList<>();
+            json(response).get("days").forEach(day -> day.get("users").forEach(user ->
+                    planned.addAll(ids(user.get("workOrders")))));
+            assertTrue(planned.contains(active.getId()), response.toString());
+            assertFalse(planned.contains(archived.getId()), response.toString());
+        }
+    }
 }
