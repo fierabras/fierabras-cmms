@@ -9,6 +9,7 @@ import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.repository.WorkflowRepository;
 import com.grash.utils.AuditComparator;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class WorkflowService {
     private final WorkflowRepository workflowRepository;
     private final WorkflowMapper workflowMapper;
@@ -78,6 +80,8 @@ public class WorkflowService {
                     workOrder.setPrimaryUser(action.getUser());
                     break;
                 case ASSIGN_ASSET:
+                    // P-14b (D-2): an automation does not give an archived asset; the action is skipped
+                    if (skipsArchivedAsset(workflow, action.getAsset())) return;
                     workOrder.setAsset(action.getAsset());
                     break;
                 case ASSIGN_CATEGORY:
@@ -113,6 +117,8 @@ public class WorkflowService {
                     request.setPrimaryUser(action.getUser());
                     break;
                 case ASSIGN_ASSET:
+                    // P-14b (D-2): an automation does not give an archived asset; the action is skipped
+                    if (skipsArchivedAsset(workflow, action.getAsset())) return;
                     request.setAsset(action.getAsset());
                     break;
                 case ASSIGN_CATEGORY:
@@ -177,7 +183,8 @@ public class WorkflowService {
                     break;
                 case SET_ASSET_STATUS:
                     Asset asset = task.getWorkOrder().getAsset();
-                    if (asset != null) {
+                    // P-14b (D-2, PPB-08): the status of an archived asset does not change; the action is skipped
+                    if (asset != null && !skipsArchivedAsset(workflow, asset)) {
                         asset.setStatus(action.getAssetStatus());
                         assetService.save(asset);
                     }
@@ -186,6 +193,15 @@ public class WorkflowService {
                     break;
             }
         }
+    }
+
+    /**
+     * P-14b (D-2): whether the action of the workflow is skipped because its asset is archived; it is logged.
+     */
+    private static boolean skipsArchivedAsset(Workflow workflow, Asset asset) {
+        if (AssetStateGuard.admits(asset)) return false;
+        log.info("P-14b: workflow {} skipped its action: asset {} is archived", workflow.getId(), asset.getId());
+        return true;
     }
 
     public void disableWorkflows(Long companyId) {

@@ -381,7 +381,6 @@ public class AssetService {
         Asset savedAsset = findById(id).orElseThrow(() -> new EntityNotFoundException("Asset not found"));
         stopAssetDowntime(savedAsset);
         recursivelyStopChildrenDowntime(savedAsset);
-        if (!AssetStateGuard.admits(savedAsset)) return;
         String message = messageSource.getMessage("notification_asset_operational",
                 new Object[]{savedAsset.getName()}, locale);
         notify(savedAsset, message, messageSource.getMessage("asset_status_change", null, locale));
@@ -390,12 +389,11 @@ public class AssetService {
     public void triggerDownTime(Long id, Locale locale, AssetStatus status) {
         Date now = new Date();
         Asset asset = findById(id).get();
-        // P-14b (E-5, PPB-15): no downtime is opened on an archived asset of the chain, and its status stays
-        if (!AssetStateGuard.admits(asset)) return;
         AssetStatus previousAssetStatus = asset.getStatus();
         createAssetDowntime(asset, now, asset.getCompany());
         Asset parentAsset = asset.getParentAsset();
         while (parentAsset != null) {
+            // P-14b (E-5, PPB-15): no downtime is opened on an archived parent, and its status stays
             if (!AssetStateGuard.admits(parentAsset)) {
                 parentAsset = parentAsset.getParentAsset();
                 continue;

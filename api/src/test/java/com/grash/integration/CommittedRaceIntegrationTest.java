@@ -316,4 +316,74 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? "
                 + "AND entity_type = 'REQUEST'", Integer.class, data.o1().company().getId()));
     }
+
+    /**
+     * P-14b (D-6): runs {@code first} in a transaction that stays open while {@code second} runs to its answer on
+     * another session, then commits {@code first}. For an archiving left open, the new work order does not wait: its
+     * foreign key check reads the asset row without waiting for the update.
+     */
+    private Response whileOpen(Runnable first, Supplier<Response> second) throws Exception {
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            return transaction.execute(status -> {
+                first.run();
+                try {
+                    return worker.submit(second::get).get(WAIT_SECONDS, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+        } finally {
+            worker.shutdownNow();
+        }
+    }
+
+    private Response createWorkOrderCiting(Asset asset) {
+        return api.call(post("/work-orders").contentType(MediaType.APPLICATION_JSON).content("{\"title\":\""
+                + TestRecords.unique("P-14b WO") + "\",\"asset\":{\"id\":" + asset.getId() + "}}"), admin);
+    }
+
+    /**
+     * P-14b (D-6): the admitted final states: (i) 409 ASSET_RETIRED and no work order, or (ii) 200 and a work order
+     * that cites the archived asset (as if it had been created first). Never a 500, and the asset stays archived.
+     */
+    private void assertAdmittedState(Response result, Asset asset) {
+        assertTrue(result.status() == 200 || result.status() == 409, result.toString());
+        assertEquals(Boolean.TRUE, jdbc.queryForObject("SELECT archived FROM asset WHERE id = ?", Boolean.class,
+                asset.getId()));
+        int citing = jdbc.queryForObject("SELECT count(*) FROM work_order WHERE asset_id = ?", Integer.class,
+                asset.getId());
+        if (result.status() == 409) {
+            assertTrue(result.body().contains("\"code\":\"ASSET_RETIRED\""), result.toString());
+            assertEquals(0, citing);
+        } else assertEquals(1, citing);
+    }
+
+    @Test
+    void workOrderCitingTheAsset_whileTheAssetIsBeingArchived_admittedState() throws Exception {
+        Asset asset = records.asset(data.o1().company());
+
+        Response result = whileOpen(() -> jdbc.update("UPDATE asset SET archived = true WHERE id = ?",
+                asset.getId()), () -> createWorkOrderCiting(asset));
+
+        assertAdmittedState(result, asset);
+        // without a lock (D-6 a) the other session does not see the archiving yet: state (ii)
+        assertEquals(200, result.status(), result.toString());
+    }
+
+    @Test
+    void assetArchived_whileAWorkOrderCitingItIsBeingCreated_waits_thenArchives_admittedState() throws Exception {
+        // the update of the asset waits for the transaction that inserts the work order (its foreign key holds a
+        // share lock on the asset row), so the archiving lands after it: state (ii)
+        Asset asset = records.asset(data.o1().company());
+
+        Response result = compete(() -> records.workOrder(data.o1().company(), asset, Status.OPEN, false),
+                () -> api.call(patch("/assets/" + asset.getId()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"archived\":true}"), admin));
+
+        assertEquals(200, result.status(), result.toString());
+        assertAdmittedState(result, asset);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? AND action = "
+                + "'RETIRE'", Integer.class, data.o1().company().getId()));
+    }
 }

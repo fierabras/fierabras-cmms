@@ -430,7 +430,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void readingThatFiresATriggerOfAnArchivedAsset_200_workOrderCitesIt() {
+        void readingThatFiresATriggerOfAnArchivedAsset_200_noWorkOrder() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = records.asset(company);
@@ -444,11 +444,12 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+            // P-14b (D-1): before, the trigger generated a work order that cited the archived asset
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void workflowThatAssignsAnArchivedAsset_runsOnANewWorkOrder() {
+        void workflowThatAssignsAnArchivedAsset_skipsItsAction() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset archived = archivedAsset(company);
@@ -467,8 +468,8 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     + "\"}", data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            // before P-14b: the automation assigns the archived asset to the new work order
-            assertEquals(archived.getId(), jdbc.queryForObject("SELECT asset_id FROM work_order WHERE id = ?",
+            // P-14b (D-2): before, the automation assigned the archived asset to the new work order
+            assertNull(jdbc.queryForObject("SELECT asset_id FROM work_order WHERE id = ?",
                     Long.class, json(response).get("id").asLong()));
         }
 

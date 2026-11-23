@@ -18,13 +18,21 @@ import com.grash.model.Company;
 import com.grash.model.Deprecation;
 import com.grash.model.enums.AssetStatus;
 import com.grash.model.enums.Status;
+import com.grash.model.enums.workflow.RequestAction;
+import com.grash.model.enums.workflow.TaskAction;
+import com.grash.model.enums.workflow.WFMainCondition;
+import com.grash.model.enums.workflow.WorkOrderAction;
 import com.grash.model.Meter;
 import com.grash.model.Request;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
+import com.grash.model.Workflow;
+import com.grash.model.WorkflowAction;
 import com.grash.repository.DeprecationRepository;
 import com.grash.repository.RequestPortalRepository;
+import com.grash.job.WorkOrderCreationJob;
 import com.grash.repository.UserRepository;
+import com.grash.repository.WorkflowRepository;
 import com.grash.service.AssetService;
 import com.grash.service.RequestService;
 import com.grash.service.WorkOrderService;
@@ -33,6 +41,12 @@ import com.grash.utils.CsvFileGenerator;
 import com.grash.utils.Helper;
 import com.grash.utils.XlsxTestUtils;
 import org.junit.jupiter.api.AfterEach;
+import org.quartz.JobDataMap;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobKey;
+import org.quartz.Scheduler;
+import org.quartz.SchedulerException;
+import org.quartz.impl.matchers.GroupMatcher;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +72,8 @@ import java.util.Map;
 import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -90,6 +106,9 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
     private final UserRepository userRepository;
     private final MessageSource messageSource;
     private final DeprecationRepository deprecationRepository;
+    private final WorkOrderCreationJob workOrderCreationJob;
+    private final Scheduler scheduler;
+    private final WorkflowRepository workflowRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -102,7 +121,12 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
                                   XlsxExportService xlsxExportService,
                                   WorkOrderService workOrderService,
                                   UserRepository userRepository,
-                                  MessageSource messageSource, DeprecationRepository deprecationRepository) {
+                                  MessageSource messageSource, DeprecationRepository deprecationRepository,
+                                  WorkOrderCreationJob workOrderCreationJob, Scheduler scheduler,
+                                  WorkflowRepository workflowRepository) {
+        this.workOrderCreationJob = workOrderCreationJob;
+        this.scheduler = scheduler;
+        this.workflowRepository = workflowRepository;
         this.deprecationRepository = deprecationRepository;
         this.csvFileGenerator = csvFileGenerator;
         this.assetService = assetService;
@@ -688,6 +712,26 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void checklistChangedToArchivedAsset_409_alreadyCitingIt_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            String checklist = "{\"name\":\"" + TestRecords.unique("P-14b checklist") + "\",\"companySettings\":"
+                    + "{\"id\":" + company.getCompanySettings().getId() + "},\"taskBases\":[{\"label\":"
+                    + "\"P-14b task\",\"taskType\":\"SUBTASK\",\"asset\":";
+            Response created = send(post("/checklists"), checklist + ref(active) + "}]}", data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long id = json(created).get("id").asLong();
+
+            assertRetired(send(patch("/checklists/" + id), checklist + ref(archived) + "}]}", data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM task_base WHERE asset_id = ?", archived.getId()));
+            archive(active);
+            Response keep = send(patch("/checklists/" + id), checklist + ref(active) + "}]}", data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+        }
+
+        @Test
         void workflowCreatedOrChangedToArchivedAsset_409_workflowKept_alreadyCiting_editedKeepingIt_200() {
             CommonData data = data();
             Company company = data.o1().company();
@@ -1162,6 +1206,190 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
                     planned.addAll(ids(user.get("workOrders")))));
             assertTrue(planned.contains(active.getId()), response.toString());
             assertFalse(planned.contains(archived.getId()), response.toString());
+        }
+    }
+
+    // =====================================================================================================
+    // B6 · D-1 (C-1): jobs; D-2: automations
+    // =====================================================================================================
+
+    private static JobExecutionContext jobContext(long scheduleId) {
+        JobDataMap jobDataMap = new JobDataMap();
+        jobDataMap.put("scheduleId", scheduleId);
+        JobExecutionContext context = mock(JobExecutionContext.class);
+        when(context.getMergedJobDataMap()).thenReturn(jobDataMap);
+        return context;
+    }
+
+    private long createdPreventiveMaintenance(Asset asset, String recurrenceBasedOn, User user) {
+        String name = TestRecords.unique("P-14b PM");
+        Response created = send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\"" + name
+                + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":\"" + recurrenceBasedOn
+                + "\",\"startsOn\":\"2099-01-01T00:00:00.000+00:00\",\"asset\":" + ref(asset) + "}", user);
+        assertEquals(200, created.status(), created.toString());
+        return json(created).get("id").asLong();
+    }
+
+    private long scheduleOf(long preventiveMaintenance) {
+        return jdbc.queryForObject("SELECT schedule_id FROM preventive_maintenance WHERE id = ?", Long.class,
+                preventiveMaintenance);
+    }
+
+    private long workOrdersOf(long preventiveMaintenance) {
+        return count("SELECT count(*) FROM work_order WHERE parent_preventive_maintenance_id = ?",
+                preventiveMaintenance);
+    }
+
+    private List<JobKey> chainedJobs(long scheduleId) throws SchedulerException {
+        return scheduler.getJobKeys(GroupMatcher.jobGroupEquals("wo-group")).stream()
+                .filter(key -> key.getName().startsWith("wo-job-chained-" + scheduleId + "-")).toList();
+    }
+
+    private void restore(Asset asset) {
+        jdbc.update("UPDATE asset SET archived = false WHERE id = ?", asset.getId());
+    }
+
+    private Workflow workflowAssigning(Company company, Asset asset, WFMainCondition mainCondition) {
+        WorkflowAction action = new WorkflowAction();
+        action.setCompany(company);
+        if (mainCondition == WFMainCondition.REQUEST_CREATED) action.setRequestAction(RequestAction.ASSIGN_ASSET);
+        else action.setWorkOrderAction(WorkOrderAction.ASSIGN_ASSET);
+        action.setAsset(asset);
+        Workflow workflow = new Workflow();
+        workflow.setCompany(company);
+        workflow.setTitle(TestRecords.unique("P-14b workflow"));
+        workflow.setMainCondition(mainCondition);
+        workflow.setAction(action);
+        return workflowRepository.saveAndFlush(workflow);
+    }
+
+    @Nested
+    class JobsAndAutomations {
+
+        @Test
+        void c1_scheduledPreventiveMaintenanceOfArchivedAsset_noWorkOrder_scheduleKept_afterRestoring_generated()
+                throws Exception {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            long preventiveMaintenance = createdPreventiveMaintenance(asset, "SCHEDULED_DATE", data.o1().admin());
+            long schedule = scheduleOf(preventiveMaintenance);
+            archive(asset);
+
+            workOrderCreationJob.executeInternal(jobContext(schedule));
+
+            assertEquals(0, workOrdersOf(preventiveMaintenance));
+            assertEquals(Boolean.FALSE, jdbc.queryForObject("SELECT disabled FROM schedule WHERE id = ?",
+                    Boolean.class, schedule));
+
+            restore(asset);
+            workOrderCreationJob.executeInternal(jobContext(schedule));
+
+            assertEquals(1, workOrdersOf(preventiveMaintenance));
+            assertEquals(asset.getId(), jdbc.queryForObject("SELECT asset_id FROM work_order "
+                    + "WHERE parent_preventive_maintenance_id = ?", Long.class, preventiveMaintenance));
+        }
+
+        @Test
+        void c1_completionBasedPreventiveMaintenanceOfArchivedAsset_noWorkOrder_nextOccurrenceChained()
+                throws Exception {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            long preventiveMaintenance = createdPreventiveMaintenance(asset, "COMPLETED_DATE", data.o1().admin());
+            long schedule = scheduleOf(preventiveMaintenance);
+            archive(asset);
+            try {
+                workOrderCreationJob.executeInternal(jobContext(schedule));
+
+                assertEquals(0, workOrdersOf(preventiveMaintenance));
+                assertEquals(1, chainedJobs(schedule).size());
+            } finally {
+                for (JobKey key : chainedJobs(schedule)) scheduler.deleteJob(key);
+            }
+        }
+
+        @Test
+        void c1_readingThatFiresATriggerOfArchivedAsset_readingSaved_noWorkOrder_afterRestoring_generated() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = records.asset(company);
+            Meter meter = module.meter(company, records.asset(company));
+            var trigger = module.trigger(meter, com.grash.model.enums.WorkOrderMeterTriggerCondition.MORE_THAN, 10);
+            jdbc.update("UPDATE work_order_meter_trigger SET asset_id = ? WHERE id = ?", asset.getId(),
+                    trigger.getId());
+            archive(asset);
+
+            Response first = send(post("/readings"), "{\"value\":98,\"meter\":{\"id\":" + meter.getId() + "}}",
+                    data.o1().admin());
+
+            assertEquals(200, first.status(), first.toString());
+            assertEquals(1, count("SELECT count(*) FROM reading WHERE meter_id = ?", meter.getId()));
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE company_id = ?", company.getId()));
+            assertTrue(webhookDouble.calls().isEmpty());
+
+            restore(asset);
+            // the meter takes one reading a day: the first one is moved back
+            jdbc.update("UPDATE reading SET created_at = now() - interval '2 days' WHERE meter_id = ?",
+                    meter.getId());
+            Response second = send(post("/readings"), "{\"value\":99,\"meter\":{\"id\":" + meter.getId() + "}}",
+                    data.o1().admin());
+
+            assertEquals(200, second.status(), second.toString());
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+        }
+
+        @Test
+        void d2_automationThatAssignsAnArchivedAsset_skipsTheAction_workOrderCreated() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            workflowAssigning(company, archivedAsset(company), WFMainCondition.WORK_ORDER_CREATED);
+
+            Response response = send(post("/work-orders"), "{\"title\":\"" + TestRecords.unique("P-14b WO")
+                    + "\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ? AND asset_id IS NOT NULL",
+                    json(response).get("id").asLong()));
+        }
+
+        @Test
+        void d2_automationThatAssignsAnArchivedAsset_skipsTheAction_requestCreated() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            workflowAssigning(company, archivedAsset(company), WFMainCondition.REQUEST_CREATED);
+
+            Response response = send(post("/requests"), "{\"title\":\"" + TestRecords.unique("P-14b request")
+                    + "\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM request WHERE id = ? AND asset_id IS NOT NULL",
+                    json(response).get("id").asLong()));
+        }
+
+        @Test
+        void d2_automationThatSetsTheStatusOfAnArchivedAsset_skipsTheAction_taskUpdated() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = archivedAsset(company);
+            WorkOrder workOrder = records.workOrder(company, asset, Status.OPEN, false);
+            Response tasks = send(patch("/tasks/work-order/" + workOrder.getId()), "[{\"label\":\"P-14b task\","
+                    + "\"taskType\":\"SUBTASK\",\"options\":[]}]", data.o1().admin());
+            assertEquals(200, tasks.status(), tasks.toString());
+            long task = json(tasks).get(0).get("id").asLong();
+            WorkflowAction action = new WorkflowAction();
+            action.setCompany(company);
+            action.setTaskAction(TaskAction.SET_ASSET_STATUS);
+            action.setAssetStatus(AssetStatus.DOWN);
+            Workflow workflow = new Workflow();
+            workflow.setCompany(company);
+            workflow.setTitle(TestRecords.unique("P-14b workflow"));
+            workflow.setMainCondition(WFMainCondition.TASK_UPDATED);
+            workflow.setAction(action);
+            workflowRepository.saveAndFlush(workflow);
+
+            Response response = send(patch("/tasks/" + task), "{\"value\":\"COMPLETE\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(AssetStatus.OPERATIONAL.ordinal(), status(asset));
         }
     }
 }
