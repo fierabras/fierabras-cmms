@@ -2,6 +2,7 @@ package com.grash.service;
 
 import com.grash.dto.ChecklistPatchDTO;
 import com.grash.dto.ChecklistPostDTO;
+import com.grash.dto.TaskBaseDTO;
 import com.grash.exception.CustomException;
 import com.grash.model.Checklist;
 import com.grash.model.Company;
@@ -29,10 +30,13 @@ public class ChecklistService {
     private final TaskBaseService taskBaseService;
     private final EntityManager em;
     private final LicenseService licenseService;
+    private final AssetService assetService;
 
     @Transactional
     public Checklist createPost(ChecklistPostDTO checklistReq, Company company) {
         checkUsageBasedLimit(company);
+        // P-14b (E-3, PPB-08): a task of the checklist does not cite an archived asset
+        assetService.rejectRetired(List.of(), checklistReq.getTaskBases().stream().map(TaskBaseDTO::getAsset).toList());
         List<TaskBase> taskBases = checklistReq.getTaskBases().stream()
                 .map(taskBaseDto -> taskBaseService.createFromTaskBaseDTO(taskBaseDto, company)).collect(Collectors.toList());
         Checklist checklist = Checklist.builder()
@@ -54,6 +58,9 @@ public class ChecklistService {
             savedChecklist.setCategory(checklistReq.getCategory());
             savedChecklist.setDescription(checklistReq.getDescription());
             savedChecklist.setName(checklistReq.getName());
+            // P-14b (E-3, PPB-08): its tasks do not cite an archived asset anew; those they already cite are kept
+            assetService.rejectRetired(savedChecklist.getTaskBases().stream().map(TaskBase::getAsset).toList(),
+                    checklistReq.getTaskBases().stream().map(TaskBaseDTO::getAsset).toList());
             savedChecklist.getTaskBases().clear();
             List<TaskBase> taskBases = checklistReq.getTaskBases().stream()
                     .map(taskBaseDto -> taskBaseService.createFromTaskBaseDTO(taskBaseDto, company)).collect(Collectors.toList());

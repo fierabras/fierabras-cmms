@@ -308,55 +308,59 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class NewReferences {
 
         @Test
-        void workOrderCreatedWithArchivedAsset_200_created() {
+        void workOrderCreatedWithArchivedAsset_409_notCreated() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(post("/work-orders"), "{\"title\":\"" + TestRecords.unique("P-14b WO")
                     + "\",\"asset\":{\"id\":" + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void requestCreatedWithArchivedAsset_200_created() {
+        void requestCreatedWithArchivedAsset_409_notCreated() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(post("/requests"), "{\"title\":\"" + TestRecords.unique("P-14b request")
                     + "\",\"asset\":{\"id\":" + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM request WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM request WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void meterCreatedOnArchivedAsset_200_created() {
+        void meterCreatedOnArchivedAsset_409_notCreated() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(post("/meters"), "{\"name\":\"" + TestRecords.unique("P-14b meter")
                     + "\",\"updateFrequency\":1,\"asset\":{\"id\":" + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM meter WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM meter WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void childAssetCreatedUnderArchivedAsset_200_created() {
+        void childAssetCreatedUnderArchivedAsset_409_notCreated() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(post("/assets"), "{\"name\":\"" + TestRecords.unique("P-14b child")
                     + "\",\"parentAsset\":{\"id\":" + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM asset WHERE parent_asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM asset WHERE parent_asset_id = ?", asset.getId()));
         }
 
         @Test
-        void preventiveMaintenanceCreatedWithArchivedAsset_200_created() {
+        void preventiveMaintenanceCreatedWithArchivedAsset_409_notCreated() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
             String name = TestRecords.unique("P-14b PM");
@@ -366,12 +370,13 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     + "\"SCHEDULED_DATE\",\"startsOn\":\"2099-01-01T00:00:00.000+00:00\",\"asset\":{\"id\":"
                     + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM preventive_maintenance WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void meterTriggerCreatedWithArchivedAsset_200_created() {
+        void meterTriggerCreatedWithArchivedAsset_409_notCreated() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = archivedAsset(company);
@@ -382,13 +387,14 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     + "\"MORE_THAN\",\"value\":10,\"waitBefore\":0,\"meter\":{\"id\":" + meter.getId()
                     + "},\"asset\":{\"id\":" + asset.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order_meter_trigger WHERE asset_id = ?",
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order_meter_trigger WHERE asset_id = ?",
                     asset.getId()));
         }
 
         @Test
-        void approvingARequestThatCitesAnArchivedAsset_200_workOrderCitesIt() {
+        void approvingARequestThatCitesAnArchivedAsset_409_noWorkOrder() {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             Response created = send(post("/requests"), "{\"title\":\"" + TestRecords.unique("P-14b request")
@@ -398,12 +404,13 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
 
             Response approved = send(patch("/requests/" + request + "/approve"), "{}", data.o1().admin());
 
-            assertEquals(200, approved.status(), approved.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, approved.status(), approved.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void triggeringAPreventiveMaintenanceOfAnArchivedAsset_200_workOrderCitesIt() {
+        void triggeringAPreventiveMaintenanceOfAnArchivedAsset_409_noWorkOrder() {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             String name = TestRecords.unique("P-14b PM");
@@ -417,8 +424,9 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
             Response triggered = call(post("/preventive-maintenances/" + preventiveMaintenance
                     + "/trigger-work-order"), data.o1().admin());
 
-            assertEquals(200, triggered.status(), triggered.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-3): before, 200 and the reference was created
+            assertEquals(409, triggered.status(), triggered.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
@@ -465,7 +473,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void workOrderMovedToArchivedAsset_200_changed() {
+        void workOrderMovedToArchivedAsset_409_unchanged() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset archived = archivedAsset(company);
@@ -474,9 +482,10 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = send(patch("/work-orders/" + workOrder.getId()), "{\"title\":\"P-14b\","
                     + "\"asset\":{\"id\":" + archived.getId() + "}}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(archived.getId(), jdbc.queryForObject("SELECT asset_id FROM work_order WHERE id = ?",
-                    Long.class, workOrder.getId()));
+            // P-14b (E-3): before, 200 and the work order cited the archived asset
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ? AND asset_id IS NOT NULL",
+                    workOrder.getId()));
         }
 
         @Test

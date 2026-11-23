@@ -2,6 +2,7 @@ package com.grash.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.exception.ConflictException;
 import com.grash.integration.support.FaultInjector;
 import com.grash.integration.support.FaultInjector.Operation;
 import com.grash.integration.support.TestApi;
@@ -16,6 +17,8 @@ import com.grash.model.Meter;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.enums.Status;
+import com.grash.repository.RequestPortalRepository;
+import com.grash.service.RequestService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -25,6 +28,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,6 +39,7 @@ import java.util.stream.StreamSupport;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * P-14b: archiving and restoring an asset is recorded and changes nothing else (PPB-07, PPB-23); an archived asset
@@ -53,11 +58,19 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbc;
     private final FaultInjector faults;
+    private final TransactionTemplate transaction;
+    private final RequestService requestService;
+    private final RequestPortalRepository requestPortalRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     AssetArchivingIntegrationTest(TestOrganizations organizations, TestRecords records, TestAssetRecords module,
-                                  MockMvc mockMvc, ObjectMapper objectMapper, JdbcTemplate jdbc) {
+                                  MockMvc mockMvc, ObjectMapper objectMapper, JdbcTemplate jdbc,
+                                  TransactionTemplate transaction, RequestService requestService,
+                                  RequestPortalRepository requestPortalRepository) {
+        this.transaction = transaction;
+        this.requestService = requestService;
+        this.requestPortalRepository = requestPortalRepository;
         this.organizations = organizations;
         this.records = records;
         this.module = module;
@@ -351,6 +364,329 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(200, response.status(), response.toString());
             assertTrue(json(response).get("archived").asBoolean());
+        }
+    }
+
+    // =====================================================================================================
+    // B2 · E-3: no new reference to an archived asset (CA-PPB-025)
+    // =====================================================================================================
+
+    private static String ref(Asset asset) {
+        return "{\"id\":" + asset.getId() + "}";
+    }
+
+    private Response createPreventiveMaintenance(Asset asset, User user) {
+        String name = TestRecords.unique("P-14b PM");
+        return send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\"" + name
+                + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":\"SCHEDULED_DATE\","
+                + "\"startsOn\":\"2099-01-01T00:00:00.000+00:00\",\"asset\":" + ref(asset) + "}", user);
+    }
+
+    private long createRequest(Asset asset, User user) {
+        Response created = send(post("/requests"), "{\"title\":\"" + TestRecords.unique("P-14b request")
+                + "\",\"asset\":" + ref(asset) + "}", user);
+        assertEquals(200, created.status(), created.toString());
+        return json(created).get("id").asLong();
+    }
+
+    private void archive(Asset asset) {
+        jdbc.update("UPDATE asset SET archived = true WHERE id = ?", asset.getId());
+    }
+
+    private String workflowBody(Asset actionAsset, Asset conditionAsset) {
+        return "{\"title\":\"" + TestRecords.unique("P-14b workflow") + "\",\"mainCondition\":\"WORK_ORDER_CREATED\","
+                + "\"secondaryConditions\":[" + (conditionAsset == null ? "" : "{\"workOrderCondition\":\"ASSET_IS\","
+                + "\"asset\":" + ref(conditionAsset) + "}") + "],\"action\":{\"workOrderAction\":\"ASSIGN_ASSET\","
+                + "\"asset\":" + ref(actionAsset) + "}}";
+    }
+
+    @Nested
+    class NewReferences {
+
+        @Test
+        void ca025_workOrderCreatedWithArchivedAsset_409Retired_notCreated() {
+            CommonData data = data();
+            Asset archived = archivedAsset(data.o1().company());
+            long workOrders = count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                    data.o1().company().getId());
+
+            Response response = send(post("/work-orders"), "{\"title\":\"" + TestRecords.unique("P-14b WO")
+                    + "\",\"asset\":" + ref(archived) + "}", data.o1().admin());
+
+            assertRetired(response);
+            assertEquals(workOrders, count("SELECT count(*) FROM work_order WHERE company_id = ?",
+                    data.o1().company().getId()));
+            assertEquals(List.of(), audit(data));
+        }
+
+        @Test
+        void workOrderChangedToArchivedAsset_409_unchanged_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset archived = archivedAsset(company);
+            WorkOrder moved = records.workOrder(company, null, Status.OPEN, false);
+            WorkOrder citing = records.workOrder(company, archived, Status.OPEN, false);
+
+            Response change = send(patch("/work-orders/" + moved.getId()), "{\"title\":\"P-14b\",\"asset\":"
+                    + ref(archived) + "}", data.o1().admin());
+            Response keep = send(patch("/work-orders/" + citing.getId()), "{\"title\":\"P-14b kept\",\"asset\":"
+                    + ref(archived) + "}", data.o1().admin());
+
+            assertRetired(change);
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ? AND asset_id IS NOT NULL",
+                    moved.getId()));
+            assertEquals(200, keep.status(), keep.toString());
+            assertEquals(archived.getId(), jdbc.queryForObject("SELECT asset_id FROM work_order WHERE id = ?",
+                    Long.class, citing.getId()));
+        }
+
+        @Test
+        void requestCreatedOrChangedToArchivedAsset_409_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            long requests = count("SELECT count(*) FROM request WHERE company_id = ?", company.getId());
+
+            Response create = send(post("/requests"), "{\"title\":\"P-14b\",\"asset\":" + ref(archived) + "}",
+                    data.o1().admin());
+            assertRetired(create);
+            assertEquals(requests, count("SELECT count(*) FROM request WHERE company_id = ?", company.getId()));
+
+            long request = createRequest(active, data.o1().admin());
+            Response change = send(patch("/requests/" + request), "{\"title\":\"P-14b\",\"asset\":" + ref(archived)
+                    + "}", data.o1().admin());
+            assertRetired(change);
+            assertEquals(active.getId(), jdbc.queryForObject("SELECT asset_id FROM request WHERE id = ?", Long.class,
+                    request));
+
+            archive(active);
+            Response keep = send(patch("/requests/" + request), "{\"title\":\"P-14b kept\",\"asset\":" + ref(active)
+                    + "}", data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+        }
+
+        @Test
+        void approvingARequestThatCitesAnArchivedAsset_409Retired_requestStaysPending_noWorkOrder() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = records.asset(company);
+            long request = createRequest(asset, data.o1().admin());
+            archive(asset);
+
+            Response approved = send(patch("/requests/" + request + "/approve"), "{}", data.o1().admin());
+
+            assertRetired(approved);
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+            assertEquals(0, count("SELECT count(*) FROM request WHERE id = ? AND work_order_id IS NOT NULL",
+                    request));
+        }
+
+        @Test
+        void d4_portalWhoseFieldCitesAnArchivedAsset_409Retired_noRequest() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = records.asset(company);
+            var portal = records.portalCiting(company, null, asset);
+            archive(asset);
+            long requests = count("SELECT count(*) FROM request WHERE company_id = ?", company.getId());
+
+            // the test profile requires a reCAPTCHA token on the portal endpoint (application-test.yml), so the
+            // request goes straight to the service the endpoint calls, as INC-02 does
+            com.grash.model.Request request = new com.grash.model.Request();
+            request.setTitle("P-14b portal");
+            ConflictException conflict = assertThrows(ConflictException.class, () -> transaction.executeWithoutResult(
+                    status -> requestService.create(request, company,
+                            requestPortalRepository.findById(portal.getId()).orElseThrow())));
+
+            assertEquals(ASSET_RETIRED, conflict.getCode());
+            assertEquals(requests, count("SELECT count(*) FROM request WHERE company_id = ?", company.getId()));
+        }
+
+        @Test
+        void preventiveMaintenanceCreatedOrChangedToArchivedAsset_409_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+
+            assertRetired(createPreventiveMaintenance(archived, data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM preventive_maintenance WHERE asset_id = ?",
+                    archived.getId()));
+
+            Response created = createPreventiveMaintenance(active, data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long preventiveMaintenance = json(created).get("id").asLong();
+            Response change = send(patch("/preventive-maintenances/" + preventiveMaintenance), "{\"title\":"
+                    + "\"P-14b\",\"name\":\"P-14b\",\"asset\":" + ref(archived) + "}", data.o1().admin());
+            assertRetired(change);
+            assertEquals(active.getId(), jdbc.queryForObject("SELECT asset_id FROM preventive_maintenance "
+                    + "WHERE id = ?", Long.class, preventiveMaintenance));
+
+            archive(active);
+            Response keep = send(patch("/preventive-maintenances/" + preventiveMaintenance), "{\"title\":"
+                    + "\"P-14b kept\",\"name\":\"P-14b kept\",\"asset\":" + ref(active) + "}", data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+        }
+
+        @Test
+        void triggeringAPreventiveMaintenanceOfAnArchivedAsset_409Retired_noWorkOrder() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            Response created = createPreventiveMaintenance(asset, data.o1().admin());
+            long preventiveMaintenance = json(created).get("id").asLong();
+            archive(asset);
+
+            Response triggered = call(post("/preventive-maintenances/" + preventiveMaintenance
+                    + "/trigger-work-order"), data.o1().admin());
+
+            assertRetired(triggered);
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE asset_id = ?", asset.getId()));
+        }
+
+        @Test
+        void meterTriggerCreatedOrChangedToArchivedAsset_409_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            Meter meter = module.meter(company, active);
+            String trigger = "{\"name\":\"" + TestRecords.unique("P-14b trigger") + "\",\"title\":\"P-14b\","
+                    + "\"triggerCondition\":\"MORE_THAN\",\"value\":10,\"waitBefore\":0,\"meter\":{\"id\":"
+                    + meter.getId() + "},\"asset\":";
+
+            assertRetired(send(post("/work-order-meter-triggers"), trigger + ref(archived) + "}", data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM work_order_meter_trigger WHERE asset_id = ?",
+                    archived.getId()));
+
+            Response created = send(post("/work-order-meter-triggers"), trigger + ref(active) + "}",
+                    data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long id = json(created).get("id").asLong();
+            assertRetired(send(patch("/work-order-meter-triggers/" + id), trigger + ref(archived) + "}",
+                    data.o1().admin()));
+            archive(active);
+            Response keep = send(patch("/work-order-meter-triggers/" + id), trigger + ref(active) + "}",
+                    data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+        }
+
+        @Test
+        void meterCreatedOnArchivedAsset_409Retired_notCreated() {
+            CommonData data = data();
+            Asset archived = archivedAsset(data.o1().company());
+
+            Response response = send(post("/meters"), "{\"name\":\"" + TestRecords.unique("P-14b meter")
+                    + "\",\"updateFrequency\":1,\"asset\":" + ref(archived) + "}", data.o1().admin());
+
+            assertRetired(response);
+            assertEquals(0, count("SELECT count(*) FROM meter WHERE asset_id = ?", archived.getId()));
+        }
+
+        @Test
+        void childAssetCreatedOrMovedUnderArchivedAsset_409_activeChildOfArchivedParent_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset archived = archivedAsset(company);
+            Asset other = records.asset(company);
+            Asset child = records.asset(company);
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", archived.getId(), child.getId());
+
+            Response create = send(post("/assets"), "{\"name\":\"" + TestRecords.unique("P-14b child")
+                    + "\",\"parentAsset\":" + ref(archived) + "}", data.o1().admin());
+            Response move = send(patch("/assets/" + other.getId()), "{\"name\":\"P-14b\",\"status\":"
+                    + "\"OPERATIONAL\",\"parentAsset\":" + ref(archived) + "}", data.o1().admin());
+            Response keep = send(patch("/assets/" + child.getId()), "{\"name\":\"P-14b kept\",\"status\":"
+                    + "\"OPERATIONAL\",\"parentAsset\":" + ref(archived) + "}", data.o1().admin());
+
+            assertRetired(create);
+            assertRetired(move);
+            assertEquals(200, keep.status(), keep.toString());
+            assertEquals(1, count("SELECT count(*) FROM asset WHERE parent_asset_id = ?", archived.getId()));
+        }
+
+        @Test
+        void newTaskOnArchivedAsset_409_tasksAlreadyCitingIt_replacedKeepingThem_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            WorkOrder workOrder = records.workOrder(company, null, Status.OPEN, false);
+            // options sent, as the web app does: without them the match of a saved task fails with a 500
+            // (TaskController.tasksMatch, outside P-14b)
+            String task = "[{\"label\":\"P-14b task\",\"taskType\":\"SUBTASK\",\"options\":[],\"asset\":";
+
+            assertRetired(send(patch("/tasks/work-order/" + workOrder.getId()), task + ref(archived) + "}]",
+                    data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM task WHERE work_order_id = ?", workOrder.getId()));
+
+            Response created = send(patch("/tasks/work-order/" + workOrder.getId()), task + ref(active) + "}]",
+                    data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            archive(active);
+            Response keep = send(patch("/tasks/work-order/" + workOrder.getId()), task + ref(active) + "}]",
+                    data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+            assertEquals(1, count("SELECT count(*) FROM task WHERE work_order_id = ?", workOrder.getId()));
+        }
+
+        @Test
+        void checklistWithATaskOnArchivedAsset_409Retired() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset archived = archivedAsset(company);
+
+            Response response = send(post("/checklists"), "{\"name\":\"" + TestRecords.unique("P-14b checklist")
+                    + "\",\"companySettings\":{\"id\":" + company.getCompanySettings().getId() + "},\"taskBases\":"
+                    + "[{\"label\":\"P-14b task\",\"taskType\":\"SUBTASK\",\"asset\":" + ref(archived) + "}]}",
+                    data.o1().admin());
+
+            assertRetired(response);
+            assertEquals(0, count("SELECT count(*) FROM task_base WHERE asset_id = ?", archived.getId()));
+        }
+
+        @Test
+        void workflowCreatedOrChangedToArchivedAsset_409_workflowKept_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+
+            assertRetired(send(post("/workflows"), workflowBody(archived, null), data.o1().admin()));
+            assertRetired(send(post("/workflows"), workflowBody(active, archived), data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM workflow WHERE company_id = ?", company.getId()));
+
+            Response created = send(post("/workflows"), workflowBody(active, null), data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long workflow = json(created).get("id").asLong();
+            Response change = send(patch("/workflows/" + workflow), workflowBody(archived, null), data.o1().admin());
+            assertRetired(change);
+            assertEquals(1, count("SELECT count(*) FROM workflow WHERE id = ?", workflow));
+
+            archive(active);
+            Response keep = send(patch("/workflows/" + workflow), workflowBody(active, null), data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
+        }
+
+        @Test
+        void portalFieldCreatedOrChangedToArchivedAsset_409_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            String portal = "{\"title\":\"" + TestRecords.unique("P-14b portal") + "\",\"fields\":[{\"type\":"
+                    + "\"ASSET\",\"asset\":";
+
+            assertRetired(send(post("/request-portals"), portal + ref(archived) + "}]}", data.o1().admin()));
+            assertEquals(0, count("SELECT count(*) FROM request_portal_field WHERE asset_id = ?", archived.getId()));
+
+            Response created = send(post("/request-portals"), portal + ref(active) + "}]}", data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long id = json(created).get("id").asLong();
+            assertRetired(send(patch("/request-portals/" + id), portal + ref(archived) + "}]}", data.o1().admin()));
+            archive(active);
+            Response keep = send(patch("/request-portals/" + id), portal + ref(active) + "}]}", data.o1().admin());
+            assertEquals(200, keep.status(), keep.toString());
         }
     }
 }

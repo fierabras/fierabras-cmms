@@ -9,6 +9,7 @@ import com.grash.mapper.WorkOrderMeterTriggerMapper;
 import com.grash.model.Meter;
 import com.grash.model.User;
 import com.grash.model.WorkOrderMeterTrigger;
+import com.grash.service.AssetService;
 import com.grash.service.MeterService;
 import com.grash.service.UserService;
 import com.grash.service.WorkOrderService;
@@ -25,6 +26,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -38,6 +40,7 @@ public class WorkOrderMeterTriggerController {
     private final WorkOrderMeterTriggerService workOrderMeterTriggerService;
     private final WorkOrderMeterTriggerMapper workOrderMeterTriggerMapper;
     private final UserService userService;
+    private final AssetService assetService;
     private final MeterService meterService;
 
 
@@ -65,6 +68,8 @@ public class WorkOrderMeterTriggerController {
         // P-14 (E-8): a disabled user is not accepted as a new reference
         userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(workOrderMeterTriggerReq.getPrimaryUser(),
                 workOrderMeterTriggerReq.getAssignedTo()));
+        // P-14b (E-3, PPB-08): an archived asset is not accepted as a new reference
+        assetService.rejectRetired(List.of(), Collections.singletonList(workOrderMeterTriggerReq.getAsset()));
         return workOrderMeterTriggerMapper.toShowDto(workOrderMeterTriggerService.create(workOrderMeterTriggerReq,
                 user.getCompany()));
     }
@@ -98,6 +103,9 @@ public class WorkOrderMeterTriggerController {
             userService.rejectRetired(WorkOrderService.assignedUsers(savedWorkOrderMeterTrigger.getPrimaryUser(),
                     savedWorkOrderMeterTrigger.getAssignedTo()), WorkOrderService.assignedUsers(
                     workOrderMeterTrigger.getPrimaryUser(), workOrderMeterTrigger.getAssignedTo()));
+            // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
+            assetService.rejectRetired(Collections.singletonList(savedWorkOrderMeterTrigger.getAsset()),
+                    Collections.singletonList(workOrderMeterTrigger.getAsset()));
             return workOrderMeterTriggerMapper.toShowDto(workOrderMeterTriggerService.update(id,
                     workOrderMeterTrigger, user.getCompany()));
         } else throw new CustomException("WorkOrderMeterTrigger not found", HttpStatus.NOT_FOUND);

@@ -77,6 +77,8 @@ public class RequestService {
         // P-13 (D-2, PPB-08): a disabled user is not assigned to a new request
         userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(request.getPrimaryUser(),
                 request.getAssignedTo()));
+        // P-14b (E-3, PPB-08): an archived asset is not given to a new request
+        assetService.rejectRetired(List.of(), Collections.singletonList(request.getAsset()));
         if (request.getAudioDescription() != null && !licenseService.hasEntitlement(LicenseEntitlement.VOICE_NOTES))
             throw new CustomException("You need a license to add voice notes", HttpStatus.FORBIDDEN);
         startPending(request);
@@ -109,6 +111,8 @@ public class RequestService {
 
         if (assetField != null) request.setAsset(assetField.getAsset());
         if (locationField != null) request.setLocation(locationField.getLocation());
+        // P-14b (E-3, D-4): a portal does not give an archived asset to a new request
+        assetService.rejectRetired(List.of(), Collections.singletonList(request.getAsset()));
 
 
         Request savedRequest = requestRepository.saveAndFlush(request);
@@ -140,6 +144,9 @@ public class RequestService {
             userService.rejectRetired(WorkOrderService.assignedUsers(savedRequest.getPrimaryUser(),
                     savedRequest.getAssignedTo()), WorkOrderService.assignedUsers(request.getPrimaryUser(),
                     request.getAssignedTo()));
+            // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
+            assetService.rejectRetired(Collections.singletonList(savedRequest.getAsset()),
+                    Collections.singletonList(request.getAsset()));
             if (!request.getCustomFields().isEmpty()) {
                 setRequestCustomFields(savedRequest, request.getCustomFields(), company);
             }
@@ -227,6 +234,8 @@ public class RequestService {
         // active; otherwise the whole approval is rejected and reverted
         userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(workOrder.getPrimaryUser(),
                 workOrder.getAssignedTo()));
+        // P-14b (E-3): the new work order does not cite an archived asset; the whole approval is rejected
+        assetService.rejectRetired(List.of(), Collections.singletonList(workOrder.getAsset()));
         workOrder.setParentRequest(request);
         WorkOrder savedWorkOrder = workOrderService.create(workOrder, creator.getCompany());
         request.setWorkOrder(savedWorkOrder);

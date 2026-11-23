@@ -39,6 +39,7 @@ public class TaskController {
 
     private final TaskService taskService;
     private final UserService userService;
+    private final AssetService assetService;
     private final TaskBaseService taskBaseService;
     private final WorkOrderService workOrderService;
     private final WorkflowService workflowService;
@@ -121,6 +122,9 @@ public class TaskController {
         }
         if (workOrder != null && (matches.contains(null) || matchedTasks.size() < savedTasks.size()))
             WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
+        // P-14b (E-3, PPB-08): a new task does not cite an archived asset; those the tasks already cite are kept
+        assetService.rejectRetired(savedTasks.stream().map(task -> task.getTaskBase().getAsset()).toList(),
+                incomingTasks.stream().map(TaskBaseDTO::getAsset).toList());
 
         // Process each incoming task
         for (int i = 0; i < incomingTasks.size(); i++) {

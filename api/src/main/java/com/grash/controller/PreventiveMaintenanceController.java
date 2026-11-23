@@ -16,6 +16,7 @@ import com.grash.model.Schedule;
 import com.grash.model.WorkOrder;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleType;
+import com.grash.service.AssetService;
 import com.grash.service.PreventiveMaintenanceService;
 import com.grash.service.ScheduleService;
 import com.grash.service.UserService;
@@ -40,6 +41,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +55,7 @@ public class PreventiveMaintenanceController {
 
     private final PreventiveMaintenanceService preventiveMaintenanceService;
     private final UserService userService;
+    private final AssetService assetService;
     private final ScheduleService scheduleService;
     private final PreventiveMaintenanceMapper preventiveMaintenanceMapper;
     private final WorkOrderService workOrderService;
@@ -123,6 +126,8 @@ public class PreventiveMaintenanceController {
         PreventiveMaintenance preventiveMaintenance = preventiveMaintenanceService.findById(id)
                 .orElseThrow(() -> new CustomException("PreventiveMaintenance not found", HttpStatus.NOT_FOUND));
         checkAccessToPreventiveMaintenance(user, preventiveMaintenance);
+        // P-14b (E-3): the new work order does not cite an archived asset
+        assetService.rejectRetired(List.of(), Collections.singletonList(preventiveMaintenance.getAsset()));
         WorkOrder workOrder =
                 preventiveMaintenanceService.createWorkOrderFromPreventiveMaintenance(preventiveMaintenance);
         return workOrderMapper.toMiniDto(workOrder);

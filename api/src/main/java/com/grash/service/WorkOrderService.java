@@ -271,6 +271,9 @@ public class WorkOrderService {
                 userService.rejectRetired(assignedUsers(savedWorkOrder.getPrimaryUser(),
                         savedWorkOrder.getAssignedTo()), assignedUsers(workOrder.getPrimaryUser(),
                         workOrder.getAssignedTo()));
+                // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
+                assetService.rejectRetired(Collections.singletonList(savedWorkOrder.getAsset()),
+                        Collections.singletonList(workOrder.getAsset()));
                 em.detach(savedWorkOrder);
                 WorkOrder patchedWorkOrder = update(id, workOrder, user);
 
@@ -1236,6 +1239,8 @@ public class WorkOrderService {
         // P-11 (PPB-08): a disabled user is not assigned to a new work order
         userService.rejectRetired(List.of(), assignedUsers(workOrderReq.getPrimaryUser(),
                 workOrderReq.getAssignedTo()));
+        // P-14b (E-3, CA-PPB-025): an archived asset is not given to a new work order
+        assetService.rejectRetired(List.of(), Collections.singletonList(workOrderReq.getAsset()));
         WorkOrder createdWorkOrder = create(workOrderReq, user.getCompany());
 
         if (!user.getCompany().isFirstWorkOrderCreated()) {

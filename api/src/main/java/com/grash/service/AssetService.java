@@ -179,6 +179,21 @@ public class AssetService {
         return changeArchived(id, false, AuditAction.RESTORE, actor);
     }
 
+    /**
+     * P-14b (E-3, PPB-08): an archived asset is not accepted as a new reference. {@code requested} are the assets a
+     * request sets; those already in {@code previous} are kept even if archived. Null elements are ignored.
+     */
+    public void rejectRetired(Collection<Asset> previous, Collection<Asset> requested) {
+        if (requested == null) return;
+        Set<Long> previousIds = new HashSet<>();
+        if (previous != null) previous.stream().filter(Objects::nonNull).map(Asset::getId).forEach(previousIds::add);
+        Set<Long> newIds = new HashSet<>();
+        requested.stream().filter(Objects::nonNull).map(Asset::getId).filter(Objects::nonNull)
+                .filter(assetId -> !previousIds.contains(assetId)).forEach(newIds::add);
+        if (!newIds.isEmpty() && assetRepository.existsByIdInAndArchivedTrue(newIds))
+            throw AssetStateGuard.notAssignable();
+    }
+
     private Asset changeArchived(Long id, boolean archived, AuditAction action, User actor) {
         Asset asset = assetRepository.findById(id).orElseThrow(() -> new CustomException("Not found",
                 HttpStatus.NOT_FOUND));

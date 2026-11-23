@@ -36,6 +36,7 @@ import jakarta.validation.Valid;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -199,6 +200,8 @@ public class AssetController {
             // P-14 (E-8): a disabled user is not accepted as a new reference
             userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(assetReq.getPrimaryUser(),
                     assetReq.getAssignedTo()));
+            // P-14b (E-3, PPB-08): a new asset is not placed under an archived one
+            assetService.rejectRetired(List.of(), Collections.singletonList(assetReq.getParentAsset()));
             Asset createdAsset = assetService.create(assetReq, user);
             String message = messageSource.getMessage("notification_asset_assigned",
                     new Object[]{createdAsset.getName()}, Helper.getLocale(user));
@@ -220,6 +223,7 @@ public class AssetController {
             Asset savedAsset = optionalAsset.get();
             List<User> previousUsers = WorkOrderService.assignedUsers(savedAsset.getPrimaryUser(),
                     savedAsset.getAssignedTo());
+            Asset previousParent = savedAsset.getParentAsset();
             em.detach(savedAsset);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.ASSETS) || user.getId().equals(savedAsset.getCreatedBy())
             ) {
@@ -234,6 +238,9 @@ public class AssetController {
                 // P-14 (E-8): a disabled user is not accepted as a new reference
                 userService.rejectRetired(previousUsers, WorkOrderService.assignedUsers(asset.getPrimaryUser(),
                         asset.getAssignedTo()));
+                // P-14b (E-3, PPB-08): it is not moved under an archived asset; the parent it already has is kept
+                assetService.rejectRetired(Collections.singletonList(previousParent),
+                        Collections.singletonList(asset.getParentAsset()));
                 // P-20 (E-5): checked before any change, the downtime ones included
                 if (asset.getCustomId() != null && !asset.getCustomId().equals(savedAsset.getCustomId())
                         && assetService.existsByCustomIdAndCompany(asset.getCustomId(), user.getCompany().getId())) {

@@ -7,7 +7,9 @@ import com.grash.dto.requestPortal.RequestPortalPatchDTO;
 import com.grash.dto.requestPortal.RequestPortalPostDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.RequestPortalMapper;
+import com.grash.model.Asset;
 import com.grash.model.RequestPortal;
+import com.grash.model.RequestPortalField;
 import com.grash.model.User;
 import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.EntityType;
@@ -23,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,6 +38,7 @@ public class RequestPortalService {
     private final RequestPortalMapper requestPortalMapper;
     private final LicenseService licenseService;
     private final DeletionService deletionService;
+    private final AssetService assetService;
 
     public static final String REQUEST_PORTAL_IN_USE = "REQUEST_PORTAL_IN_USE";
     private static final String REQUEST_PORTAL_IN_USE_MESSAGE = "This request portal has received requests and "
@@ -43,6 +47,8 @@ public class RequestPortalService {
     public RequestPortal create(@Valid RequestPortalPostDTO requestPortalReq, User user) {
         if (!user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.REQUEST_PORTAL) || !user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) || !licenseService.hasEntitlement(LicenseEntitlement.REQUEST_PORTAL))
             throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+        // P-14b (E-3, PPB-08): a field does not cite an archived asset
+        assetService.rejectRetired(List.of(), fieldAssets(requestPortalReq.getFields()));
         RequestPortal requestPortal =
                 requestPortalMapper.fromPostDto(requestPortalReq);
         requestPortal.setUuid(UUID.randomUUID().toString());
@@ -51,6 +57,10 @@ public class RequestPortalService {
         return requestPortalRepository.save(requestPortal);
     }
 
+
+    private static List<Asset> fieldAssets(Collection<RequestPortalField> fields) {
+        return fields == null ? List.of() : fields.stream().map(RequestPortalField::getAsset).toList();
+    }
 
     public List<RequestPortal> getAll() {
         return requestPortalRepository.findAll();
@@ -77,6 +87,9 @@ public class RequestPortalService {
         RequestPortal savedRequestPortal =
                 requestPortalRepository.findById(id).orElseThrow(() -> new CustomException("Not found",
                         HttpStatus.NOT_FOUND));
+        // P-14b (E-3, PPB-08): a field does not cite an archived asset anew; those the fields already cite are kept
+        assetService.rejectRetired(fieldAssets(savedRequestPortal.getFields()),
+                fieldAssets(requestPortalPatchDTO.getFields()));
         RequestPortal newRequestPortal = requestPortalMapper.updateRequestPortal(savedRequestPortal,
                 requestPortalPatchDTO);
         newRequestPortal.getFields().forEach(field -> field.setRequestPortal(savedRequestPortal));

@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,7 @@ public class WorkflowController {
 
     private final WorkflowService workflowService;
     private final UserService userService;
+    private final AssetService assetService;
     private final WorkflowConditionMapper workflowConditionMapper;
     private final WorkflowConditionService workflowConditionService;
     private final WorkflowActionMapper workflowActionMapper;
@@ -64,6 +66,8 @@ public class WorkflowController {
             int workflowsCount =
                     (int) workflowService.findByCompany(user.getCompany().getId()).stream().filter(Workflow::isEnabled).count();
             if ((user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.WORKFLOW) && licenseService.hasEntitlement(LicenseEntitlement.WORKFLOW)) || workflowsCount == 0) {
+                // P-14b (E-3, PPB-08): neither its action nor its conditions cite an archived asset
+                assetService.rejectRetired(List.of(), requestedAssets(workflowReq));
                 return workflowMapper.toShowDto(createWorkflow(workflowReq, user.getCompany()));
             } else
                 throw new CustomException("You can't create a new workflow. Please upgrade", HttpStatus.NOT_ACCEPTABLE);
@@ -97,6 +101,12 @@ public class WorkflowController {
 
         if (optionalWorkflow.isPresent()) {
             Workflow savedWorkflow = optionalWorkflow.get();
+            // P-14b (E-3, PPB-08): checked before the workflow is deleted and created again; the assets it already
+            // cites are kept
+            List<Asset> previousAssets = new ArrayList<>();
+            if (savedWorkflow.getAction() != null) previousAssets.add(savedWorkflow.getAction().getAsset());
+            savedWorkflow.getSecondaryConditions().forEach(condition -> previousAssets.add(condition.getAsset()));
+            assetService.rejectRetired(previousAssets, requestedAssets(workflow));
             workflowService.delete(id);
             return workflowMapper.toShowDto(createWorkflow(workflow, user.getCompany()));
         } else throw new CustomException("Workflow not found", HttpStatus.NOT_FOUND);
@@ -117,6 +127,17 @@ public class WorkflowController {
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Workflow not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-14b: the assets that the action and the conditions of the request cite, with nulls.
+     */
+    private static List<Asset> requestedAssets(WorkflowPostDTO workflowReq) {
+        List<Asset> assets = new ArrayList<>();
+        if (workflowReq.getAction() != null) assets.add(workflowReq.getAction().getAsset());
+        if (workflowReq.getSecondaryConditions() != null)
+            workflowReq.getSecondaryConditions().forEach(condition -> assets.add(condition.getAsset()));
+        return assets;
     }
 
     private Workflow createWorkflow(WorkflowPostDTO workflowReq, Company company) {
