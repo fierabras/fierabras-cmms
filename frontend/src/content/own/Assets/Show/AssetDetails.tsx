@@ -77,6 +77,9 @@ const AssetDetails = ({ asset, loading, onCopy }: PropsType) => {
   const { t }: { t: any } = useTranslation();
   const theme = useTheme();
   const { hasCreatePermission, hasEditPermission } = useAuth();
+  // P-14b (E-3): a new work order does not cite an archived asset
+  const canCreateWorkOrder =
+    hasCreatePermission(PermissionEntity.WORK_ORDERS) && !asset?.archived;
   const navigate = useNavigate();
   const { getFormattedDate, getFormattedCurrency } = useContext(
     CompanySettingsContext
@@ -238,7 +241,7 @@ const AssetDetails = ({ asset, loading, onCopy }: PropsType) => {
                       </IconButton>
                     )}
                   </Stack>
-                  {hasCreatePermission(PermissionEntity.WORK_ORDERS) && (
+                  {canCreateWorkOrder && (
                     <Button
                       onClick={() =>
                         navigate(`/app/work-orders?asset=${asset.id}`)
