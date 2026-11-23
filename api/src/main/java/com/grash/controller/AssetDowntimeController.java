@@ -9,6 +9,7 @@ import com.grash.model.User;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.service.AssetDowntimeService;
 import com.grash.service.AssetService;
+import com.grash.service.AssetStateGuard;
 import com.grash.service.UserService;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -62,6 +63,8 @@ public class AssetDowntimeController {
                     HttpStatus.NOT_ACCEPTABLE);
         }
         if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.ASSETS) || user.getId().equals(optionalAsset.get().getCreatedBy())) {
+            // P-14b (E-5, PPB-15): an archived asset gets no new downtime
+            AssetStateGuard.check(optionalAsset.get());
             return assetDowntimeService.create(assetDowntimeReq, true);
         } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
     }
@@ -85,6 +88,8 @@ public class AssetDowntimeController {
         Optional<AssetDowntime> optionalAssetDowntime = assetDowntimeService.findById(id);
         if (optionalAssetDowntime.isPresent()) {
             if (canPatchAsset(optionalAssetDowntime.get().getAsset(), user)) {
+                // P-14b (E-5, PPB-15, CA-PPB-119): the downtimes of an archived asset do not change
+                AssetStateGuard.check(optionalAssetDowntime.get().getAsset());
                 return assetDowntimeService.update(id, assetDowntime);
             } else {
                 throw new CustomException("Can't patch assetDowntime of someone else", HttpStatus.NOT_ACCEPTABLE);
@@ -102,6 +107,8 @@ public class AssetDowntimeController {
         Optional<AssetDowntime> optionalAssetDowntime = assetDowntimeService.findById(id);
         if (optionalAssetDowntime.isPresent()) {
             if (canPatchAsset(optionalAssetDowntime.get().getAsset(), user)) {
+                // P-14b (E-5, PPB-15, CA-PPB-119): the downtimes of an archived asset are not removed
+                AssetStateGuard.check(optionalAssetDowntime.get().getAsset());
                 assetDowntimeService.delete(optionalAssetDowntime.get(), user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);

@@ -13,12 +13,16 @@ import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Asset;
+import com.grash.model.AssetDowntime;
 import com.grash.model.Company;
+import com.grash.model.Deprecation;
+import com.grash.model.enums.AssetStatus;
 import com.grash.model.enums.Status;
 import com.grash.model.Meter;
 import com.grash.model.Request;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
+import com.grash.repository.DeprecationRepository;
 import com.grash.repository.RequestPortalRepository;
 import com.grash.repository.UserRepository;
 import com.grash.service.AssetService;
@@ -45,6 +49,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +58,7 @@ import java.util.Map;
 import java.util.stream.StreamSupport;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -83,6 +89,7 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
     private final WorkOrderService workOrderService;
     private final UserRepository userRepository;
     private final MessageSource messageSource;
+    private final DeprecationRepository deprecationRepository;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -95,7 +102,8 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
                                   XlsxExportService xlsxExportService,
                                   WorkOrderService workOrderService,
                                   UserRepository userRepository,
-                                  MessageSource messageSource) {
+                                  MessageSource messageSource, DeprecationRepository deprecationRepository) {
+        this.deprecationRepository = deprecationRepository;
         this.csvFileGenerator = csvFileGenerator;
         this.assetService = assetService;
         this.xlsxExportService = xlsxExportService;
@@ -898,6 +906,182 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
                             && line.contains("," + archivedText + ",")), assets),
                     () -> assertTrue(workOrderRows.stream().anyMatch(row -> row.get(0).equals(
                             String.valueOf(w6.getId()))), workOrderRows.toString()));
+        }
+    }
+
+    // =====================================================================================================
+    // B4 · E-5: the children of an archived asset do not change (CA-PPB-119, 123)
+    // =====================================================================================================
+
+    private Deprecation deprecationOf(Asset asset) {
+        Deprecation deprecation = new Deprecation();
+        deprecation.setPurchasePrice(1000);
+        deprecation.setCompany(asset.getCompany());
+        deprecation = deprecationRepository.saveAndFlush(deprecation);
+        jdbc.update("UPDATE asset SET deprecation_id = ? WHERE id = ?", deprecation.getId(), asset.getId());
+        return deprecation;
+    }
+
+    private Map<String, Object> rowOf(String table, Long id) {
+        return jdbc.queryForMap("SELECT * FROM " + table + " WHERE id = ?", id);
+    }
+
+    private int status(Asset asset) {
+        return jdbc.queryForObject("SELECT status FROM asset WHERE id = ?", Integer.class, asset.getId());
+    }
+
+    private AssetDowntime runningDowntime(Asset asset) {
+        jdbc.update("UPDATE asset SET status = ? WHERE id = ?", AssetStatus.DOWN.ordinal(), asset.getId());
+        AssetDowntime downtime = records.downtime(asset);
+        jdbc.update("UPDATE asset_downtime SET starts_on = now() - interval '1 hour' WHERE id = ?",
+                downtime.getId());
+        return downtime;
+    }
+
+    @Nested
+    class Children {
+
+        @Test
+        void ca119_downtimeOfArchivedAsset_editOrDelete_409Retired_unchanged() {
+            CommonData data = data();
+            Asset x16 = archivedAsset(data.o1().company());
+            AssetDowntime dt2 = records.downtime(x16);
+            Map<String, Object> before = rowOf("asset_downtime", dt2.getId());
+
+            Response edit = send(patch("/asset-downtimes/" + dt2.getId()), "{\"duration\":60,\"startsOn\":\""
+                    + Instant.now().minusSeconds(3600) + "\"}", data.o1().admin());
+            Response remove = call(delete("/asset-downtimes/" + dt2.getId()), data.o1().admin());
+
+            assertRetired(edit);
+            assertRetired(remove);
+            assertEquals(before, rowOf("asset_downtime", dt2.getId()));
+            assertEquals(List.of(), audit(data));
+        }
+
+        @Test
+        void downtimeCreatedOnArchivedAsset_409Retired_notCreated() {
+            CommonData data = data();
+            Asset asset = archivedAsset(data.o1().company());
+
+            Response create = send(post("/asset-downtimes"), "{\"asset\":" + ref(asset) + ",\"startsOn\":\""
+                    + Instant.now().plusSeconds(60) + "\",\"duration\":3600}", data.o1().admin());
+
+            assertRetired(create);
+            assertEquals(0, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", asset.getId()));
+        }
+
+        @Test
+        void downtimeOfArchivedAsset_unknown_404_otherOrganization_notConflict() {
+            CommonData data = data();
+            Asset asset = archivedAsset(data.o1().company());
+            AssetDowntime downtime = records.downtime(asset);
+
+            Response unknownEdit = send(patch("/asset-downtimes/" + Long.MAX_VALUE), "{\"duration\":60}",
+                    data.o1().admin());
+            Response unknownDelete = call(delete("/asset-downtimes/" + Long.MAX_VALUE), data.o1().admin());
+            Response otherDelete = call(delete("/asset-downtimes/" + downtime.getId()), data.o2().admin());
+
+            assertEquals(404, unknownEdit.status(), unknownEdit.toString());
+            assertEquals(404, unknownDelete.status(), unknownDelete.toString());
+            assertEquals(403, otherDelete.status(), otherDelete.toString());
+            assertEquals(1, count("SELECT count(*) FROM asset_downtime WHERE id = ?", downtime.getId()));
+        }
+
+        @Test
+        void ca123_deleteDepreciationOfArchivedAsset_409Retired_depreciationExists_editAlso409() {
+            CommonData data = data();
+            Asset x16 = archivedAsset(data.o1().company());
+            Deprecation dp1 = deprecationOf(x16);
+            Map<String, Object> before = rowOf("deprecation", dp1.getId());
+
+            Response remove = call(delete("/deprecations/" + dp1.getId()), data.o1().admin());
+            Response edit = send(patch("/deprecations/" + dp1.getId()), "{\"purchasePrice\":5}", data.o1().admin());
+
+            assertRetired(remove);
+            assertRetired(edit);
+            assertEquals(before, rowOf("deprecation", dp1.getId()));
+            assertEquals(dp1.getId(), jdbc.queryForObject("SELECT deprecation_id FROM asset WHERE id = ?",
+                    Long.class, x16.getId()));
+            assertEquals(List.of(), audit(data));
+        }
+
+        @Test
+        void depreciationOfActiveAsset_editAndDelete_200_unknown_404() {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            Deprecation deprecation = deprecationOf(asset);
+
+            Response unknown = call(delete("/deprecations/" + Long.MAX_VALUE), data.o1().admin());
+            Response edit = send(patch("/deprecations/" + deprecation.getId()), "{\"purchasePrice\":5}",
+                    data.o1().admin());
+            Response remove = call(delete("/deprecations/" + deprecation.getId()), data.o1().admin());
+
+            assertEquals(404, unknown.status(), unknown.toString());
+            assertEquals(200, edit.status(), edit.toString());
+            assertEquals(200, remove.status(), remove.toString());
+        }
+
+        @Test
+        void closingTheLastWorkOrderOfArchivedAsset_200_itsDowntimeAndStatusDoNotChange() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset asset = archivedAsset(company);
+            AssetDowntime downtime = runningDowntime(asset);
+            WorkOrder workOrder = records.workOrder(company, asset, Status.OPEN, false);
+
+            Response response = send(patch("/work-orders/" + workOrder.getId() + "/change-status"),
+                    "{\"status\":\"COMPLETE\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(Status.COMPLETE.ordinal(), jdbc.queryForObject("SELECT status FROM work_order WHERE id = ?",
+                    Integer.class, workOrder.getId()));
+            assertEquals(0L, count("SELECT duration FROM asset_downtime WHERE id = ?", downtime.getId()));
+            assertEquals(AssetStatus.DOWN.ordinal(), status(asset));
+        }
+
+        @Test
+        void childGoingDown_archivedParentGetsNoDowntime_activeGrandparentDoes() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset grandparent = records.asset(company);
+            Asset parent = archivedAsset(company);
+            Asset child = records.asset(company);
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", grandparent.getId(), parent.getId());
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", parent.getId(), child.getId());
+
+            Response response = send(patch("/assets/" + child.getId()), "{\"name\":\"" + child.getName()
+                    + "\",\"status\":\"DOWN\",\"parentAsset\":" + ref(parent) + "}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", child.getId()));
+            assertEquals(0, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", parent.getId()));
+            assertEquals(AssetStatus.OPERATIONAL.ordinal(), status(parent));
+            assertEquals(1, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", grandparent.getId()));
+            assertEquals(AssetStatus.DOWN.ordinal(), status(grandparent));
+        }
+
+        @Test
+        void parentBackUp_itsArchivedChildKeepsItsDowntime_activeGrandchildIsStopped() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset parent = records.asset(company);
+            Asset child = archivedAsset(company);
+            Asset grandchild = records.asset(company);
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", parent.getId(), child.getId());
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", child.getId(), grandchild.getId());
+            runningDowntime(parent);
+            AssetDowntime childDowntime = runningDowntime(child);
+            AssetDowntime grandchildDowntime = runningDowntime(grandchild);
+
+            Response response = send(patch("/assets/" + parent.getId()), "{\"name\":\"" + parent.getName()
+                    + "\",\"status\":\"OPERATIONAL\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0L, count("SELECT duration FROM asset_downtime WHERE id = ?", childDowntime.getId()));
+            assertEquals(AssetStatus.DOWN.ordinal(), status(child));
+            assertNotEquals(0L, count("SELECT duration FROM asset_downtime WHERE id = ?",
+                    grandchildDowntime.getId()));
+            assertEquals(AssetStatus.OPERATIONAL.ordinal(), status(grandchild));
         }
     }
 }

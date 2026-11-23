@@ -575,24 +575,26 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class Children {
 
         @Test
-        void downtimeOfArchivedAsset_createEditDelete_200() {
+        void downtimeOfArchivedAsset_createEditDelete_409() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
+            AssetDowntime downtime = records.downtime(asset);
 
             Response create = send(post("/asset-downtimes"), "{\"asset\":{\"id\":" + asset.getId()
                     + "},\"startsOn\":\"" + Instant.now().plusSeconds(60) + "\",\"duration\":3600}", data.o1().admin());
-            long downtime = json(create).get("id").asLong();
-            Response edit = send(patch("/asset-downtimes/" + downtime), "{\"duration\":60,\"startsOn\":\""
+            Response edit = send(patch("/asset-downtimes/" + downtime.getId()), "{\"duration\":60,\"startsOn\":\""
                     + Instant.now().plusSeconds(120) + "\"}", data.o1().admin());
-            Response remove = call(delete("/asset-downtimes/" + downtime), data.o1().admin());
+            Response remove = call(delete("/asset-downtimes/" + downtime.getId()), data.o1().admin());
 
-            assertEquals(200, create.status(), create.toString());
-            assertEquals(200, edit.status(), edit.toString());
-            assertEquals(200, remove.status(), remove.toString());
+            // P-14b (E-5, CA-PPB-119): before, the three answered 200
+            assertEquals(409, create.status(), create.toString());
+            assertEquals(409, edit.status(), edit.toString());
+            assertEquals(409, remove.status(), remove.toString());
+            assertEquals(1, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", asset.getId()));
         }
 
         @Test
-        void depreciationOfArchivedAsset_editDelete_200() {
+        void depreciationOfArchivedAsset_editDelete_409() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
             Deprecation deprecation = deprecationOf(asset);
@@ -601,13 +603,14 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     data.o1().admin());
             Response remove = call(delete("/deprecations/" + deprecation.getId()), data.o1().admin());
 
-            assertEquals(200, edit.status(), edit.toString());
-            assertEquals(200, remove.status(), remove.toString());
-            assertEquals(0, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
+            // P-14b (E-5, CA-PPB-123): before, both answered 200 and the depreciation was deleted
+            assertEquals(409, edit.status(), edit.toString());
+            assertEquals(409, remove.status(), remove.toString());
+            assertEquals(1, count("SELECT count(*) FROM deprecation WHERE id = ?", deprecation.getId()));
         }
 
         @Test
-        void closingTheLastWorkOrderOfArchivedAsset_stopsItsRunningDowntime() {
+        void closingTheLastWorkOrderOfArchivedAsset_keepsItsRunningDowntime() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = archivedAsset(company);
@@ -621,9 +624,9 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     "{\"status\":\"COMPLETE\"}", data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            // before P-14b: the automatic downtime of the archived asset is closed and its status changes
-            assertNotEquals(0L, count("SELECT duration FROM asset_downtime WHERE id = ?", downtime.getId()));
-            assertEquals(AssetStatus.OPERATIONAL.ordinal(), jdbc.queryForObject("SELECT status FROM asset WHERE id = ?",
+            // P-14b (E-5): before, the automatic downtime of the archived asset was closed and its status changed
+            assertEquals(0L, count("SELECT duration FROM asset_downtime WHERE id = ?", downtime.getId()));
+            assertEquals(AssetStatus.DOWN.ordinal(), jdbc.queryForObject("SELECT status FROM asset WHERE id = ?",
                     Integer.class, asset.getId()));
         }
 
