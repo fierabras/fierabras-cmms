@@ -151,7 +151,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class ArchiveAndRestore {
 
         @Test
-        void archiveThenRestore_200_noAuditRecord_workOrdersMeterAndReadingsUnchanged() {
+        void archiveThenRestore_200_recorded_workOrdersMeterAndReadingsUnchanged() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = records.asset(company);
@@ -179,8 +179,8 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     () -> assertTrue(archivedAfterArchive),
                     () -> assertEquals(200, restore.status(), restore.toString()),
                     () -> assertFalse(archived(asset)),
-                    // before P-14b: neither operation is recorded
-                    () -> assertEquals(List.of(), audit(data)),
+                    // P-14b (E-1): before, neither operation was recorded
+                    () -> assertEquals(List.of("RETIRE ASSET -", "RESTORE ASSET -"), audit(data)),
                     () -> assertEquals(before, jdbc.queryForList("SELECT * FROM work_order WHERE id IN (?, ?) "
                             + "ORDER BY id", first.getId(), second.getId())),
                     () -> assertEquals(meterBefore, jdbc.queryForList("SELECT * FROM meter WHERE id = ?",
@@ -190,19 +190,19 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void onlyArchived_500_unchanged() {
+        void onlyArchived_200_archived() {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
 
             Response response = send(patch("/assets/" + asset.getId()), "{\"archived\":true}", data.o1().admin());
 
-            // before P-14b: the controller reads the status of the body, which is null (AssetController.java:234)
-            assertEquals(500, response.status(), response.toString());
-            assertFalse(archived(asset));
+            // P-14b (D-5): before, 500, because the controller read the status of the body, which is null
+            assertEquals(200, response.status(), response.toString());
+            assertTrue(archived(asset));
         }
 
         @Test
-        void archive_setsTheOmittedFieldsToNull() {
+        void archive_keepsTheOmittedFields() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset asset = records.asset(company);
@@ -213,10 +213,11 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
                     + asset.getName() + "\",\"status\":\"OPERATIONAL\"}", data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            // before P-14b: the mapper copies every field of the DTO, so archiving with a partial body empties the rest
+            // P-14b (D-5): before, the mapper copied every field of the DTO, so archiving with a partial body emptied
+            // the rest; now archiving changes only archived
             assertTrue(archived(asset));
-            assertEquals(0, count("SELECT count(*) FROM asset WHERE id = ? AND (location_id IS NOT NULL "
-                    + "OR description IS NOT NULL)", asset.getId()));
+            assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ? AND location_id IS NOT NULL "
+                    + "AND description = 'P-14b'", asset.getId()));
         }
 
         @Test
@@ -254,45 +255,48 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class EditArchived {
 
         @Test
-        void patchWithoutArchived_200_restoresSilently_andChangesTheName() {
+        void patchWithoutArchived_409_staysArchived_nameUnchanged() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(patch("/assets/" + asset.getId()),
                     "{\"name\":\"P-14b renamed\",\"status\":\"OPERATIONAL\"}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            // before P-14b: the primitive archived of the DTO is false when omitted, so the edit restores it
-            assertFalse(archived(asset));
-            assertEquals("P-14b renamed", jdbc.queryForObject("SELECT name FROM asset WHERE id = ?", String.class,
+            // P-14b (E-2): before, 200; the primitive archived of the DTO was false when omitted, so the edit
+            // restored it
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(archived(asset));
+            assertEquals(asset.getName(), jdbc.queryForObject("SELECT name FROM asset WHERE id = ?", String.class,
                     asset.getId()));
             assertEquals(List.of(), audit(data));
         }
 
         @Test
-        void patchWithArchivedTrue_200_changesTheName_staysArchived() {
+        void patchWithArchivedTrue_409_nameUnchanged() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(patch("/assets/" + asset.getId()),
                     "{\"archived\":true,\"name\":\"P-14b renamed\",\"status\":\"OPERATIONAL\"}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
+            // P-14b (E-2): before, 200 and the name changed
+            assertEquals(409, response.status(), response.toString());
             assertTrue(archived(asset));
-            assertEquals("P-14b renamed", jdbc.queryForObject("SELECT name FROM asset WHERE id = ?", String.class,
+            assertEquals(asset.getName(), jdbc.queryForObject("SELECT name FROM asset WHERE id = ?", String.class,
                     asset.getId()));
         }
 
         @Test
-        void statusDown_onArchived_200_opensADowntime() {
+        void statusDown_onArchived_409_noDowntime() {
             CommonData data = data();
             Asset asset = archivedAsset(data.o1().company());
 
             Response response = send(patch("/assets/" + asset.getId()),
                     "{\"archived\":true,\"name\":\"" + asset.getName() + "\",\"status\":\"DOWN\"}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", asset.getId()));
+            // P-14b (E-2, E-5): before, 200 and a downtime was opened
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM asset_downtime WHERE asset_id = ?", asset.getId()));
         }
     }
 

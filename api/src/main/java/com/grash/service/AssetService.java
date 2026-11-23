@@ -12,6 +12,7 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.AssetMapper;
 import com.grash.model.*;
 import com.grash.model.enums.AssetStatus;
+import com.grash.model.enums.AuditAction;
 import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
 import com.grash.model.enums.EntityType;
@@ -72,6 +73,7 @@ public class AssetService {
     private final LicenseService licenseService;
     private WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final AuditLogService auditLogService;
 
     @Autowired
     public void setDeps(@Lazy LocationService locationService, @Lazy LaborService laborService,
@@ -158,6 +160,33 @@ public class AssetService {
 
             return patchedAsset;
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-14b (E-1, D-5, PPB-07, PPB-23): archives the asset and records it, in one transaction. Only {@code archived}
+     * changes: its work orders, meters, readings, children and its own fields stay as they are.
+     */
+    @Transactional
+    public Asset archive(Long id, User actor) {
+        return changeArchived(id, true, AuditAction.RETIRE, actor);
+    }
+
+    /**
+     * P-14b (E-1, E-2, D-5): the inverse of {@link #archive}; nothing else changes either.
+     */
+    @Transactional
+    public Asset restore(Long id, User actor) {
+        return changeArchived(id, false, AuditAction.RESTORE, actor);
+    }
+
+    private Asset changeArchived(Long id, boolean archived, AuditAction action, User actor) {
+        Asset asset = assetRepository.findById(id).orElseThrow(() -> new CustomException("Not found",
+                HttpStatus.NOT_FOUND));
+        asset.setArchived(archived);
+        Asset saved = assetRepository.saveAndFlush(asset);
+        auditLogService.record(new AuditTarget(EntityType.ASSET, saved.getId(), saved.getCustomId(), saved.getName(),
+                saved.getCompany().getId()), actor, action, AuditSource.API, Map.of(), 0);
+        return saved;
     }
 
     private void checkUsageBasedLimit(Company company) {

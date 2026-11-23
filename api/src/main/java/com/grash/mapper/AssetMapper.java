@@ -21,6 +21,8 @@ import java.util.Date;
 @Mapper(componentModel = "spring", uses = {CustomerMapper.class, VendorMapper.class, UserMapper.class,
         TeamMapper.class, FileMapper.class, PartMapper.class, FileMapper.class, CustomFieldValueMapper.class})
 public interface AssetMapper {
+    // P-14b (E-1, D-5): only AssetService.archive and restore change archived
+    @Mapping(target = "archived", ignore = true)
     Asset updateAsset(@MappingTarget Asset entity, AssetPatchDTO dto);
 
     @Mappings({})

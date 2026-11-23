@@ -223,6 +223,14 @@ public class AssetController {
             em.detach(savedAsset);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.ASSETS) || user.getId().equals(savedAsset.getCreatedBy())
             ) {
+                // P-14b (E-1, E-2, D-5): archiving and restoring change only archived; an archived asset admits only
+                // its restoration
+                if (savedAsset.isArchived()) {
+                    if (!Boolean.FALSE.equals(asset.getArchived())) AssetStateGuard.check(savedAsset);
+                    return assetMapper.toShowDto(assetService.restore(id, user), assetService);
+                }
+                if (Boolean.TRUE.equals(asset.getArchived()))
+                    return assetMapper.toShowDto(assetService.archive(id, user), assetService);
                 // P-14 (E-8): a disabled user is not accepted as a new reference
                 userService.rejectRetired(previousUsers, WorkOrderService.assignedUsers(asset.getPrimaryUser(),
                         asset.getAssignedTo()));
