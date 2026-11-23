@@ -14,7 +14,6 @@ import com.grash.model.*;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.PortalFieldType;
 import com.grash.model.enums.RoleType;
-import com.grash.repository.AssetRepository;
 import com.grash.security.CurrentUser;
 import com.grash.service.*;
 import com.grash.utils.Helper;
@@ -57,7 +56,6 @@ public class AssetController {
     private final LicenseService licenseService;
     private final RateLimiterService rateLimiterService;
     private final RequestPortalService requestPortalService;
-    private final AssetRepository assetRepository;
 
     @PostMapping("/search")
     @PreAuthorize("permitAll()")
@@ -120,7 +118,8 @@ public class AssetController {
         User user = userService.whoami(req);
         Optional<Location> optionalLocation = locationService.findById(id);
         if (optionalLocation.isPresent()) {
-            return assetService.findByLocation(id).stream().map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
+            // P-14b (D-3): the archived assets are left out
+            return assetService.findActiveByLocation(id).stream().map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
@@ -131,7 +130,9 @@ public class AssetController {
         User user = userService.whoami(req);
         Optional<Part> optionalPart = partService.findById(id);
         if (optionalPart.isPresent()) {
-            return optionalPart.get().getAssets().stream().map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
+            // P-14b (D-3): the archived assets are left out
+            return optionalPart.get().getAssets().stream().filter(asset -> !asset.isArchived())
+                    .map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
@@ -142,13 +143,14 @@ public class AssetController {
                                               HttpServletRequest req) {
         User user = userService.whoami(req);
         if (id.equals(0L) && user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT)) {
-            return assetService.findByCompanyAndParentAssetNull(user.getCompany().getId(), Pageable.unpaged()).stream().map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
+            // P-14b (D-3): the hierarchy leaves out the archived assets
+            return assetService.findActiveRoots(user.getCompany().getId(), Pageable.unpaged()).stream().map(asset -> assetMapper.toShowDto(asset, assetService)).collect(Collectors.toList());
         }
         Optional<Asset> optionalAsset = assetService.findById(id);
         if (optionalAsset.isPresent()) {
             Asset savedAsset = optionalAsset.get();
             if (user.getRole().getViewPermissions().contains(PermissionEntity.ASSETS)) {
-                return assetService.findAssetChildren(id, Pageable.unpaged()).stream().map(asset -> assetMapper.toShowDto(asset,
+                return assetService.findActiveChildren(id, Pageable.unpaged()).stream().map(asset -> assetMapper.toShowDto(asset,
                         assetService)).collect(Collectors.toList());
             } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
 
@@ -162,15 +164,15 @@ public class AssetController {
                                                        HttpServletRequest req) {
         User user = userService.whoami(req);
         if (id.equals(0L) && user.getRole().getRoleType().equals(RoleType.ROLE_CLIENT)) {
-            Page<Asset> assetsPage = assetRepository.findByCompany_IdAndParentAssetIsNull(user.getCompany().getId(),
-                    pageable);
+            // P-14b (D-3): the hierarchy leaves out the archived assets
+            Page<Asset> assetsPage = assetService.findActiveRoots(user.getCompany().getId(), pageable);
             return assetsPage.map(asset -> assetMapper.toShowDto(asset, assetService));
         }
         Optional<Asset> optionalAsset = assetService.findById(id);
         if (optionalAsset.isPresent()) {
             Asset savedAsset = optionalAsset.get();
             if (user.getRole().getViewPermissions().contains(PermissionEntity.ASSETS)) {
-                Page<Asset> assetsPage = assetService.findAssetChildren(id, pageable);
+                Page<Asset> assetsPage = assetService.findActiveChildren(id, pageable);
                 return assetsPage.map(asset -> assetMapper.toShowDto(asset, assetService));
             } else throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
 
@@ -280,10 +282,11 @@ public class AssetController {
             "by location ID. If not provided, returns all assets") Long locationId, HttpServletRequest req) {
         User user = userService.whoami(req);
         List<Asset> assets = new ArrayList<>();
+        // P-14b (E-4, PPB-09): a selector does not offer archived assets
         if (locationId == null) {
-            assets = assetService.findByCompany(user.getCompany().getId());
+            assets = assetService.findActiveByCompany(user.getCompany().getId());
         } else {
-            assets = assetService.findByLocation(locationId);
+            assets = assetService.findActiveByLocation(locationId);
         }
         return assets.stream().map(assetMapper::toMiniDto).collect(Collectors.toList());
     }
@@ -302,10 +305,11 @@ public class AssetController {
         RequestPortal requestPortal = requestPortalService.findByUuidByUser(portalUUID).get();
         if (requestPortal.getFields().stream().anyMatch(requestPortalField -> requestPortalField.getAsset() != null && requestPortalField.getType().equals(PortalFieldType.ASSET)))
             throw new CustomException("This portal is not configured to show assets", HttpStatus.FORBIDDEN);
+        // P-14b (E-4, PPB-09): a selector does not offer archived assets
         if (locationId == null) {
-            assets = assetService.findByCompany(requestPortal.getCompany().getId());
+            assets = assetService.findActiveByCompany(requestPortal.getCompany().getId());
         } else {
-            assets = assetService.findByLocation(locationId);
+            assets = assetService.findActiveByLocation(locationId);
         }
         return assets.stream().map(assetMapper::toMiniDto).collect(Collectors.toList());
     }

@@ -18,6 +18,16 @@ import java.util.Optional;
 public interface AssetRepository extends JpaRepository<Asset, Long>, JpaSpecificationExecutor<Asset> {
     List<Asset> findByCompany_Id(Long id);
 
+    List<Asset> findByCompany_IdAndArchivedFalse(Long id);
+
+    Page<Asset> findByCompany_IdAndParentAssetIsNullAndArchivedFalse(Long id, Pageable pageable);
+
+    Page<Asset> findByParentAsset_IdAndArchivedFalse(Long id, Pageable pageable);
+
+    Integer countByParentAsset_IdAndArchivedFalse(Long id);
+
+    List<Asset> findByLocation_IdAndArchivedFalse(Long id);
+
     List<Asset> findByCompany_Id(Long id, Sort sort);
 
     Page<Asset> findByCompany_IdAndParentAssetIsNull(Long id, Pageable pageable);

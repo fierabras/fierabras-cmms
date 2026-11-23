@@ -2,37 +2,53 @@ package com.grash.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.advancedsearch.SearchCriteria;
 import com.grash.exception.ConflictException;
-import com.grash.integration.support.FaultInjector;
 import com.grash.integration.support.FaultInjector.Operation;
-import com.grash.integration.support.TestApi;
+import com.grash.integration.support.FaultInjector;
 import com.grash.integration.support.TestApi.Response;
+import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestAssetRecords;
-import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
+import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Asset;
 import com.grash.model.Company;
+import com.grash.model.enums.Status;
 import com.grash.model.Meter;
+import com.grash.model.Request;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
-import com.grash.model.enums.Status;
 import com.grash.repository.RequestPortalRepository;
+import com.grash.repository.UserRepository;
+import com.grash.service.AssetService;
 import com.grash.service.RequestService;
+import com.grash.service.WorkOrderService;
+import com.grash.service.XlsxExportService;
+import com.grash.utils.CsvFileGenerator;
+import com.grash.utils.Helper;
+import com.grash.utils.XlsxTestUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.context.MessageSource;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.StreamSupport;
 
@@ -61,13 +77,31 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
     private final TransactionTemplate transaction;
     private final RequestService requestService;
     private final RequestPortalRepository requestPortalRepository;
+    private final CsvFileGenerator csvFileGenerator;
+    private final AssetService assetService;
+    private final XlsxExportService xlsxExportService;
+    private final WorkOrderService workOrderService;
+    private final UserRepository userRepository;
+    private final MessageSource messageSource;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     AssetArchivingIntegrationTest(TestOrganizations organizations, TestRecords records, TestAssetRecords module,
                                   MockMvc mockMvc, ObjectMapper objectMapper, JdbcTemplate jdbc,
                                   TransactionTemplate transaction, RequestService requestService,
-                                  RequestPortalRepository requestPortalRepository) {
+                                  RequestPortalRepository requestPortalRepository,
+                                  CsvFileGenerator csvFileGenerator,
+                                  AssetService assetService,
+                                  XlsxExportService xlsxExportService,
+                                  WorkOrderService workOrderService,
+                                  UserRepository userRepository,
+                                  MessageSource messageSource) {
+        this.csvFileGenerator = csvFileGenerator;
+        this.assetService = assetService;
+        this.xlsxExportService = xlsxExportService;
+        this.workOrderService = workOrderService;
+        this.userRepository = userRepository;
+        this.messageSource = messageSource;
         this.transaction = transaction;
         this.requestService = requestService;
         this.requestPortalRepository = requestPortalRepository;
@@ -493,7 +527,7 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
 
             // the test profile requires a reCAPTCHA token on the portal endpoint (application-test.yml), so the
             // request goes straight to the service the endpoint calls, as INC-02 does
-            com.grash.model.Request request = new com.grash.model.Request();
+            Request request = new Request();
             request.setTitle("P-14b portal");
             ConflictException conflict = assertThrows(ConflictException.class, () -> transaction.executeWithoutResult(
                     status -> requestService.create(request, company,
@@ -687,6 +721,183 @@ class AssetArchivingIntegrationTest extends AbstractIntegrationTest {
             archive(active);
             Response keep = send(patch("/request-portals/" + id), portal + ref(active) + "}]}", data.o1().admin());
             assertEquals(200, keep.status(), keep.toString());
+        }
+    }
+
+    // =====================================================================================================
+    // B3 · E-4: visibility on the server (CA-PPB-027, 028; D-3; C-2)
+    // =====================================================================================================
+
+    private List<Long> searched(String body, User user) {
+        Response response = send(post("/assets/search"), body, user);
+        assertEquals(200, response.status(), response.toString());
+        return ids(json(response).get("content"));
+    }
+
+    private List<Long> listed(MockHttpServletRequestBuilder request, User user) {
+        Response response = call(request, user);
+        assertEquals(200, response.status(), response.toString());
+        JsonNode body = json(response);
+        return ids(body.isArray() ? body : body.get("content"));
+    }
+
+    @Nested
+    class Visibility {
+
+        @Test
+        void ca027_defaultListAndSelector_onlyTheActive_withTheFilter_theArchived() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset x7 = records.asset(company);
+            Asset x8 = archivedAsset(company);
+            User admin = data.o1().admin();
+
+            List<Long> byDefault = searched("{\"pageSize\":100}", admin);
+            List<Long> selector = listed(get("/assets/mini"), admin);
+            List<Long> filtered = searched("{\"pageSize\":100,\"filterFields\":[{\"field\":\"archived\","
+                    + "\"operation\":\"eq\",\"value\":true}]}", admin);
+            List<Long> notArchived = searched("{\"pageSize\":100,\"filterFields\":[{\"field\":\"archived\","
+                    + "\"operation\":\"eq\",\"value\":false}]}", admin);
+
+            assertAll(
+                    () -> assertTrue(byDefault.contains(x7.getId())),
+                    () -> assertFalse(byDefault.contains(x8.getId())),
+                    () -> assertTrue(selector.contains(x7.getId())),
+                    () -> assertFalse(selector.contains(x8.getId())),
+                    () -> assertTrue(filtered.contains(x8.getId())),
+                    () -> assertFalse(filtered.contains(x7.getId())),
+                    () -> assertEquals(byDefault, notArchived));
+        }
+
+        @Test
+        void selectorsByLocation_andOfThePortal_excludeTheArchived() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            var location = records.location(company);
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            jdbc.update("UPDATE asset SET location_id = ? WHERE id IN (?, ?)", location.getId(), active.getId(),
+                    archived.getId());
+            var portal = records.portalCiting(company, location, null);
+
+            List<Long> byLocation = listed(get("/assets/mini").param("locationId", location.getId().toString()),
+                    data.o1().admin());
+            Response publicMini = api.call(get("/assets/public/mini/" + portal.getUuid()), null);
+            Response publicByLocation = api.call(get("/assets/public/mini/" + portal.getUuid())
+                    .param("locationId", location.getId().toString()), null);
+            Response detailOfLocation = call(get("/assets/location/" + location.getId()), data.o1().admin());
+
+            assertEquals(List.of(active.getId()), byLocation);
+            assertEquals(200, publicMini.status(), publicMini.toString());
+            assertTrue(ids(json(publicMini)).contains(active.getId()));
+            assertFalse(ids(json(publicMini)).contains(archived.getId()));
+            assertEquals(List.of(active.getId()), ids(json(publicByLocation)));
+            assertEquals(List.of(active.getId()), ids(json(detailOfLocation)));
+        }
+
+        @Test
+        void d3_hierarchy_excludesTheArchived_hasChildrenCountsTheActive() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            User admin = data.o1().admin();
+            Asset root = records.asset(company);
+            Asset archivedRoot = archivedAsset(company);
+            Asset activeChild = records.asset(company);
+            Asset archivedChild = archivedAsset(company);
+            Asset onlyArchivedChildren = records.asset(company);
+            Asset hiddenChild = archivedAsset(company);
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id IN (?, ?)", root.getId(), activeChild.getId(),
+                    archivedChild.getId());
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", onlyArchivedChildren.getId(),
+                    hiddenChild.getId());
+
+            List<Long> roots = listed(get("/assets/children/0/paginated").param("size", "100"), admin);
+            List<Long> rootsDeprecated = listed(get("/assets/children/0"), admin);
+            List<Long> children = listed(get("/assets/children/" + root.getId() + "/paginated"), admin);
+            List<Long> childrenDeprecated = listed(get("/assets/children/" + root.getId()), admin);
+            Response withActiveChild = call(get("/assets/" + root.getId()), admin);
+            Response withArchivedChild = call(get("/assets/" + onlyArchivedChildren.getId()), admin);
+
+            assertAll(
+                    () -> assertTrue(roots.contains(root.getId())),
+                    () -> assertFalse(roots.contains(archivedRoot.getId())),
+                    () -> assertTrue(rootsDeprecated.contains(root.getId())),
+                    () -> assertFalse(rootsDeprecated.contains(archivedRoot.getId())),
+                    () -> assertEquals(List.of(activeChild.getId()), children),
+                    () -> assertEquals(List.of(activeChild.getId()), childrenDeprecated),
+                    () -> assertTrue(json(withActiveChild).get("hasChildren").asBoolean()),
+                    () -> assertFalse(json(withArchivedChild).get("hasChildren").asBoolean()));
+        }
+
+        @Test
+        void d3_assetsOfAPart_excludeTheArchived() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            var part = records.part(company, null);
+            Asset active = records.asset(company);
+            Asset archived = archivedAsset(company);
+            jdbc.update("INSERT INTO t_asset_part_associations (id_asset, id_part) VALUES (?, ?), (?, ?)",
+                    active.getId(), part.getId(), archived.getId(), part.getId());
+
+            assertEquals(List.of(active.getId()), listed(get("/assets/part/" + part.getId()), data.o1().admin()));
+        }
+
+        @Test
+        void c2_activeChildOfAnArchivedParent_isSearchedAndReadById() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset parent = archivedAsset(company);
+            Asset child = records.asset(company);
+            jdbc.update("UPDATE asset SET parent_asset_id = ? WHERE id = ?", parent.getId(), child.getId());
+
+            List<Long> byDefault = searched("{\"pageSize\":100}", data.o1().admin());
+            Response detail = call(get("/assets/" + child.getId()), data.o1().admin());
+
+            assertTrue(byDefault.contains(child.getId()));
+            assertEquals(200, detail.status(), detail.toString());
+            assertEquals(parent.getId(), json(detail).get("parentAsset").get("id").asLong());
+        }
+
+        @Test
+        void ca028_archived_detailHistoryAndBothExports_withTheirState() throws Exception {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset x8 = archivedAsset(company);
+            WorkOrder w6 = records.workOrder(company, x8, Status.COMPLETE, false);
+            User admin = data.o1().admin();
+
+            Response detail = call(get("/assets/" + x8.getId()), admin);
+            List<Long> history = listed(get("/work-orders/asset/" + x8.getId()), admin);
+            String assets = transaction.execute(status -> {
+                StringWriter writer = new StringWriter();
+                csvFileGenerator.writeAssetsToCsv(assetService.findByCompanyForExport(company.getId(),
+                                PageRequest.of(0, 100)).getContent(), writer,
+                        Locale.ENGLISH, ",", true);
+                return writer.toString();
+            });
+            byte[] workOrders = transaction.execute(status -> {
+                User current = userRepository.findById(admin.getId()).orElseThrow();
+                Helper.setCurrentUser(current);
+                try {
+                    return xlsxExportService.exportWorkOrders(current, workOrderService.getSearchCriteria(current,
+                            new SearchCriteria()));
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+            SecurityContextHolder.clearContext();
+            String archivedText = Helper.getStringFromBoolean(true, messageSource,
+                    Locale.ENGLISH);
+            List<List<String>> workOrderRows = XlsxTestUtils.readText(workOrders, 1);
+
+            assertAll(
+                    () -> assertEquals(200, detail.status(), detail.toString()),
+                    () -> assertTrue(json(detail).get("archived").asBoolean()),
+                    () -> assertTrue(history.contains(w6.getId())),
+                    () -> assertTrue(assets.lines().anyMatch(line -> line.startsWith(x8.getId() + ",")
+                            && line.contains("," + archivedText + ",")), assets),
+                    () -> assertTrue(workOrderRows.stream().anyMatch(row -> row.get(0).equals(
+                            String.valueOf(w6.getId()))), workOrderRows.toString()));
         }
     }
 }

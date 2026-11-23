@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.advancedsearch.FilterField;
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.advancedsearch.SpecificationBuilder;
 import com.grash.dto.AssetPatchDTO;
@@ -284,6 +285,26 @@ public class AssetService {
         return assetRepository.findByCompany_IdAndParentAssetIsNull(id, pageable).toList();
     }
 
+    /**
+     * P-14b (E-4, D-3, PPB-09): the assets that the selectors and the operational lists offer leave out the archived
+     * ones; the detail by id, the history and the exports keep them.
+     */
+    public List<Asset> findActiveByCompany(Long companyId) {
+        return assetRepository.findByCompany_IdAndArchivedFalse(companyId);
+    }
+
+    public List<Asset> findActiveByLocation(Long locationId) {
+        return assetRepository.findByLocation_IdAndArchivedFalse(locationId);
+    }
+
+    public Page<Asset> findActiveRoots(Long companyId, Pageable pageable) {
+        return assetRepository.findByCompany_IdAndParentAssetIsNullAndArchivedFalse(companyId, pageable);
+    }
+
+    public Page<Asset> findActiveChildren(Long id, Pageable pageable) {
+        return assetRepository.findByParentAsset_IdAndArchivedFalse(id, pageable);
+    }
+
 
     public List<Asset> findByCompanyAndBefore(Long id, Date date) {
         return assetRepository.findByCompany_IdAndCreatedAtBefore(id, date);
@@ -396,6 +417,10 @@ public class AssetService {
     }
 
     public Page<AssetShowDTO> findBySearchCriteria(SearchCriteria searchCriteria) {
+        // P-14b (E-4, PPB-09): without a filter on archived, the archived assets are left out
+        if (searchCriteria.getFilterFields().stream().noneMatch(filter -> "archived".equals(filter.getField())))
+            searchCriteria.getFilterFields().add(FilterField.builder().field("archived").operation("eq").value(false)
+                    .values(new ArrayList<>()).build());
         SpecificationBuilder<Asset> builder = new SpecificationBuilder<>();
         searchCriteria.getFilterFields().forEach(builder::with);
         Pageable page = PageRequest.of(searchCriteria.getPageNum(), searchCriteria.getPageSize(),
@@ -571,8 +596,11 @@ public class AssetService {
     }
 
 
+    /**
+     * P-14b (D-3): whether the hierarchy shows children under the asset; archived children are not shown.
+     */
     public Boolean hasChildren(Long assetId) {
-        return assetRepository.countByParentAsset_Id(assetId) > 0;
+        return assetRepository.countByParentAsset_IdAndArchivedFalse(assetId) > 0;
     }
 
     public long getMTBF(Long assetId, Date start, Date end) {

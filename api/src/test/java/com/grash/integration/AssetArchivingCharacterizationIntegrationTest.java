@@ -512,7 +512,7 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
     class Listings {
 
         @Test
-        void searchWithoutFilters_miniAndHierarchy_includeTheArchivedAsset() {
+        void searchWithoutFilters_miniAndHierarchy_leaveOutTheArchivedAsset() {
             CommonData data = data();
             Company company = data.o1().company();
             Asset active = records.asset(company);
@@ -525,10 +525,13 @@ class AssetArchivingCharacterizationIntegrationTest extends AbstractIntegrationT
             assertEquals(200, search.status(), search.toString());
             assertEquals(200, mini.status(), mini.toString());
             assertEquals(200, roots.status(), roots.toString());
-            // before P-14b: only the client excludes it
-            assertTrue(ids(json(search).get("content")).containsAll(List.of(active.getId(), archived.getId())));
-            assertTrue(ids(json(mini)).containsAll(List.of(active.getId(), archived.getId())));
-            assertTrue(ids(json(roots).get("content")).containsAll(List.of(active.getId(), archived.getId())));
+            // P-14b (E-4, D-3): before, the three included it and only the client left it out
+            assertTrue(ids(json(search).get("content")).contains(active.getId()));
+            assertFalse(ids(json(search).get("content")).contains(archived.getId()));
+            assertTrue(ids(json(mini)).contains(active.getId()));
+            assertFalse(ids(json(mini)).contains(archived.getId()));
+            assertTrue(ids(json(roots).get("content")).contains(active.getId()));
+            assertFalse(ids(json(roots).get("content")).contains(archived.getId()));
         }
 
         @Test
