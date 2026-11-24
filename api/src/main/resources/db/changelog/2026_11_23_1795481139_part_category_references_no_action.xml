@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-16 (PPB-02, PPB-21, PPB-22, C-03): a part category used by a part is not deleted. Until now deleting the
+         category deleted its parts, their lines and their movements in cascade. The reference becomes NO ACTION and
+         gets an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_23_1795481139_part_category_references_no_action_part_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="part" constraintName="fk_part_category"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="part"
+                                 constraintName="fk_part_category" referencedColumnNames="id"
+                                 referencedTableName="part_category" onDelete="NO ACTION"/>
+        <createIndex tableName="part" indexName="idx_part_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part" indexName="idx_part_category_id"/>
+            <dropForeignKeyConstraint baseTableName="part" constraintName="fk_part_category"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="part"
+                                     constraintName="fk_part_category" referencedColumnNames="id"
+                                     referencedTableName="part_category" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

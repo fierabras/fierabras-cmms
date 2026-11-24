@@ -28,6 +28,7 @@ import PartQuantity from 'src/models/owns/partQuantity';
 import ClearTwoToneIcon from '@mui/icons-material/ClearTwoTone';
 import CheckTwoToneIcon from '@mui/icons-material/CheckTwoTone';
 import { respondPurchaseOrder } from '../../../slices/purchaseOrder';
+import { conflictMessage } from '../../../utils/conflicts';
 import BasicField from '../components/BasicField';
 
 interface PurchaseOrderDetailsProps {
@@ -70,18 +71,20 @@ export default function PurchaseOrderDetails(props: PurchaseOrderDetailsProps) {
     () => debounce(onPartQuantityChange, 1500),
     []
   );
+  const onRespondFailure = (err) =>
+    showSnackBar(conflictMessage(err, t, t('po_respond_failure')), 'error');
   const onApprove = () => {
     setApproving(true);
-    dispatch(respondPurchaseOrder(purchaseOrder.id, true)).finally(() =>
-      setApproving(false)
-    );
+    dispatch(respondPurchaseOrder(purchaseOrder.id, true))
+      .catch(onRespondFailure)
+      .finally(() => setApproving(false));
   };
 
   const onCancel = () => {
     setCancelling(true);
-    dispatch(respondPurchaseOrder(purchaseOrder.id, false)).finally(() =>
-      setCancelling(false)
-    );
+    dispatch(respondPurchaseOrder(purchaseOrder.id, false))
+      .catch(onRespondFailure)
+      .finally(() => setCancelling(false));
   };
   const detailsFieldsToRender = (
     purchaseOrder1: PurchaseOrder
@@ -203,14 +206,15 @@ export default function PurchaseOrderDetails(props: PurchaseOrderDetailsProps) {
               <EditTwoToneIcon color="primary" />
             </IconButton>
           )}
-          {hasDeletePermission(
-            PermissionEntity.PURCHASE_ORDERS,
-            purchaseOrder
-          ) && (
-            <IconButton onClick={handleDelete}>
-              <DeleteTwoToneIcon color="error" />
-            </IconButton>
-          )}
+          {purchaseOrder.status === 'PENDING' &&
+            hasDeletePermission(
+              PermissionEntity.PURCHASE_ORDERS,
+              purchaseOrder
+            ) && (
+              <IconButton onClick={handleDelete}>
+                <DeleteTwoToneIcon color="error" />
+              </IconButton>
+            )}
         </Box>
       </Grid>
       <Divider />

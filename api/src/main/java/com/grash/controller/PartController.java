@@ -33,7 +33,9 @@ import jakarta.persistence.EntityManager;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -89,6 +91,9 @@ public class PartController {
                        HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.PARTS_AND_MULTIPARTS)) {
+            // P-16 (E-10, PPB-08, D-P16-10): the assigned users are of the organization and active
+            userService.rejectForeign(partReq.getAssignedTo(), user.getCompany().getId());
+            userService.rejectRetired(List.of(), partReq.getAssignedTo());
             if (partReq.getBarcode() != null) {
                 Optional<Part> optionalPartWithSameBarCode = partService.findByBarcodeAndCompany(partReq.getBarcode()
                         , user.getCompany().getId());
@@ -129,8 +134,12 @@ public class PartController {
 
         if (optionalPart.isPresent()) {
             Part savedPart = optionalPart.get();
+            List<User> previousUsers = new ArrayList<>(savedPart.getAssignedTo());
             em.detach(savedPart);
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.PARTS_AND_MULTIPARTS) || user.getId().equals(savedPart.getCreatedBy())) {
+                // P-16 (E-10, PPB-08, D-P16-10): the assigned users are of the organization; the new ones are active
+                userService.rejectForeign(part.getAssignedTo(), user.getCompany().getId());
+                userService.rejectRetired(previousUsers, part.getAssignedTo());
                 if (part.getBarcode() != null) {
                     Optional<Part> optionalPartWithSameBarCode =
                             partService.findByBarcodeAndCompany(part.getBarcode(), user.getCompany().getId());

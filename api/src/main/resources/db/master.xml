@@ -265,4 +265,10 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_22_1795384003_meter_trigger_custom_field_values_cascade.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_23_1795481139_part_category_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_23_1795481140_part_references_no_action.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

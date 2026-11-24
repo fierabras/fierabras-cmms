@@ -55,6 +55,7 @@ import { CustomFieldEntityType } from '../../../models/owns/customField';
 import { getCustomFieldsIFields, getCustomFieldsRequiredShape } from '../type';
 import { formatCustomFields } from '../../../utils/formatters';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext';
 
 interface PropsType {
@@ -155,7 +156,7 @@ const Vendors = ({ openModal, handleCloseModal }: PropsType) => {
     showSnackBar(t('vendor_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('vendor_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('vendor_delete_failure')), 'error');
 
   const handleOpenModal = (vendor: Vendor) => {
     setCurrentVendor(vendor);

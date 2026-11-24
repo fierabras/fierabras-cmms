@@ -70,6 +70,7 @@ import { createColumnHelper } from '@tanstack/react-table';
 import useTableState from '../../../hooks/useTableState';
 import { CategoryMiniDTO } from '../../../models/owns/category';
 import { getErrorMessage } from '../../../utils/api';
+import { conflictMessage } from '../../../utils/conflicts';
 import { getPartUrl } from '../../../utils/urlPaths';
 import { getCustomFields } from '../../../slices/customField';
 import { CustomFieldEntityType } from '../../../models/owns/customField';
@@ -214,7 +215,7 @@ const Parts = ({ setAction }: PropsType) => {
     showSnackBar(t('part_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('part_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('part_delete_failure')), 'error');
   useEffect(() => {
     const handleOpenModal = () => setOpenAddModal(true);
     setAction(() => handleOpenModal);

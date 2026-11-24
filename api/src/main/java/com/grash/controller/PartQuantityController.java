@@ -134,13 +134,23 @@ public class PartQuantityController {
 
             Collection<Long> partQuantitiesReqMappedPartIds = partQuantitiesReq.stream().map
                     (partQuantity -> partQuantity.getPart().getId()).collect(Collectors.toList());
+            // P-16 (E-7, C-2): a closed purchase order is checked only when a line is added, removed or changed, and
+            // before anything is written; the same lines are answered without writing
+            boolean changesLines = !savedPartQuantitiesMappedPartIds.containsAll(partQuantitiesReqMappedPartIds)
+                    || !partQuantitiesReqMappedPartIds.containsAll(savedPartQuantitiesMappedPartIds)
+                    || partQuantitiesReq.stream().anyMatch(partQuantityReq -> savedPartQuantities.stream()
+                    .anyMatch(partQuantity -> partQuantity.getPart().getId().equals(partQuantityReq.getPart().getId())
+                            && partQuantity.getQuantity() != partQuantityReq.getQuantity()));
+            if (changesLines) PurchaseOrderStateGuard.check(savedPurchaseOrder);
             partQuantitiesReq.forEach(partQuantityReq -> {
                 if (savedPartQuantitiesMappedPartIds.contains(partQuantityReq.getPart().getId())) {
                     //existing parts
                     PartQuantity savedPartQuantity =
                             savedPartQuantities.stream().filter(partQuantity -> partQuantity.getPart().getId().equals(partQuantityReq.getPart().getId())).findFirst().get();
-                    savedPartQuantity.setQuantity(partQuantityReq.getQuantity());
-                    partQuantityService.save(savedPartQuantity);
+                    if (savedPartQuantity.getQuantity() != partQuantityReq.getQuantity()) {
+                        savedPartQuantity.setQuantity(partQuantityReq.getQuantity());
+                        partQuantityService.save(savedPartQuantity);
+                    }
                 } else {
                     //new Parts
                     Optional<Part> optionalPart = partService.findById(partQuantityReq.getPart().getId());
@@ -155,7 +165,7 @@ public class PartQuantityController {
             savedPartQuantitiesMappedPartIds.forEach(partId -> {
                 if (!partQuantitiesReqMappedPartIds.contains(partId)) {
                     partQuantityService.delete(savedPartQuantities.stream().filter(partQuantity ->
-                            partQuantity.getPart().getId().equals(partId)).findFirst().get().getId());
+                            partQuantity.getPart().getId().equals(partId)).findFirst().get(), user);
                 }
             });
             return partQuantityService.findByPurchaseOrder(id).stream().map(partQuantityMapper::toShowDto).collect(Collectors.toList());
@@ -184,6 +194,10 @@ public class PartQuantityController {
             WorkOrderStateGuard.check(workOrderService.findById(partQuantityReq.getWorkOrder().getId())
                             .orElseThrow(() -> new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND)),
                     WorkOrderStateGuard.Change.CHILD);
+        // P-16 (E-7): a line is not added to an approved or rejected purchase order
+        if (partQuantityReq.getPurchaseOrder() != null)
+            PurchaseOrderStateGuard.check(purchaseOrderService.findById(partQuantityReq.getPurchaseOrder().getId())
+                    .orElseThrow(() -> new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND)));
         PartQuantity savedPartQuantity = partQuantityService.create(partQuantityReq);
         return partQuantityMapper.toShowDto(savedPartQuantity);
     }
@@ -200,6 +214,9 @@ public class PartQuantityController {
             if (savedPartQuantity.getPart().getUnit() == null) {
                 partQuantity.setQuantity((int) partQuantity.getQuantity());
             }
+            // P-16 (E-7): the line of an approved or rejected purchase order does not change
+            if (savedPartQuantity.getPurchaseOrder() != null)
+                PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
             if (savedPartQuantity.getWorkOrder() != null) {
                 // P-12 (E-4): the consumption of a closed or archived work order does not change
                 WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
@@ -231,6 +248,9 @@ public class PartQuantityController {
                             -savedPartQuantity.getQuantity(),
                             savedPartQuantity.getWorkOrder(), Helper.getLocale(user), true);
                 }
+                // P-16 (E-7): the line of an approved or rejected purchase order is not removed
+                if (savedPartQuantity.getPurchaseOrder() != null)
+                    PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
                 partQuantityService.delete(savedPartQuantity, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);

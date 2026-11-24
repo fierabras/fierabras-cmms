@@ -5,10 +5,13 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.PurchaseOrderCategoryMapper;
 import com.grash.model.PurchaseOrderCategory;
 import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.PurchaseOrderCategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -20,6 +23,11 @@ public class PurchaseOrderCategoryService {
 
     private final CompanySettingsService companySettingsService;
     private final PurchaseOrderCategoryMapper purchaseOrderCategoryMapper;
+    private final DeletionService deletionService;
+
+    public static final String PURCHASE_ORDER_CATEGORY_IN_USE = "PURCHASE_ORDER_CATEGORY_IN_USE";
+    private static final String PURCHASE_ORDER_CATEGORY_IN_USE_MESSAGE = "This purchase order category is used by "
+            + "other records and cannot be deleted";
 
     public PurchaseOrderCategory create(PurchaseOrderCategory purchaseOrderCategory, User user) {
         Optional<PurchaseOrderCategory> categoryWithSameName =
@@ -42,8 +50,23 @@ public class PurchaseOrderCategoryService {
         return purchaseOrderCategoryRepository.findAll();
     }
 
-    public void delete(Long id) {
-        purchaseOrderCategoryRepository.deleteById(id);
+    /**
+     * P-16 (PPB-02, PPB-23): deletes the category and records it in the audit log, in one transaction. A category
+     * used by a purchase order or a workflow is not deleted: 409 PURCHASE_ORDER_CATEGORY_IN_USE.
+     */
+    @Transactional
+    public void delete(PurchaseOrderCategory category, User actor) {
+        Long id = category.getId();
+        deletionService.delete(new AuditTarget(EntityType.PURCHASE_ORDER_CATEGORY, id, null, category.getName(),
+                        category.getCompanySettings().getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(PURCHASE_ORDER_CATEGORY_IN_USE, PURCHASE_ORDER_CATEGORY_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.PURCHASE_ORDER,
+                                () -> deletionService.isCited("purchase_order", "category_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "purchase_order_category_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "purchase_order_category_id", id)),
+                () -> purchaseOrderCategoryRepository.deleteById(id));
     }
 
     public Optional<PurchaseOrderCategory> findById(Long id) {

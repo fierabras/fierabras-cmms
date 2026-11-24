@@ -52,6 +52,7 @@ import {
 import Category from '../../../models/owns/category';
 import { SearchCriteria } from '../../../models/owns/page';
 import { onSearchQueryChange } from '../../../utils/overall';
+import { conflictMessage } from '../../../utils/conflicts';
 import SearchInput from '../components/SearchInput';
 import { getCustomFields } from '../../../slices/customField';
 import { CustomFieldEntityType } from '../../../models/owns/customField';
@@ -200,7 +201,7 @@ function PurchaseOrders() {
     showSnackBar(t('po_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('po_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('po_delete_failure')), 'error');
   const columns: GridEnrichedColDef[] = [
     {
       field: 'id',
@@ -477,7 +478,12 @@ function PurchaseOrders() {
       >
         <Box>
           <Form
-            fields={fields}
+            fields={
+              // P-16: the lines of an approved or rejected purchase order do not change
+              currentPurchaseOrder?.status === 'PENDING'
+                ? fields
+                : fields.filter((field) => field.name !== 'partQuantities')
+            }
             validation={Yup.object().shape(shape)}
             submitText={t('save')}
             values={{
@@ -504,6 +510,7 @@ function PurchaseOrders() {
               return new Promise<void>((resolve, rej) => {
                 dispatch(editPurchaseOrder(currentPurchaseOrder.id, values))
                   .then(() => {
+                    if (currentPurchaseOrder.status !== 'PENDING') return;
                     dispatch(
                       editPOPartQuantities(
                         currentPurchaseOrder.id,

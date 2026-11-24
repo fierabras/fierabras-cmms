@@ -24,7 +24,12 @@ const conflictKeys: Record<string, string> = {
   ASSET_CATEGORY_IN_USE: 'asset_category_in_use',
   METER_CATEGORY_IN_USE: 'meter_category_in_use',
   HISTORY_IMMUTABLE: 'history_immutable',
-  ASSET_RETIRED: 'asset_retired'
+  ASSET_RETIRED: 'asset_retired',
+  PART_IN_USE: 'part_in_use',
+  PART_CATEGORY_IN_USE: 'part_category_in_use',
+  PURCHASE_ORDER_CATEGORY_IN_USE: 'purchase_order_category_in_use',
+  VENDOR_IN_USE: 'vendor_in_use',
+  PURCHASE_ORDER_CLOSED: 'purchase_order_closed'
 };
 
 /**

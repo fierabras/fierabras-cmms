@@ -15,6 +15,7 @@ import com.grash.model.enums.webhook.PartField;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.service.*;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,6 +26,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -99,6 +101,8 @@ public class PurchaseOrderController {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.PURCHASE_ORDERS)
                 && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.PURCHASE_ORDER)) {
+            // P-16 (D-P16-5): a purchase order is born pending; it is closed only by answering it
+            purchaseOrderReq.setStatus(ApprovalStatus.PENDING);
             PurchaseOrder savedPurchaseOrder = purchaseOrderService.create(purchaseOrderReq);
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.PURCHASE_ORDER_CREATED,
@@ -152,51 +156,57 @@ public class PurchaseOrderController {
         } else throw new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16 (PPB-05, D-1): answers a pending purchase order in one transaction, with the purchase order locked. An
+     * approved or rejected purchase order is not answered again: 409 PURCHASE_ORDER_CLOSED.
+     */
     @PatchMapping("/{id}/respond")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public PurchaseOrderShowDTO respond(@Parameter(description = "Whether the purchase order is approved") @RequestParam("approved") boolean approved, @PathVariable("id") Long id,
                                         HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findById(id);
+        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findByIdForUpdate(id);
 
         if (optionalPurchaseOrder.isPresent()) {
             PurchaseOrder savedPurchaseOrder = optionalPurchaseOrder.get();
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.PURCHASE_ORDERS)) {
-                if (!savedPurchaseOrder.getStatus().equals(ApprovalStatus.APPROVED)) {
-                    if (approved) {
-                        Collection<PartQuantity> partQuantities =
-                                partQuantityService.findByPurchaseOrder(savedPurchaseOrder.getId());
-                        partQuantities.forEach(partQuantity -> {
-                            Part part = partQuantity.getPart();
-                            double previousQuantity = part.getQuantity();
-                            part.setQuantity(part.getQuantity() + partQuantity.getQuantity());
-                            partService.save(part);
+                PurchaseOrderStateGuard.check(savedPurchaseOrder);
+                if (approved) {
+                    Collection<PartQuantity> partQuantities =
+                            partQuantityService.findByPurchaseOrder(savedPurchaseOrder.getId());
+                    partQuantities.forEach(partQuantity -> {
+                        Part part = partQuantity.getPart();
+                        double previousQuantity = part.getQuantity();
+                        part.setQuantity(part.getQuantity() + partQuantity.getQuantity());
+                        partService.save(part);
 
-                            // Dispatch webhook for part quantity change from purchase order
-                            dispatchPartQuantityChangeWebhook(part, previousQuantity, part.getQuantity(),
-                                    partQuantity, savedPurchaseOrder, user.getCompany());
-                        });
-                    }
-                    savedPurchaseOrder.setStatus(approved ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED);
-                    return setPartQuantities(purchaseOrderMapper.toShowDto(purchaseOrderService.save(savedPurchaseOrder)));
-                } else
-                    throw new CustomException("The purchase order has already been approved",
-                            HttpStatus.NOT_ACCEPTABLE);
+                        // Dispatch webhook for part quantity change from purchase order, once it is committed
+                        AfterCommit.run(() -> dispatchPartQuantityChangeWebhook(part, previousQuantity,
+                                part.getQuantity(), partQuantity, savedPurchaseOrder, user.getCompany()));
+                    });
+                }
+                savedPurchaseOrder.setStatus(approved ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED);
+                return setPartQuantities(purchaseOrderMapper.toShowDto(purchaseOrderService.save(savedPurchaseOrder)));
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16 (PPB-05): deletes a pending purchase order, with the purchase order locked (see {@link #respond}).
+     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public ResponseEntity delete(@PathVariable("id") Long id, HttpServletRequest req) {
         User user = userService.whoami(req);
 
-        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findById(id);
+        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findByIdForUpdate(id);
         if (optionalPurchaseOrder.isPresent()) {
             PurchaseOrder savedPurchaseOrder = optionalPurchaseOrder.get();
             if (user.getId().equals(savedPurchaseOrder.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.PURCHASE_ORDERS)) {
-                purchaseOrderService.delete(id);
+                purchaseOrderService.delete(savedPurchaseOrder, user);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

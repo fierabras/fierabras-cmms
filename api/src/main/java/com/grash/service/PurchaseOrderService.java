@@ -7,6 +7,9 @@ import com.grash.dto.PurchaseOrderShowDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.PurchaseOrderMapper;
 import com.grash.model.PurchaseOrder;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.PurchaseOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -14,6 +17,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.EntityManager;
@@ -28,6 +32,7 @@ public class PurchaseOrderService {
     private final PurchaseOrderMapper purchaseOrderMapper;
     private final CompanyService companyService;
     private final EntityManager em;
+    private final DeletionService deletionService;
 
     @Transactional
     public PurchaseOrder create(PurchaseOrder purchaseOrder) {
@@ -52,12 +57,30 @@ public class PurchaseOrderService {
         return purchaseOrderRepository.findAll();
     }
 
-    public void delete(Long id) {
-        purchaseOrderRepository.deleteById(id);
+    /**
+     * P-16 (PPB-05, PPB-23): deletes a pending purchase order with its lines and records it in the audit log, in one
+     * transaction. An approved or rejected purchase order is not deleted: 409 PURCHASE_ORDER_CLOSED.
+     */
+    @Transactional
+    public void delete(PurchaseOrder purchaseOrder, User actor) {
+        PurchaseOrderStateGuard.check(purchaseOrder);
+        Long id = purchaseOrder.getId();
+        deletionService.delete(new AuditTarget(EntityType.PURCHASE_ORDER, id, null, purchaseOrder.getName(),
+                        purchaseOrder.getCompany().getId()), actor, AuditSource.API, null,
+                () -> purchaseOrderRepository.deleteById(id));
     }
 
     public Optional<PurchaseOrder> findById(Long id) {
         return purchaseOrderRepository.findById(id);
+    }
+
+    /**
+     * P-16 (R-1, R-2): the purchase order to answer or delete, locked until the transaction ends. A concurrent answer
+     * or deletion of the same purchase order waits, then reads it answered or finds it gone.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<PurchaseOrder> findByIdForUpdate(Long id) {
+        return purchaseOrderRepository.findByIdForUpdate(id);
     }
 
     public Collection<PurchaseOrder> findByCompany(Long id) {
