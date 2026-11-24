@@ -10,7 +10,10 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.VendorMapper;
 import com.grash.model.Vendor;
 import com.grash.model.Company;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.VendorRepository;
 import com.grash.service.CustomFieldValueService;
@@ -20,6 +23,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -37,6 +41,10 @@ public class VendorService {
     private final LicenseService licenseService;
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
+    private final DeletionService deletionService;
+
+    public static final String VENDOR_IN_USE = "VENDOR_IN_USE";
+    private static final String VENDOR_IN_USE_MESSAGE = "This vendor is used by other records and cannot be deleted";
 
     public Vendor create(Vendor vendor, Company company) {
         if (!licenseService.hasEntitlement(LicenseEntitlement.CUSTOMER_VENDOR))
@@ -81,8 +89,24 @@ public class VendorService {
         return vendorRepository.findAll();
     }
 
-    public void delete(Long id) {
-        vendorRepository.deleteById(id);
+    /**
+     * P-16 (PPB-02, PPB-23): deletes the vendor and records it in the audit log, in one transaction. A vendor cited
+     * by a purchase order or a workflow, or linked to an archived asset, is not deleted: 409 VENDOR_IN_USE.
+     */
+    @Transactional
+    public void delete(Vendor vendor, User actor) {
+        Long id = vendor.getId();
+        deletionService.delete(new AuditTarget(EntityType.VENDOR, id, null, vendor.getName(),
+                        vendor.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(VENDOR_IN_USE, VENDOR_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.PURCHASE_ORDER,
+                                () -> deletionService.isCited("purchase_order", "vendor_id", id))
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "vendor_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "vendor_id", id))
+                        .blockedBy(EntityType.ASSET, () -> vendorRepository.isOnArchivedAsset(id)),
+                () -> vendorRepository.deleteById(id));
     }
 
     public Optional<Vendor> findById(Long id) {

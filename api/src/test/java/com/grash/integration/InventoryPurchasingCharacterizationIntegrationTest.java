@@ -590,7 +590,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class PurchaseOrderCategoryDeletion {
 
         @Test
-        void usedByAPurchaseOrder_200_referenceSetToNull() {
+        void usedByAPurchaseOrder_409_referenceKept() {
+            // before P-16: 200, the reference set to null
             CommonData data = data();
             Company company = data.o1().company();
             PurchaseOrderCategory category = purchaseOrderCategory(company);
@@ -600,14 +601,15 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/purchase-order-categories/" + category.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
+            assertEquals(409, response.status(), response.toString());
             assertEquals(1, rows("purchase_order", purchaseOrder.getId()));
-            assertNull(reference("purchase_order", "category_id", purchaseOrder.getId()));
+            assertEquals(category.getId(), reference("purchase_order", "category_id", purchaseOrder.getId()));
             assertEquals(0, auditRecords(data));
         }
 
         @Test
-        void citedByAWorkflow_200_actionAndConditionDeleted_workflowWithThem() {
+        void citedByAWorkflow_409_workflowKept() {
+            // before P-16: 200, the action and the condition deleted, and the workflow with them
             CommonData data = data();
             Company company = data.o1().company();
             PurchaseOrderCategory category = purchaseOrderCategory(company);
@@ -617,8 +619,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/purchase-order-categories/" + category.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("workflow", workflow.getId()), "the whole workflow goes");
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, rows("workflow", workflow.getId()));
         }
 
         @Test
@@ -637,8 +639,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class VendorDeletion {
 
         @Test
-        void citedByAPurchaseOrder_200_referenceSetToNull() {
-            // CA-PPB-108 before P-16
+        void citedByAPurchaseOrder_409_referenceKept() {
+            // CA-PPB-108; before P-16: 200, the reference set to null
             CommonData data = data();
             Company company = data.o1().company();
             Vendor vendor = vendor(company);
@@ -648,13 +650,14 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/vendors/" + vendor.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertNull(reference("purchase_order", "vendor_id", purchaseOrder.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(vendor.getId(), reference("purchase_order", "vendor_id", purchaseOrder.getId()));
             assertEquals(0, auditRecords(data));
         }
 
         @Test
-        void citedByAWorkflow_200_workflowDeleted() {
+        void citedByAVendorWorkflow_409_workflowKept() {
+            // before P-16: 200, the workflow deleted
             CommonData data = data();
             Company company = data.o1().company();
             Vendor vendor = vendor(company);
@@ -663,12 +666,13 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/vendors/" + vendor.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("workflow", workflow.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, rows("workflow", workflow.getId()));
         }
 
         @Test
-        void onAnArchivedAsset_200_associationDeleted() {
+        void onAnArchivedAsset_409_associationKept() {
+            // before P-16: 200, the association deleted
             CommonData data = data();
             Company company = data.o1().company();
             Vendor vendor = vendor(company);
@@ -679,8 +683,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/vendors/" + vendor.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, count("SELECT count(*) FROM t_asset_vendor_associations WHERE id_vendor = ?",
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM t_asset_vendor_associations WHERE id_vendor = ?",
                     vendor.getId()));
         }
 
@@ -1173,7 +1177,9 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void demoVendorCitedByAPurchaseOrder_200_referenceSetToNull() {
+        void demoVendorCitedByAPurchaseOrder_409RecordInUse_nothingDeleted() {
+            // before P-16: 200, the reference set to null. D-P16-6: the purchase order is not demo, so the whole purge
+            // is rejected (PPB-20 d); P-18 gives the code DEMO_DATA_IN_USE
             CommonData data = data();
             Company company = data.o1().company();
             Vendor vendor = vendor(company);
@@ -1184,8 +1190,10 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/demo/demo-data"), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertNull(reference("purchase_order", "vendor_id", purchaseOrder.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertEquals(1, rows("vendor", vendor.getId()));
+            assertEquals(vendor.getId(), reference("purchase_order", "vendor_id", purchaseOrder.getId()));
         }
     }
 
@@ -1214,8 +1222,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     "part_quantity.part_id -> part fk21q7kq7mtnvshipi5oym9t2b3 a true",
                     "part_quantity.purchase_order_id -> purchase_order fkb8l63n0csjq7q33wwbkvsj61u c false",
                     "part_transaction.part_id -> part fkbx2tggt11xc2ofuwui2xsxkg0 a true",
-                    "purchase_order.category_id -> purchase_order_category fk29o4jh7n4ttmsfh50ulu11hjg n false",
-                    "purchase_order.vendor_id -> vendor fk20jcn7pw6hvx0uo0sh4y1d9xv n false",
+                    "purchase_order.category_id -> purchase_order_category fk29o4jh7n4ttmsfh50ulu11hjg a true",
+                    "purchase_order.vendor_id -> vendor fk20jcn7pw6hvx0uo0sh4y1d9xv a true",
                     "t_asset_part_associations.id_part -> part fkno24a5qbnjjn9xl0x2goppspd c true",
                     "t_asset_vendor_associations.id_vendor -> vendor fkrqd179yspkkgkqn96oggb7lhp c true",
                     "t_location_vendor_associations.id_vendor -> vendor fk8qdsmekvft0a8cjricw0fyjeq c true",
@@ -1227,11 +1235,11 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     "t_part_user_associations.id_part -> part fk690l6jljarx0xx5mq51qhgq64 c true",
                     "t_part_vendor_associations.id_part -> part fk7d9ha6pxi5gajdqeds5ekdcw5 c true",
                     "t_part_vendor_associations.id_vendor -> vendor fklhnjg0qhqks9ob72oybq4xk73 c true",
-                    "workflow_action.purchase_order_category_id -> purchase_order_category fkk62qy20rgsjmy2l8jvehrew58 c false",
-                    "workflow_action.vendor_id -> vendor fkonpcm48v2k8p83xkj6gf5wwip c false",
+                    "workflow_action.purchase_order_category_id -> purchase_order_category fkk62qy20rgsjmy2l8jvehrew58 a true",
+                    "workflow_action.vendor_id -> vendor fkonpcm48v2k8p83xkj6gf5wwip a true",
                     "workflow_condition.part_id -> part fkbn902y2gyu5mrf43spdiw8duo a true",
-                    "workflow_condition.purchase_order_category_id -> purchase_order_category fkr0f6t6jua29he3jhq40ty7wkc c false",
-                    "workflow_condition.vendor_id -> vendor fkexm8hsr4hficvbx66p66asyhs c false"), keys);
+                    "workflow_condition.purchase_order_category_id -> purchase_order_category fkr0f6t6jua29he3jhq40ty7wkc a true",
+                    "workflow_condition.vendor_id -> vendor fkexm8hsr4hficvbx66p66asyhs a true"), keys);
         }
 
         @Test

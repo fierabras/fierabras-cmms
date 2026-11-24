@@ -26,6 +26,12 @@ import com.grash.repository.PartTransactionRepository;
 import com.grash.repository.PurchaseOrderRepository;
 import com.grash.repository.PreventiveMaintenanceRepository;
 import com.grash.repository.WorkflowRepository;
+import com.grash.repository.PurchaseOrderCategoryRepository;
+import com.grash.repository.VendorRepository;
+import com.grash.model.PurchaseOrderCategory;
+import com.grash.model.Vendor;
+import com.grash.model.enums.workflow.PurchaseOrderAction;
+import com.grash.model.enums.workflow.PurchaseOrderCondition;
 import com.grash.service.WebhookDispatchService;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -83,6 +89,10 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
     WorkflowRepository workflowRepository;
     @Autowired
     PreventiveMaintenanceRepository preventiveMaintenanceRepository;
+    @Autowired
+    PurchaseOrderCategoryRepository purchaseOrderCategoryRepository;
+    @Autowired
+    VendorRepository vendorRepository;
     final FaultInjector faults;
     private final List<CommonData> created = new ArrayList<>();
 
@@ -174,6 +184,52 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
         workflow.setMainCondition(WFMainCondition.PART_UPDATED);
         workflow.setAction(workflowAction);
         workflow.setSecondaryConditions(new ArrayList<>(List.of(workflowCondition)));
+        return workflowRepository.saveAndFlush(workflow);
+    }
+
+    PurchaseOrderCategory purchaseOrderCategory(Company company) {
+        PurchaseOrderCategory category = new PurchaseOrderCategory();
+        category.setName(TestRecords.unique("P-16 PO category"));
+        category.setCompanySettings(company.getCompanySettings());
+        return purchaseOrderCategoryRepository.saveAndFlush(category);
+    }
+
+    Vendor vendor(Company company) {
+        Vendor vendor = new Vendor();
+        vendor.setName(TestRecords.unique("P-16 vendor"));
+        vendor.setCompanyName(vendor.getName());
+        vendor.setCompany(company);
+        return vendorRepository.saveAndFlush(vendor);
+    }
+
+    /**
+     * A workflow on purchase orders with {@code action} (and its vendor or category) and, when {@code condition} is
+     * not {@code null}, one condition citing {@code conditionVendor} or {@code conditionCategory}.
+     */
+    Workflow purchaseOrderWorkflow(Company company, WFMainCondition main, PurchaseOrderAction action,
+                                   Vendor actionVendor, PurchaseOrderCategory actionCategory,
+                                   PurchaseOrderCondition condition, Vendor conditionVendor,
+                                   PurchaseOrderCategory conditionCategory) {
+        WorkflowAction workflowAction = new WorkflowAction();
+        workflowAction.setCompany(company);
+        workflowAction.setPurchaseOrderAction(action);
+        workflowAction.setVendor(actionVendor);
+        workflowAction.setPurchaseOrderCategory(actionCategory);
+        List<WorkflowCondition> conditions = new ArrayList<>();
+        if (condition != null) {
+            WorkflowCondition workflowCondition = new WorkflowCondition();
+            workflowCondition.setCompany(company);
+            workflowCondition.setPurchaseOrderCondition(condition);
+            workflowCondition.setVendor(conditionVendor);
+            workflowCondition.setPurchaseOrderCategory(conditionCategory);
+            conditions.add(workflowCondition);
+        }
+        Workflow workflow = new Workflow();
+        workflow.setCompany(company);
+        workflow.setTitle(TestRecords.unique("P-16 workflow"));
+        workflow.setMainCondition(main);
+        workflow.setAction(workflowAction);
+        workflow.setSecondaryConditions(conditions);
         return workflowRepository.saveAndFlush(workflow);
     }
 
@@ -630,6 +686,224 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
                     () -> assertEquals("a true", key("part_quantity", "part_id")),
                     () -> assertEquals("a true", key("part_transaction", "part_id")),
                     () -> assertEquals("a true", key("workflow_condition", "part_id")));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 3: purchase order category and vendor
+    // =====================================================================================================
+
+    @Nested
+    class PurchaseOrderCategoryDeletion {
+
+        private Response deleteCategory(PurchaseOrderCategory category, User user) {
+            return call(delete("/purchase-order-categories/" + category.getId()), user);
+        }
+
+        @Test
+        void ca103_usedByAPurchaseOrder_409PurchaseOrderCategoryInUse_unchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrderCategory kp1 = purchaseOrderCategory(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            jdbc.update("UPDATE purchase_order SET category_id = ? WHERE id = ?", kp1.getId(),
+                    purchaseOrder.getId());
+            String before = row("purchase_order", purchaseOrder.getId());
+
+            Response response = deleteCategory(kp1, data.o1().admin());
+
+            assertConflict(response, "PURCHASE_ORDER_CATEGORY_IN_USE", "PURCHASE_ORDER");
+            assertEquals(1, rows("purchase_order_category", kp1.getId()));
+            assertEquals(before, row("purchase_order", purchaseOrder.getId()));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void citedByAWorkflowActionAndCondition_409WithBoth_workflowKept() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrderCategory category = purchaseOrderCategory(company);
+            Workflow workflow = purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_CREATED,
+                    PurchaseOrderAction.ASSIGN_CATEGORY, null, category, PurchaseOrderCondition.CATEGORY_IS, null,
+                    category);
+
+            Response response = deleteCategory(category, data.o1().admin());
+
+            assertConflict(response, "PURCHASE_ORDER_CATEGORY_IN_USE", "WORKFLOW_ACTION", "WORKFLOW_CONDITION");
+            assertEquals(1, rows("workflow", workflow.getId()));
+            assertEquals(1, rows("purchase_order_category", category.getId()));
+        }
+
+        @Test
+        void unused_200_deleted_recorded() {
+            CommonData data = data();
+            PurchaseOrderCategory category = purchaseOrderCategory(data.o1().company());
+
+            Response response = deleteCategory(category, data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(DELETED_BODY, response.body());
+            assertEquals(0, rows("purchase_order_category", category.getId()));
+            Map<String, Object> record = onlyAuditRecord(data);
+            assertAll(
+                    () -> assertEquals("PURCHASE_ORDER_CATEGORY", record.get("entity_type")),
+                    () -> assertEquals(category.getId(), record.get("entity_id")),
+                    () -> assertEquals(category.getName(), record.get("entity_name")),
+                    () -> assertEquals("{}", record.get("cascade_rows")));
+        }
+
+        @Test
+        void purchaseOrderAssignedBetweenCheckAndDeletion_409WithPurchaseOrder_never500() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrderCategory category = purchaseOrderCategory(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+
+            Response response;
+            try (Fault fault = faults.runBefore("purchase_order_category", Operation.DELETE,
+                    "UPDATE purchase_order SET category_id = " + category.getId() + " WHERE id = "
+                            + purchaseOrder.getId())) {
+                response = deleteCategory(category, data.o1().admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertConflict(response, "PURCHASE_ORDER_CATEGORY_IN_USE", "PURCHASE_ORDER");
+            assertEquals(1, rows("purchase_order_category", category.getId()));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void otherOrganization_inUse_403_never409() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrderCategory category = purchaseOrderCategory(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            jdbc.update("UPDATE purchase_order SET category_id = ? WHERE id = ?", category.getId(),
+                    purchaseOrder.getId());
+
+            Response response = deleteCategory(category, data.o2().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("IN_USE"), response.toString());
+            assertEquals(1, rows("purchase_order_category", category.getId()));
+        }
+
+        @Test
+        void schema_referencesToPurchaseOrderCategoryNoActionIndexed() {
+            assertAll(
+                    () -> assertEquals("a true", key("purchase_order", "category_id")),
+                    () -> assertEquals("a true", key("workflow_action", "purchase_order_category_id")),
+                    () -> assertEquals("a true", key("workflow_condition", "purchase_order_category_id")));
+        }
+    }
+
+    @Nested
+    class VendorDeletion {
+
+        private Response deleteVendor(Vendor vendor, User user) {
+            return call(delete("/vendors/" + vendor.getId()), user);
+        }
+
+        @Test
+        void ca108_citedByAPurchaseOrder_409VendorInUse_unchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor v1 = vendor(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            jdbc.update("UPDATE purchase_order SET vendor_id = ? WHERE id = ?", v1.getId(), purchaseOrder.getId());
+            String before = row("vendor", v1.getId());
+            String purchaseOrderBefore = row("purchase_order", purchaseOrder.getId());
+
+            Response response = deleteVendor(v1, data.o1().admin());
+
+            assertConflict(response, "VENDOR_IN_USE", "PURCHASE_ORDER");
+            assertEquals(before, row("vendor", v1.getId()));
+            assertEquals(purchaseOrderBefore, row("purchase_order", purchaseOrder.getId()));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void citedByAWorkflowActionAndCondition_409WithBoth_workflowKept() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor vendor = vendor(company);
+            Workflow workflow = purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_CREATED,
+                    PurchaseOrderAction.ASSIGN_VENDOR, vendor, null, PurchaseOrderCondition.VENDOR_IS, vendor, null);
+
+            Response response = deleteVendor(vendor, data.o1().admin());
+
+            assertConflict(response, "VENDOR_IN_USE", "WORKFLOW_ACTION", "WORKFLOW_CONDITION");
+            assertEquals(1, rows("workflow", workflow.getId()));
+        }
+
+        @Test
+        void onAnArchivedAsset_409WithAsset_onAnActiveAsset_200_associationInTheSummary() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor blocked = vendor(company);
+            Vendor free = vendor(company);
+            Asset archived = records.asset(company);
+            Asset active = records.asset(company);
+            jdbc.update("INSERT INTO t_asset_vendor_associations (id_asset, id_vendor) VALUES (?, ?)",
+                    archived.getId(), blocked.getId());
+            jdbc.update("INSERT INTO t_asset_vendor_associations (id_asset, id_vendor) VALUES (?, ?)",
+                    active.getId(), free.getId());
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", archived.getId());
+
+            assertConflict(deleteVendor(blocked, data.o1().admin()), "VENDOR_IN_USE", "ASSET");
+            assertEquals(1, rows("vendor", blocked.getId()));
+            Response allowed = deleteVendor(free, data.o1().admin());
+
+            assertEquals(200, allowed.status(), allowed.toString());
+            Map<String, Object> record = onlyAuditRecord(data);
+            assertAll(
+                    () -> assertEquals("VENDOR", record.get("entity_type")),
+                    () -> assertEquals(free.getId(), record.get("entity_id")),
+                    () -> assertEquals(free.getName(), record.get("entity_name")),
+                    () -> assertEquals("{\"t_asset_vendor_associations\": 1}", record.get("cascade_rows")));
+        }
+
+        @Test
+        void purchaseOrderAssignedBetweenCheckAndDeletion_409WithPurchaseOrder_never500() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor vendor = vendor(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+
+            Response response;
+            try (Fault fault = faults.runBefore("vendor", Operation.DELETE, "UPDATE purchase_order SET vendor_id = "
+                    + vendor.getId() + " WHERE id = " + purchaseOrder.getId())) {
+                response = deleteVendor(vendor, data.o1().admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertConflict(response, "VENDOR_IN_USE", "PURCHASE_ORDER");
+            assertEquals(1, rows("vendor", vendor.getId()));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void otherOrganization_inUse_403_never409() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor vendor = vendor(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            jdbc.update("UPDATE purchase_order SET vendor_id = ? WHERE id = ?", vendor.getId(),
+                    purchaseOrder.getId());
+
+            Response response = deleteVendor(vendor, data.o2().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("IN_USE"), response.toString());
+            assertEquals(1, rows("vendor", vendor.getId()));
+        }
+
+        @Test
+        void schema_referencesToVendorNoActionIndexed() {
+            assertAll(
+                    () -> assertEquals("a true", key("purchase_order", "vendor_id")),
+                    () -> assertEquals("a true", key("workflow_action", "vendor_id")),
+                    () -> assertEquals("a true", key("workflow_condition", "vendor_id")));
         }
     }
 }

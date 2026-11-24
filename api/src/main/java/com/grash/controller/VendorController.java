@@ -114,7 +114,7 @@ public class VendorController {
             Vendor savedVendor = optionalVendor.get();
             if (user.getId().equals(savedVendor.getCreatedBy()) ||
                     user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.VENDORS_AND_CUSTOMERS)) {
-                vendorService.delete(id);
+                vendorService.delete(savedVendor, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

@@ -24,4 +24,7 @@ public interface VendorRepository extends JpaRepository<Vendor, Long>, JpaSpecif
     Optional<Vendor> findByNameIgnoreCaseAndCompany_Id(@Param("name") String name, @Param("companyId") Long companyId);
 
     void deleteByCompany_IdAndIsDemoTrue(Long companyId);
+
+    @Query("SELECT COUNT(a) > 0 FROM Asset a JOIN a.vendors v WHERE v.id = :id AND a.archived = true")
+    boolean isOnArchivedAsset(@Param("id") Long id);
 }

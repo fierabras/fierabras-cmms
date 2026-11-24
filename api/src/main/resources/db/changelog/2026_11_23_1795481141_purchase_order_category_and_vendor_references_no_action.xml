@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-16 (PPB-02, PPB-03, PPB-21, PPB-22): a purchase order category or a vendor used by a purchase order or a
+         workflow is not deleted. Until now deleting it put the purchase order reference in NULL and deleted the
+         workflow that cited it. These references become NO ACTION and each child column gets an index. Earlier
+         changesets are left untouched. -->
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_purchase_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="purchase_order" constraintName="fk29o4jh7n4ttmsfh50ulu11hjg"/>
+        <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="purchase_order"
+                                 constraintName="fk29o4jh7n4ttmsfh50ulu11hjg" referencedColumnNames="id"
+                                 referencedTableName="purchase_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="purchase_order" indexName="idx_purchase_order_category_id">
+            <column name="category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="purchase_order" indexName="idx_purchase_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="purchase_order" constraintName="fk29o4jh7n4ttmsfh50ulu11hjg"/>
+            <addForeignKeyConstraint baseColumnNames="category_id" baseTableName="purchase_order"
+                                     constraintName="fk29o4jh7n4ttmsfh50ulu11hjg" referencedColumnNames="id"
+                                     referencedTableName="purchase_order_category" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_workflow_action_purchase_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkk62qy20rgsjmy2l8jvehrew58"/>
+        <addForeignKeyConstraint baseColumnNames="purchase_order_category_id" baseTableName="workflow_action"
+                                 constraintName="fkk62qy20rgsjmy2l8jvehrew58" referencedColumnNames="id"
+                                 referencedTableName="purchase_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_purchase_order_category_id">
+            <column name="purchase_order_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_purchase_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkk62qy20rgsjmy2l8jvehrew58"/>
+            <addForeignKeyConstraint baseColumnNames="purchase_order_category_id" baseTableName="workflow_action"
+                                     constraintName="fkk62qy20rgsjmy2l8jvehrew58" referencedColumnNames="id"
+                                     referencedTableName="purchase_order_category" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_workflow_condition_purchase_order_category_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkr0f6t6jua29he3jhq40ty7wkc"/>
+        <addForeignKeyConstraint baseColumnNames="purchase_order_category_id" baseTableName="workflow_condition"
+                                 constraintName="fkr0f6t6jua29he3jhq40ty7wkc" referencedColumnNames="id"
+                                 referencedTableName="purchase_order_category" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_purchase_order_category_id">
+            <column name="purchase_order_category_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_purchase_order_category_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkr0f6t6jua29he3jhq40ty7wkc"/>
+            <addForeignKeyConstraint baseColumnNames="purchase_order_category_id" baseTableName="workflow_condition"
+                                     constraintName="fkr0f6t6jua29he3jhq40ty7wkc" referencedColumnNames="id"
+                                     referencedTableName="purchase_order_category" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_purchase_order_vendor_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="purchase_order" constraintName="fk20jcn7pw6hvx0uo0sh4y1d9xv"/>
+        <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="purchase_order"
+                                 constraintName="fk20jcn7pw6hvx0uo0sh4y1d9xv" referencedColumnNames="id"
+                                 referencedTableName="vendor" onDelete="NO ACTION"/>
+        <createIndex tableName="purchase_order" indexName="idx_purchase_order_vendor_id">
+            <column name="vendor_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="purchase_order" indexName="idx_purchase_order_vendor_id"/>
+            <dropForeignKeyConstraint baseTableName="purchase_order" constraintName="fk20jcn7pw6hvx0uo0sh4y1d9xv"/>
+            <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="purchase_order"
+                                     constraintName="fk20jcn7pw6hvx0uo0sh4y1d9xv" referencedColumnNames="id"
+                                     referencedTableName="vendor" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_workflow_action_vendor_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkonpcm48v2k8p83xkj6gf5wwip"/>
+        <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="workflow_action"
+                                 constraintName="fkonpcm48v2k8p83xkj6gf5wwip" referencedColumnNames="id"
+                                 referencedTableName="vendor" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_vendor_id">
+            <column name="vendor_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_vendor_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkonpcm48v2k8p83xkj6gf5wwip"/>
+            <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="workflow_action"
+                                     constraintName="fkonpcm48v2k8p83xkj6gf5wwip" referencedColumnNames="id"
+                                     referencedTableName="vendor" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action_workflow_condition_vendor_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkexm8hsr4hficvbx66p66asyhs"/>
+        <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="workflow_condition"
+                                 constraintName="fkexm8hsr4hficvbx66p66asyhs" referencedColumnNames="id"
+                                 referencedTableName="vendor" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_vendor_id">
+            <column name="vendor_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_vendor_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkexm8hsr4hficvbx66p66asyhs"/>
+            <addForeignKeyConstraint baseColumnNames="vendor_id" baseTableName="workflow_condition"
+                                     constraintName="fkexm8hsr4hficvbx66p66asyhs" referencedColumnNames="id"
+                                     referencedTableName="vendor" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
