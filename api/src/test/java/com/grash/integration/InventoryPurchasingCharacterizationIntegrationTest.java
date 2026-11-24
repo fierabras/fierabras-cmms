@@ -704,7 +704,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class SetDeletion {
 
         @Test
-        void usedOnAWorkOrder_200_linesAndMovementsKept_noAuditRecord() {
+        void usedOnAWorkOrder_200_linesAndMovementsKept_recorded() {
             // CA-PPB-124: the set is expanded into plain lines; the work order never cites it
             CommonData data = data();
             Company company = data.o1().company();
@@ -729,7 +729,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                             workOrder.getId())),
                     () -> assertEquals(2, count("SELECT count(*) FROM part WHERE id IN (?, ?)", first.getId(),
                             second.getId())),
-                    () -> assertEquals(0, auditRecords(data), "no audit record"));
+                    () -> assertEquals(1, auditRecords(data), "before P-16: no audit record"));
         }
 
         @Test

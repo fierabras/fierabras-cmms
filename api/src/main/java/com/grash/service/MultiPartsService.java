@@ -4,6 +4,9 @@ import com.grash.dto.MultiPartsPatchDTO;
 import com.grash.exception.CustomException;
 import com.grash.mapper.MultiPartsMapper;
 import com.grash.model.MultiParts;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.MultiPartsRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +26,7 @@ public class MultiPartsService {
     private final MultiPartsMapper multiPartsMapper;
     private final EntityManager em;
     private final PartService partService;
+    private final DeletionService deletionService;
 
     @Transactional
     public MultiParts create(MultiParts multiParts) {
@@ -47,8 +51,15 @@ public class MultiPartsService {
         return multiPartsRepository.findAll();
     }
 
-    public void delete(Long id) {
-        multiPartsRepository.deleteById(id);
+    /**
+     * P-16 (PPB-17, PPB-23): a set of parts is a template; it is always deleted, with its associations, and recorded
+     * in the audit log. The work orders it was used on keep their lines and their movements: they never cite it.
+     */
+    @Transactional
+    public void delete(MultiParts set, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.MULTI_PARTS, set.getId(), null, set.getName(),
+                        set.getCompany().getId()), actor, AuditSource.API, null,
+                () -> multiPartsRepository.deleteById(set.getId()));
     }
 
     public Optional<MultiParts> findById(Long id) {

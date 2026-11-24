@@ -28,6 +28,9 @@ import com.grash.repository.PreventiveMaintenanceRepository;
 import com.grash.repository.WorkflowRepository;
 import com.grash.repository.PurchaseOrderCategoryRepository;
 import com.grash.repository.VendorRepository;
+import com.grash.repository.MultiPartsRepository;
+import com.grash.model.MultiParts;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import com.grash.model.PurchaseOrderCategory;
 import com.grash.model.Vendor;
 import com.grash.model.enums.workflow.PurchaseOrderAction;
@@ -93,6 +96,8 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
     PurchaseOrderCategoryRepository purchaseOrderCategoryRepository;
     @Autowired
     VendorRepository vendorRepository;
+    @Autowired
+    MultiPartsRepository multiPartsRepository;
     final FaultInjector faults;
     private final List<CommonData> created = new ArrayList<>();
 
@@ -904,6 +909,73 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
                     () -> assertEquals("a true", key("purchase_order", "vendor_id")),
                     () -> assertEquals("a true", key("workflow_action", "vendor_id")),
                     () -> assertEquals("a true", key("workflow_condition", "vendor_id")));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 4: set of parts
+    // =====================================================================================================
+
+    @Nested
+    class SetDeletion {
+
+        private MultiParts set(Company company, Part... parts) {
+            MultiParts set = new MultiParts();
+            set.setName(TestRecords.unique("P-16 set"));
+            set.setCompany(company);
+            set.setParts(new ArrayList<>(List.of(parts)));
+            return multiPartsRepository.saveAndFlush(set);
+        }
+
+        @Test
+        void ca124_usedOnAWorkOrder_200_workOrderKeepsItsLinesAndMovements_recorded() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part first = part(company, 5);
+            Part second = part(company, 5);
+            MultiParts mp1 = set(company, first, second);
+            WorkOrder w24 = records.workOrder(company, null, Status.OPEN, false);
+            String admin = api.login(data.o1().admin());
+            Response added = api.call(patch("/part-quantities/work-order/" + w24.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("[" + first.getId() + "," + second.getId() + "]"), admin);
+            assertEquals(200, added.status(), added.toString());
+            List<String> linesBefore = jdbc.queryForList("SELECT row_to_json(q)::text FROM part_quantity q "
+                    + "WHERE work_order_id = ? ORDER BY id", String.class, w24.getId());
+            List<String> movementsBefore = jdbc.queryForList("SELECT row_to_json(t)::text FROM part_transaction t "
+                    + "WHERE work_order_id = ? ORDER BY id", String.class, w24.getId());
+
+            Response response = api.call(delete("/multi-parts/" + mp1.getId()), admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(DELETED_BODY, response.body());
+            assertEquals(0, rows("multi_parts", mp1.getId()));
+            assertAll(
+                    () -> assertEquals(2, linesBefore.size()),
+                    () -> assertEquals(linesBefore, jdbc.queryForList("SELECT row_to_json(q)::text FROM "
+                            + "part_quantity q WHERE work_order_id = ? ORDER BY id", String.class, w24.getId())),
+                    () -> assertEquals(2, movementsBefore.size()),
+                    () -> assertEquals(movementsBefore, jdbc.queryForList("SELECT row_to_json(t)::text FROM "
+                            + "part_transaction t WHERE work_order_id = ? ORDER BY id", String.class, w24.getId())),
+                    () -> assertEquals(1, rows("part", first.getId()) * rows("part", second.getId())));
+            Map<String, Object> record = onlyAuditRecord(data);
+            assertAll(
+                    () -> assertEquals("MULTI_PARTS", record.get("entity_type")),
+                    () -> assertEquals(mp1.getId(), record.get("entity_id")),
+                    () -> assertEquals(mp1.getName(), record.get("entity_name")),
+                    () -> assertEquals("{\"t_multi_parts_part_associations\": 2}", record.get("cascade_rows")));
+        }
+
+        @Test
+        void otherOrganization_403_kept() {
+            CommonData data = data();
+            MultiParts set = set(data.o1().company());
+
+            Response response = call(delete("/multi-parts/" + set.getId()), data.o2().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(1, rows("multi_parts", set.getId()));
+            assertEquals(0, auditRecords(data));
         }
     }
 }

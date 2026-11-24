@@ -106,7 +106,7 @@ public class MultiPartsController {
         if (optionalMultiParts.isPresent()) {
             MultiParts savedMultiParts = optionalMultiParts.get();
             if (user.getId().equals(savedMultiParts.getCreatedBy()) || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.PARTS_AND_MULTIPARTS)) {
-                multiPartsService.delete(id);
+                multiPartsService.delete(savedMultiParts, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
