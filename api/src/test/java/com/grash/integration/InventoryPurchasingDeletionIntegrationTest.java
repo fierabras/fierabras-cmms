@@ -1285,6 +1285,110 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
         }
     }
 
+    // =====================================================================================================
+    // Block 6: disabled users on a part (E-10)
+    // =====================================================================================================
+
+    @Nested
+    class PartUsers {
+
+        private String partBody(String name, User... users) {
+            StringBuilder assigned = new StringBuilder();
+            for (User user : users) {
+                if (assigned.length() > 0) assigned.append(",");
+                assigned.append("{\"id\":").append(user.getId()).append("}");
+            }
+            return "{\"name\":\"" + name + "\",\"assignedTo\":[" + assigned + "]}";
+        }
+
+        private long assigned(Long part, User user) {
+            return count("SELECT count(*) FROM t_part_user_associations WHERE id_part = ? AND id_user = ?", part,
+                    user.getId());
+        }
+
+        @Test
+        void disabledUserOnCreate_409UserRetired_noPart() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            String name = TestRecords.unique("P-16 part");
+
+            Response response = send(post("/parts"), partBody(name, data.o1().technician()), data.o1().admin());
+
+            assertConflict(response, "USER_RETIRED");
+            assertEquals(0, count("SELECT count(*) FROM part WHERE name = ?", name));
+        }
+
+        @Test
+        void enabledUserOnCreate_200() {
+            CommonData data = data();
+
+            Response response = send(post("/parts"), partBody(TestRecords.unique("P-16 part"),
+                    data.o1().technician()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(1, assigned(json(response).get("id").asLong(), data.o1().technician()));
+        }
+
+        @Test
+        void disabledUserAddedOnEdit_409UserRetired_partUnchanged() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 0);
+            disable(data.o1().technician());
+            String before = row("part", part.getId());
+
+            Response response = send(patch("/parts/" + part.getId()), partBody(part.getName(),
+                    data.o1().technician()), data.o1().admin());
+
+            assertConflict(response, "USER_RETIRED");
+            assertEquals(before, row("part", part.getId()));
+            assertEquals(0, assigned(part.getId(), data.o1().technician()));
+        }
+
+        @Test
+        void userDisabledAfterTheAssignment_keptOnEdit_200() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 0);
+            jdbc.update("INSERT INTO t_part_user_associations (id_part, id_user) VALUES (?, ?)", part.getId(),
+                    data.o1().technician().getId());
+            disable(data.o1().technician());
+
+            Response response = send(patch("/parts/" + part.getId()), partBody(part.getName(),
+                    data.o1().technician(), data.o1().owner()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(1, assigned(part.getId(), data.o1().technician()), "a previous reference is kept");
+            assertEquals(1, assigned(part.getId(), data.o1().owner()));
+        }
+
+        @Test
+        void otherOrganizationAssignsADisabledUserOfO1_403_never409() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            String name = TestRecords.unique("P-16 part");
+
+            Response response = send(post("/parts"), partBody(name, data.o1().technician()), data.o2().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("RETIRED"), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM part WHERE name = ?", name));
+        }
+
+        @Test
+        void otherOrganizationEditsItsPartWithADisabledUserOfO1_403_never409() {
+            CommonData data = data();
+            Part part = part(data.o2().company(), 0);
+            disable(data.o1().technician());
+            String before = row("part", part.getId());
+
+            Response response = send(patch("/parts/" + part.getId()), partBody(part.getName(),
+                    data.o1().technician()), data.o2().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("RETIRED"), response.toString());
+            assertEquals(before, row("part", part.getId()));
+        }
+    }
+
     @Nested
     class PurchaseOrderLines {
 

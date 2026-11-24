@@ -557,7 +557,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class PartUsers {
 
         @Test
-        void disabledUserAssignedOnCreate_200() {
+        void disabledUserAssignedOnCreate_409() {
+            // E-10; before P-16: 200
             CommonData data = data();
             User user = data.o1().technician();
             disable(user);
@@ -565,13 +566,13 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = send(post("/parts"), "{\"name\":\"" + TestRecords.unique("P-16 part")
                     + "\",\"assignedTo\":[{\"id\":" + user.getId() + "}]}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM t_part_user_associations WHERE id_part = ? AND id_user = ?",
-                    json(response).get("id").asLong(), user.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("USER_RETIRED"), response.toString());
         }
 
         @Test
-        void disabledUserAssignedOnEdit_200() {
+        void disabledUserAssignedOnEdit_409() {
+            // E-10; before P-16: 200
             CommonData data = data();
             Part part = part(data.o1().company(), 0);
             User user = data.o1().technician();
@@ -580,8 +581,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
                     + "\",\"assignedTo\":[{\"id\":" + user.getId() + "}]}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM t_part_user_associations WHERE id_part = ? AND id_user = ?",
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM t_part_user_associations WHERE id_part = ? AND id_user = ?",
                     part.getId(), user.getId()));
         }
     }

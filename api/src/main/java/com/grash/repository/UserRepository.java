@@ -37,6 +37,8 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
 
     boolean existsByIdInAndEnabledFalse(Collection<Long> ids);
 
+    long countByIdInAndCompany_Id(Collection<Long> ids, Long companyId);
+
     Optional<User> findByUsername(String username);
 
     @Query("select u from User u where u.company.id=:id and u.role.code not in :roleCodes")

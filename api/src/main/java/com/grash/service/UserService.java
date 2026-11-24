@@ -332,6 +332,18 @@ public class UserService {
             throw new ConflictException(USER_RETIRED, USER_RETIRED_MESSAGE);
     }
 
+    /**
+     * P-16 (D-P16-10, INV-10): the users a request sets belong to the organization {@code companyId}; otherwise 403,
+     * before any 409 on their state. Null elements are ignored.
+     */
+    public void rejectForeign(Collection<User> requested, Long companyId) {
+        if (requested == null) return;
+        Set<Long> ids = new HashSet<>();
+        requested.stream().filter(Objects::nonNull).map(User::getId).filter(Objects::nonNull).forEach(ids::add);
+        if (!ids.isEmpty() && userRepository.countByIdInAndCompany_Id(ids, companyId) < ids.size())
+            throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
+    }
+
     public Optional<User> findByEmail(String email) {
         return userRepository.findByEmailIgnoreCase(email);
     }
