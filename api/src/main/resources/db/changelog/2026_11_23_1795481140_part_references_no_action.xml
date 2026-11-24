@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-16 (PPB-02, PPB-03, PPB-04, PPB-21, PPB-22): a part with a line on a work order or a purchase order, a
+         movement or a workflow condition is not deleted. Until now deleting the part deleted them in cascade. These
+         references become NO ACTION and each child column gets an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_23_1795481140_part_references_no_action_part_quantity_part_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="part_quantity" constraintName="fk21q7kq7mtnvshipi5oym9t2b3"/>
+        <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="part_quantity"
+                                 constraintName="fk21q7kq7mtnvshipi5oym9t2b3" referencedColumnNames="id"
+                                 referencedTableName="part" onDelete="NO ACTION"/>
+        <createIndex tableName="part_quantity" indexName="idx_part_quantity_part_id">
+            <column name="part_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_quantity" indexName="idx_part_quantity_part_id"/>
+            <dropForeignKeyConstraint baseTableName="part_quantity" constraintName="fk21q7kq7mtnvshipi5oym9t2b3"/>
+            <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="part_quantity"
+                                     constraintName="fk21q7kq7mtnvshipi5oym9t2b3" referencedColumnNames="id"
+                                     referencedTableName="part" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481140_part_references_no_action_part_transaction_part_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="part_transaction" constraintName="fkbx2tggt11xc2ofuwui2xsxkg0"/>
+        <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="part_transaction"
+                                 constraintName="fkbx2tggt11xc2ofuwui2xsxkg0" referencedColumnNames="id"
+                                 referencedTableName="part" onDelete="NO ACTION"/>
+        <createIndex tableName="part_transaction" indexName="idx_part_transaction_part_id">
+            <column name="part_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_transaction" indexName="idx_part_transaction_part_id"/>
+            <dropForeignKeyConstraint baseTableName="part_transaction" constraintName="fkbx2tggt11xc2ofuwui2xsxkg0"/>
+            <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="part_transaction"
+                                     constraintName="fkbx2tggt11xc2ofuwui2xsxkg0" referencedColumnNames="id"
+                                     referencedTableName="part" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_23_1795481140_part_references_no_action_workflow_condition_part_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkbn902y2gyu5mrf43spdiw8duo"/>
+        <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="workflow_condition"
+                                 constraintName="fkbn902y2gyu5mrf43spdiw8duo" referencedColumnNames="id"
+                                 referencedTableName="part" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_condition" indexName="idx_workflow_condition_part_id">
+            <column name="part_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_condition" indexName="idx_workflow_condition_part_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_condition" constraintName="fkbn902y2gyu5mrf43spdiw8duo"/>
+            <addForeignKeyConstraint baseColumnNames="part_id" baseTableName="workflow_condition"
+                                     constraintName="fkbn902y2gyu5mrf43spdiw8duo" referencedColumnNames="id"
+                                     referencedTableName="part" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

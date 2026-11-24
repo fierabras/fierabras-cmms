@@ -35,4 +35,23 @@ public interface PartRepository extends JpaRepository<Part, Long>, JpaSpecificat
     @Query("SELECT CASE WHEN COUNT(p) > :threshold THEN true ELSE false END " +
             "FROM Part p WHERE p.company.id = :companyId")
     boolean hasMoreThan(@Param("companyId") Long companyId, @Param("threshold") Long threshold);
+
+    /**
+     * P-16: whether a line of a work order cites the part.
+     */
+    @Query("SELECT COUNT(q) > 0 FROM PartQuantity q WHERE q.part.id = :id AND q.workOrder IS NOT NULL")
+    boolean isOnAWorkOrder(@Param("id") Long id);
+
+    /**
+     * P-16: whether a line of a purchase order cites the part.
+     */
+    @Query("SELECT COUNT(q) > 0 FROM PartQuantity q WHERE q.part.id = :id AND q.purchaseOrder IS NOT NULL")
+    boolean isOnAPurchaseOrder(@Param("id") Long id);
+
+    @Query("SELECT COUNT(a) > 0 FROM Part p JOIN p.assets a WHERE p.id = :id AND a.archived = true")
+    boolean isOnArchivedAsset(@Param("id") Long id);
+
+    @Query("SELECT COUNT(pm) > 0 FROM Part p JOIN p.preventiveMaintenances pm WHERE p.id = :id "
+            + "AND pm.schedule.disabled = true")
+    boolean isOnDisabledPreventiveMaintenance(@Param("id") Long id);
 }

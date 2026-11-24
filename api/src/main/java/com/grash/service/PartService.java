@@ -20,6 +20,7 @@ import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.webhook.PartField;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.PartRepository;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.AuditComparator;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +66,9 @@ public class PartService {
 
     @Value("${frontend.url}")
     private String frontendUrl;
+
+    public static final String PART_IN_USE = "PART_IN_USE";
+    private static final String PART_IN_USE_MESSAGE = "This part is used by other records and cannot be deleted";
 
 
     @Transactional
@@ -213,18 +217,35 @@ public class PartService {
 
 
     /**
-     * Deletes the part and records it in the audit log, in one transaction (P-10).
+     * Deletes the part and records it in the audit log, in one transaction (P-10). P-16 (PPB-02, PPB-25): a part
+     * with a dependent is not deleted (409 PART_IN_USE); the webhook PART_DELETE is sent only after the commit, never
+     * when the deletion is rejected or rolled back, and its failure does not undo the deletion.
      */
     @Transactional
     public void delete(Part part, User actor) {
+        Long id = part.getId();
+        Company company = part.getCompany();
         Map<String, Object> webhookPayload = new HashMap<>();
-        webhookPayload.put("partId", part.getId());
+        webhookPayload.put("partId", id);
         Object serializedPart = partMapper.toShowDto(part);
-        webhookDispatchService.dispatchWebhook(part.getCompany(), WebhookEvent.PART_DELETE, webhookPayload,
-                "deletePart", serializedPart, null, null, null, null, null);
-        deletionService.delete(new AuditTarget(EntityType.PART, part.getId(), null, part.getName(),
-                        part.getCompany().getId()), actor, AuditSource.API, null,
-                () -> partRepository.deleteById(part.getId()));
+        deletionService.delete(new AuditTarget(EntityType.PART, id, null, part.getName(), company.getId()), actor,
+                AuditSource.API,
+                DeletionRule.inUse(PART_IN_USE, PART_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.WORK_ORDER, () -> partRepository.isOnAWorkOrder(id))
+                        .blockedBy(EntityType.PURCHASE_ORDER, () -> partRepository.isOnAPurchaseOrder(id))
+                        .blockedBy(EntityType.PART_TRANSACTION,
+                                () -> deletionService.isCited("part_transaction", "part_id", id))
+                        .blockedBy(EntityType.WORKFLOW_CONDITION,
+                                () -> deletionService.isCited("workflow_condition", "part_id", id))
+                        .blockedBy(EntityType.USER,
+                                () -> deletionService.isLinkedToRetiredUser("t_part_user_associations", "id_part",
+                                        id))
+                        .blockedBy(EntityType.ASSET, () -> partRepository.isOnArchivedAsset(id))
+                        .blockedBy(EntityType.PREVENTIVE_MAINTENANCE,
+                                () -> partRepository.isOnDisabledPreventiveMaintenance(id)),
+                () -> partRepository.deleteById(id));
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.PART_DELETE,
+                webhookPayload, "deletePart", serializedPart, null, null, null, null, null));
     }
 
     public Optional<Part> findById(Long id) {
