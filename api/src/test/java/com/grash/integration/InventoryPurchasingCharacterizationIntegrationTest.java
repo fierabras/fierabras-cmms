@@ -301,8 +301,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class PartCategoryDeletion {
 
         @Test
-        void usedByAPartWithAMovement_200_partLinesAndMovementsDeletedInCascade() {
-            // C-03: the category takes its parts, their lines and their movements with it
+        void usedByAPartWithAMovement_409_partLinesAndMovementsKept() {
+            // before P-16 (C-03): 200, the category took its parts, their lines and their movements with it
             CommonData data = data();
             Company company = data.o1().company();
             PartCategory category = partCategory(company);
@@ -315,18 +315,18 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = call(delete("/part-categories/" + category.getId()), data.o1().admin());
 
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(DELETED_BODY, response.body()),
-                    () -> assertEquals(0, rows("part_category", category.getId())),
-                    () -> assertEquals(0, rows("part", part.getId()), "the part goes with its category"),
-                    () -> assertEquals(0, rows("part_quantity", line.getId())),
-                    () -> assertEquals(0, rows("part_transaction", movement.getId())),
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertTrue(response.body().contains("PART_CATEGORY_IN_USE"), response.toString()),
+                    () -> assertEquals(1, rows("part_category", category.getId())),
+                    () -> assertEquals(1, rows("part", part.getId()), "the part is kept"),
+                    () -> assertEquals(1, rows("part_quantity", line.getId())),
+                    () -> assertEquals(1, rows("part_transaction", movement.getId())),
                     () -> assertEquals(1, rows("work_order", workOrder.getId())),
                     () -> assertEquals(0, auditRecords(data), "no audit record"));
         }
 
         @Test
-        void unused_200_noAuditRecord() {
+        void unused_200_recorded() {
             CommonData data = data();
             PartCategory category = partCategory(data.o1().company());
 
@@ -334,7 +334,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, rows("part_category", category.getId()));
-            assertEquals(0, auditRecords(data));
+            assertEquals(1, auditRecords(data), "before P-16: no audit record");
         }
 
         @Test
@@ -1198,7 +1198,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             assertEquals(List.of(
                     "custom_field_value.part_id -> part fk_custom_field_value_part c true",
                     "custom_field_value.vendor_id -> vendor fk_custom_field_value_vendor c true",
-                    "part.category_id -> part_category fk_part_category c false",
+                    "part.category_id -> part_category fk_part_category a true",
                     "part_preventive_maintenances.part_id -> part fkcec0nx6ooubsuiwcwg23jod93 c false",
                     "part_quantity.part_id -> part fk21q7kq7mtnvshipi5oym9t2b3 c false",
                     "part_quantity.purchase_order_id -> purchase_order fkb8l63n0csjq7q33wwbkvsj61u c false",

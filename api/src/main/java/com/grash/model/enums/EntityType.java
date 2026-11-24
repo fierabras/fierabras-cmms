@@ -25,9 +25,17 @@ public enum EntityType {
     LOCATION("location"),
     METER("meter"),
     METER_CATEGORY("meter_category"),
+    MULTI_PARTS("multi_parts"),
     PART("part"),
+    PART_CATEGORY("part_category"),
     PART_QUANTITY("part_quantity"),
+    /**
+     * A movement of the inventory ledger ({@code part_transaction}).
+     */
+    PART_TRANSACTION("part_transaction"),
     PREVENTIVE_MAINTENANCE("preventive_maintenance"),
+    PURCHASE_ORDER("purchase_order"),
+    PURCHASE_ORDER_CATEGORY("purchase_order_category"),
     READING("reading"),
     RELATION("relation"),
     REQUEST("request"),
@@ -39,6 +47,7 @@ public enum EntityType {
     TEAM("team"),
     TIME_CATEGORY("time_category"),
     USER("own_user"),
+    VENDOR("vendor"),
     WEBHOOK_ENDPOINT("webhook_endpoint"),
     WORK_ORDER("work_order"),
     WORK_ORDER_CATEGORY("work_order_category"),
