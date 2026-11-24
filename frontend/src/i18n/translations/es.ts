@@ -2133,6 +2133,21 @@ const esJSON = {
   entity_type_METER_CATEGORY: 'Categoría de medidor',
   entity_type_ASSET_DOWNTIME: 'Paro de activo',
   entity_type_DEPRECATION: 'Depreciación',
+  entity_type_PART_TRANSACTION: 'Movimiento de inventario',
+  entity_type_PURCHASE_ORDER: 'Orden de compra',
+  entity_type_PART_CATEGORY: 'Categoría de repuesto',
+  entity_type_PURCHASE_ORDER_CATEGORY: 'Categoría de orden de compra',
+  entity_type_VENDOR: 'Proveedor',
+  entity_type_MULTI_PARTS: 'Conjunto de repuestos',
+  part_in_use: 'Este repuesto está en uso y no se puede eliminar.',
+  part_category_in_use:
+    'Esta categoría de repuesto está en uso y no se puede eliminar.',
+  purchase_order_category_in_use:
+    'Esta categoría de orden de compra está en uso y no se puede eliminar.',
+  vendor_in_use: 'Este proveedor está en uso y no se puede eliminar.',
+  purchase_order_closed:
+    'Esta orden de compra ya fue aprobada o rechazada: no se puede eliminar, volver a responder ni cambiar sus repuestos.',
+  po_respond_failure: 'La orden de compra no pudo ser respondida',
   location_in_use: 'Esta localización está en uso y no se puede eliminar.',
   meter_in_use: 'Este medidor está en uso y no se puede eliminar.',
   asset_category_in_use:

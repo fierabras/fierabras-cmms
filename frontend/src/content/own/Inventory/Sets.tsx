@@ -38,6 +38,7 @@ import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import { CompanySettingsContext } from '../../../contexts/CompanySettingsContext';
 import NoRowsMessageWrapper from '../components/NoRowsMessageWrapper';
 import { formatSelectMultiple } from '../../../utils/formatters';
+import { conflictMessage } from '../../../utils/conflicts';
 import { createColumnHelper } from '@tanstack/react-table';
 
 interface PropsType {
@@ -93,7 +94,7 @@ const Sets = ({ setAction }: PropsType) => {
     showSnackBar(t('set_delete_success'), 'success');
   };
   const onDeleteFailure = (err) =>
-    showSnackBar(t('set_delete_failure'), 'error');
+    showSnackBar(conflictMessage(err, t, t('set_delete_failure')), 'error');
 
   useEffect(() => {
     dispatch(getMultiParts());
