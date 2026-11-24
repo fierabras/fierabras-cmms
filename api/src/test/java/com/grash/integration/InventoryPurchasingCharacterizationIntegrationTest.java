@@ -748,8 +748,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class PurchaseOrderDeletion {
 
         @Test
-        void approved_200_deletedWithItsLines_stockKept() {
-            // CA-PPB-020 (PO1) before P-16
+        void approved_409_keptWithItsLines_stockKept() {
+            // CA-PPB-020 (PO1); before P-16: 200, deleted with its lines
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -762,26 +762,28 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = api.call(delete("/purchase-orders/" + purchaseOrder.getId()), admin);
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("purchase_order", purchaseOrder.getId()));
-            assertEquals(0, rows("part_quantity", line.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("PURCHASE_ORDER_CLOSED"), response.toString());
+            assertEquals(1, rows("purchase_order", purchaseOrder.getId()));
+            assertEquals(1, rows("part_quantity", line.getId()));
             assertEquals(3, stock(part), "the stock it brought stays");
             assertEquals(0, auditRecords(data));
         }
 
         @Test
-        void rejected_200_deleted() {
+        void rejected_409_kept() {
+            // before P-16: 200, deleted
             CommonData data = data();
             PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.REJECTED);
 
             Response response = call(delete("/purchase-orders/" + purchaseOrder.getId()), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("purchase_order", purchaseOrder.getId()));
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, rows("purchase_order", purchaseOrder.getId()));
         }
 
         @Test
-        void pending_200_deletedWithItsLines_noAuditRecord() {
+        void pending_200_deletedWithItsLines_recorded() {
             CommonData data = data();
             Company company = data.o1().company();
             PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
@@ -792,7 +794,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, rows("part_quantity", first.getId()) + rows("part_quantity", second.getId()));
-            assertEquals(0, auditRecords(data));
+            assertEquals(1, auditRecords(data), "before P-16: no audit record");
         }
 
         @Test
@@ -853,8 +855,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void approvedAnsweredAgain_406_unchanged() {
-            // CA-PPB-085 before P-16: 406 for both answers
+        void approvedAnsweredAgain_409_unchanged() {
+            // CA-PPB-085; before P-16: 406 for both answers
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -864,15 +866,15 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response rejected = respond(purchaseOrder, false, data.o1().admin());
             Response approved = respond(purchaseOrder, true, data.o1().admin());
 
-            assertEquals(406, rejected.status(), rejected.toString());
-            assertEquals(406, approved.status(), approved.toString());
+            assertEquals(409, rejected.status(), rejected.toString());
+            assertEquals(409, approved.status(), approved.toString());
             assertEquals("APPROVED", status(purchaseOrder.getId()));
             assertEquals(0, stock(part));
         }
 
         @Test
-        void rejectedApprovedLater_200_stockAdded() {
-            // D-1: a rejected purchase order can still be approved, and that adds stock
+        void rejectedApprovedLater_409_noStockAdded() {
+            // D-1; before P-16: a rejected purchase order could still be approved, and that added stock
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -881,19 +883,20 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = respond(purchaseOrder, true, data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals("APPROVED", status(purchaseOrder.getId()));
-            assertEquals(4, stock(part));
+            assertEquals(409, response.status(), response.toString());
+            assertEquals("REJECTED", status(purchaseOrder.getId()));
+            assertEquals(0, stock(part));
         }
 
         @Test
-        void rejectedRejectedAgain_200() {
+        void rejectedRejectedAgain_409() {
+            // before P-16: 200
             CommonData data = data();
             PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.REJECTED);
 
             Response response = respond(purchaseOrder, false, data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
+            assertEquals(409, response.status(), response.toString());
             assertEquals("REJECTED", status(purchaseOrder.getId()));
         }
 
@@ -924,14 +927,15 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     class PurchaseOrderStateRoutes {
 
         @Test
-        void createdWithStatusApproved_200_approvedWithoutStock() {
+        void createdWithStatusApproved_200_pending() {
+            // D-P16-5; before P-16: the body set the state, approved without stock
             CommonData data = data();
 
             Response response = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16 PO")
                     + "\",\"status\":\"APPROVED\"}", data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals("APPROVED", status(json(response).get("id").asLong()), "the body sets the state");
+            assertEquals("PENDING", status(json(response).get("id").asLong()), "the body does not set the state");
         }
 
         @Test
@@ -953,8 +957,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void rejectedEdited_workflowApproves_approvedWithoutStock() {
-            // the automation approves a rejected purchase order, without adding stock
+        void rejectedEdited_workflowApproveSkipped() {
+            // D-P16-4; before P-16: the automation approved a rejected purchase order, without adding stock
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -967,13 +971,13 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals("APPROVED", status(purchaseOrder.getId()));
+            assertEquals("REJECTED", status(purchaseOrder.getId()));
             assertEquals(0, stock(part));
         }
 
         @Test
-        void approvedEdited_workflowRejects_rejected() {
-            // the automation rejects an approved purchase order; the stock it brought stays
+        void approvedEdited_workflowRejectSkipped() {
+            // D-P16-4; before P-16: the automation rejected an approved purchase order
             CommonData data = data();
             Company company = data.o1().company();
             PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
@@ -984,7 +988,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals("REJECTED", status(purchaseOrder.getId()));
+            assertEquals("APPROVED", status(purchaseOrder.getId()));
         }
 
         @Test
@@ -1011,8 +1015,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void pendingLineRemoved_200_oneLineLeft() {
-            // CA-PPB-038: passes today
+        void pendingLineRemoved_200_oneLineLeft_recorded() {
+            // CA-PPB-038: passed before P-16, without audit record (D-P16-3)
             CommonData data = data();
             Company company = data.o1().company();
             Part kept = part(company, 0);
@@ -1027,11 +1031,12 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             assertEquals(0, rows("part_quantity", removed.getId()));
             assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
                     purchaseOrder.getId()));
-            assertEquals(0, auditRecords(data), "a line of a purchase order is removed without audit record");
+            assertEquals(1, auditRecords(data), "before P-16: removed without audit record");
         }
 
         @Test
-        void closedLinesReplaced_200_added_changed_removed() {
+        void closedLinesReplaced_409_unchanged() {
+            // E-7; before P-16: 200, added, changed and removed
             CommonData data = data();
             Company company = data.o1().company();
             Part existing = part(company, 0);
@@ -1044,14 +1049,15 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response removed = send(patch("/part-quantities/purchase-order/" + purchaseOrder.getId()), "[]",
                     data.o1().admin());
 
-            assertEquals(200, changed.status(), changed.toString());
-            assertEquals(200, removed.status(), removed.toString());
-            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+            assertEquals(409, changed.status(), changed.toString());
+            assertEquals(409, removed.status(), removed.toString());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
                     purchaseOrder.getId()));
         }
 
         @Test
-        void closedLineChangedAlone_200() {
+        void closedLineChangedAlone_409() {
+            // before P-16: 200
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -1061,13 +1067,14 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = send(patch("/part-quantities/" + line), "{\"quantity\":7}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(7, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class,
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(2, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class,
                     line));
         }
 
         @Test
-        void closedLineDeletedAlone_200() {
+        void closedLineDeletedAlone_409() {
+            // before P-16: 200
             CommonData data = data();
             Company company = data.o1().company();
             PurchaseOrder purchaseOrder = approvedWithALine(company, part(company, 0));
@@ -1076,12 +1083,13 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
 
             Response response = call(delete("/part-quantities/" + line), data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("part_quantity", line));
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, rows("part_quantity", line));
         }
 
         @Test
-        void closedLineCreated_200() {
+        void closedLineCreated_409() {
+            // before P-16: 200
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 0);
@@ -1090,8 +1098,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = send(post("/part-quantities"), "{\"part\":{\"id\":" + part.getId()
                     + "},\"purchaseOrder\":{\"id\":" + purchaseOrder.getId() + "},\"quantity\":1}", data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
                     purchaseOrder.getId()));
         }
 

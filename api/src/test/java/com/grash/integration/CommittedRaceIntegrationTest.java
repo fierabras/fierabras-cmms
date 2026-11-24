@@ -261,6 +261,73 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(), storageDouble.calls("delete"));
     }
 
+    /**
+     * P-16: a pending purchase order with one line of {@code quantity} of {@code part}, through the API.
+     */
+    private Long pendingPurchaseOrder(Long part, double quantity) throws Exception {
+        Response created = api.call(post("/purchase-orders").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + TestRecords.unique("P-16 PO") + "\"}"), admin);
+        assertTrue(created.is2xx(), created.toString());
+        Long purchaseOrder = objectMapper.readTree(created.body()).get("id").asLong();
+        Response line = api.call(post("/part-quantities").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"part\":{\"id\":" + part + "},\"purchaseOrder\":{\"id\":" + purchaseOrder
+                        + "},\"quantity\":" + quantity + "}"), admin);
+        assertTrue(line.is2xx(), line.toString());
+        return purchaseOrder;
+    }
+
+    private Response approvePurchaseOrder(Long purchaseOrder) {
+        return api.call(patch("/purchase-orders/" + purchaseOrder + "/respond").param("approved", "true"), admin);
+    }
+
+    private double stock(Long part) {
+        return jdbc.queryForObject("SELECT quantity FROM part WHERE id = ?", Double.class, part);
+    }
+
+    @Test
+    void pendingPurchaseOrderDeleted_whileItIsBeingApproved_409PurchaseOrderClosed_stockAddedOnce() throws Exception {
+        // P-16 (R-1): the approval holds the row; the deletion waits for it and then reads it approved
+        Long part = records.part(data.o1().company(), null).getId();
+        Long purchaseOrder = pendingPurchaseOrder(part, 3);
+        AtomicReference<Response> approval = new AtomicReference<>();
+
+        Response result = compete(() -> approval.set(approvePurchaseOrder(purchaseOrder)),
+                () -> api.call(delete("/purchase-orders/" + purchaseOrder), admin));
+
+        assertEquals(200, approval.get().status(), approval.get().toString());
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("PURCHASE_ORDER_CLOSED"), result.toString());
+        assertEquals(0, jdbc.queryForObject("SELECT status FROM purchase_order WHERE id = ?", Integer.class,
+                purchaseOrder), "the purchase order stays approved (APPROVED is 0)");
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+                Integer.class, purchaseOrder));
+        assertEquals(3, stock(part), "the stock is added once");
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
+    }
+
+    @Test
+    void pendingPurchaseOrderApproved_whileItIsBeingDeleted_404_noStockAdded() throws Exception {
+        // P-16 (R-2): the deletion holds the row; the approval waits for it and then finds no purchase order
+        Long part = records.part(data.o1().company(), null).getId();
+        Long purchaseOrder = pendingPurchaseOrder(part, 3);
+        AtomicReference<Response> deletion = new AtomicReference<>();
+
+        Response result = compete(() -> deletion.set(api.call(delete("/purchase-orders/" + purchaseOrder), admin)),
+                () -> approvePurchaseOrder(purchaseOrder));
+
+        assertEquals(200, deletion.get().status(), deletion.get().toString());
+        assertEquals(404, result.status(), result.toString());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM purchase_order WHERE id = ?", Integer.class,
+                purchaseOrder));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+                Integer.class, purchaseOrder));
+        assertEquals(0, stock(part), "no stock added by a purchase order that no longer exists");
+        assertEquals(List.of("PURCHASE_ORDER {\"part_quantity\": 1}"), jdbc.queryForList("SELECT entity_type || ' ' "
+                + "|| cascade_rows::text FROM audit_log WHERE company_id = ?", String.class,
+                data.o1().company().getId()));
+    }
+
     private Long pendingRequest() throws Exception {
         Response created = api.call(post("/requests").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"" + TestRecords.unique("P-13 request") + "\"}"), admin);

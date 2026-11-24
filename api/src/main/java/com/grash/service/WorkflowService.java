@@ -142,9 +142,11 @@ public class WorkflowService {
             WorkflowAction action = workflow.getAction();
             switch (action.getPurchaseOrderAction()) {
                 case APPROVE:
+                    if (skipsClosedPurchaseOrder(workflow, purchaseOrder)) return;
                     purchaseOrder.setStatus(ApprovalStatus.APPROVED);
                     break;
                 case REJECT:
+                    if (skipsClosedPurchaseOrder(workflow, purchaseOrder)) return;
                     purchaseOrder.setStatus(ApprovalStatus.REJECTED);
                     break;
                 case ASSIGN_VENDOR:
@@ -201,6 +203,17 @@ public class WorkflowService {
     private static boolean skipsArchivedAsset(Workflow workflow, Asset asset) {
         if (AssetStateGuard.admits(asset)) return false;
         log.info("P-14b: workflow {} skipped its action: asset {} is archived", workflow.getId(), asset.getId());
+        return true;
+    }
+
+    /**
+     * P-16 (D-P16-4, PPB-05): whether the approval or rejection of the workflow is skipped because the purchase order
+     * is already approved or rejected; it is logged.
+     */
+    private static boolean skipsClosedPurchaseOrder(Workflow workflow, PurchaseOrder purchaseOrder) {
+        if (PurchaseOrderStateGuard.admits(purchaseOrder)) return false;
+        log.info("P-16: workflow {} skipped its action: purchase order {} is closed", workflow.getId(),
+                purchaseOrder.getId());
         return true;
     }
 

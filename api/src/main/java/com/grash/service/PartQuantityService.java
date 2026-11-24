@@ -48,16 +48,17 @@ public class PartQuantityService {
 
     /**
      * P-12 (E-6, PPB-23): removes a part consumption of an open work order and records it, in one transaction. The
-     * stock is handled by the caller, as before (P-16). A line of a purchase order is removed as before.
+     * stock is handled by the caller, as before (P-16b). P-16 (D-P16-3): a line of a pending purchase order is
+     * removed and recorded the same way; the purchase order has no folio.
      */
     @Transactional
     public void delete(PartQuantity partQuantity, User actor) {
-        if (partQuantity.getWorkOrder() == null) {
-            delete(partQuantity.getId());
-            return;
-        }
-        deletionService.delete(AuditTarget.childOf(EntityType.PART_QUANTITY, partQuantity.getId(),
-                        partQuantity.getPart().getName(), partQuantity.getWorkOrder()), actor, AuditSource.API, null,
+        String name = partQuantity.getPart().getName();
+        AuditTarget target = partQuantity.getWorkOrder() == null
+                ? new AuditTarget(EntityType.PART_QUANTITY, partQuantity.getId(), null, name,
+                partQuantity.getCompany().getId())
+                : AuditTarget.childOf(EntityType.PART_QUANTITY, partQuantity.getId(), name, partQuantity.getWorkOrder());
+        deletionService.delete(target, actor, AuditSource.API, null,
                 () -> partQuantityRepository.deleteById(partQuantity.getId()));
     }
 

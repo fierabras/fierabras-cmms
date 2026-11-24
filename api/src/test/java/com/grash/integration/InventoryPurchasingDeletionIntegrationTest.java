@@ -30,6 +30,8 @@ import com.grash.repository.PurchaseOrderCategoryRepository;
 import com.grash.repository.VendorRepository;
 import com.grash.repository.MultiPartsRepository;
 import com.grash.model.MultiParts;
+import com.grash.service.WorkflowService;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import com.grash.model.PurchaseOrderCategory;
 import com.grash.model.Vendor;
@@ -248,6 +250,20 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
             Thread.currentThread().interrupt();
         }
         assertTrue(webhookDouble.calls().isEmpty(), webhookDouble.calls().toString());
+    }
+
+    double stock(Part part) {
+        return jdbc.queryForObject("SELECT quantity FROM part WHERE id = ?", Double.class, part.getId());
+    }
+
+    String status(Long purchaseOrder) {
+        return ApprovalStatus.values()[jdbc.queryForObject("SELECT status FROM purchase_order WHERE id = ?",
+                Integer.class, purchaseOrder)].name();
+    }
+
+    List<String> lines(PurchaseOrder purchaseOrder) {
+        return jdbc.queryForList("SELECT row_to_json(q)::text FROM part_quantity q WHERE purchase_order_id = ? "
+                + "ORDER BY id", String.class, purchaseOrder.getId());
     }
 
     // --- queries ---
@@ -967,7 +983,7 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
         }
 
         @Test
-        void otherOrganization_403_kept() {
+        void otherOrganization_403_kept_noRecord() {
             CommonData data = data();
             MultiParts set = set(data.o1().company());
 
@@ -976,6 +992,467 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
             assertEquals(403, response.status(), response.toString());
             assertEquals(1, rows("multi_parts", set.getId()));
             assertEquals(0, auditRecords(data));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 5: purchase order
+    // =====================================================================================================
+
+    @Nested
+    class PurchaseOrderState {
+
+        private Response respond(PurchaseOrder purchaseOrder, boolean approved, User user) {
+            return call(patch("/purchase-orders/" + purchaseOrder.getId() + "/respond")
+                    .param("approved", String.valueOf(approved)), user);
+        }
+
+        private Response deletePurchaseOrder(PurchaseOrder purchaseOrder, User user) {
+            return call(delete("/purchase-orders/" + purchaseOrder.getId()), user);
+        }
+
+        /**
+         * The purchase order, its lines, the stock of {@code part} and its movements are as {@code before}, and no
+         * audit record was written.
+         */
+        private void assertUnchanged(PurchaseOrder purchaseOrder, String before, List<String> linesBefore, Part part,
+                                     double stockBefore, CommonData data) {
+            assertAll(
+                    () -> assertEquals(before, row("purchase_order", purchaseOrder.getId())),
+                    () -> assertEquals(linesBefore, lines(purchaseOrder)),
+                    () -> assertEquals(stockBefore, stock(part)),
+                    () -> assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?",
+                            part.getId())),
+                    () -> assertEquals(0, auditRecords(data)));
+        }
+
+        @Test
+        void ca020_approvedDeleted_409PurchaseOrderClosed_stockUnchanged_pendingDeleted_200WithItsLines() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder po1 = purchaseOrder(company, ApprovalStatus.PENDING);
+            line(part, null, po1, 3);
+            assertEquals(200, respond(po1, true, data.o1().admin()).status());
+            assertEquals(3, stock(part));
+            PurchaseOrder po2 = purchaseOrder(company, ApprovalStatus.PENDING);
+            PartQuantity first = line(part(company, 0), null, po2, 1);
+            PartQuantity second = line(part(company, 0), null, po2, 2);
+            String before = row("purchase_order", po1.getId());
+            List<String> linesBefore = lines(po1);
+
+            Response closed = deletePurchaseOrder(po1, data.o1().admin());
+            assertConflict(closed, "PURCHASE_ORDER_CLOSED");
+            assertUnchanged(po1, before, linesBefore, part, 3, data);
+            Response pending = deletePurchaseOrder(po2, data.o1().admin());
+
+            assertEquals(200, pending.status(), pending.toString());
+            assertEquals(DELETED_BODY, pending.body());
+            assertEquals(0, rows("purchase_order", po2.getId()));
+            assertEquals(0, rows("part_quantity", first.getId()) + rows("part_quantity", second.getId()));
+            Map<String, Object> record = onlyAuditRecord(data);
+            assertAll(
+                    () -> assertEquals("PURCHASE_ORDER", record.get("entity_type")),
+                    () -> assertEquals(po2.getId(), record.get("entity_id")),
+                    () -> assertEquals(po2.getName(), record.get("entity_name")),
+                    () -> assertNull(record.get("entity_folio")),
+                    () -> assertEquals("{\"part_quantity\": 2}", record.get("cascade_rows")));
+        }
+
+        @Test
+        void rejectedDeleted_409PurchaseOrderClosed() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.REJECTED);
+            line(part, null, purchaseOrder, 1);
+            String before = row("purchase_order", purchaseOrder.getId());
+            List<String> linesBefore = lines(purchaseOrder);
+
+            assertConflict(deletePurchaseOrder(purchaseOrder, data.o1().admin()), "PURCHASE_ORDER_CLOSED");
+            assertUnchanged(purchaseOrder, before, linesBefore, part, 0, data);
+        }
+
+        @Test
+        void closedDeletedByTechnician_403_never409() {
+            CommonData data = data();
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.APPROVED);
+
+            Response response = deletePurchaseOrder(purchaseOrder, data.o1().technician());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("PURCHASE_ORDER_CLOSED"), response.toString());
+        }
+
+        @Test
+        void unknownDeleted_404() {
+            CommonData data = data();
+
+            Response response = call(delete("/purchase-orders/" + Long.MAX_VALUE), data.o1().admin());
+
+            assertEquals(404, response.status(), response.toString());
+        }
+
+        @Test
+        void ca085_approvedAnsweredAgain_409PurchaseOrderClosedForBoth_unchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 2);
+            PurchaseOrder po4 = purchaseOrder(company, ApprovalStatus.APPROVED);
+            line(part, null, po4, 4);
+            String before = row("purchase_order", po4.getId());
+            List<String> linesBefore = lines(po4);
+
+            assertConflict(respond(po4, false, data.o1().admin()), "PURCHASE_ORDER_CLOSED");
+            assertConflict(respond(po4, true, data.o1().admin()), "PURCHASE_ORDER_CLOSED");
+            assertUnchanged(po4, before, linesBefore, part, 2, data);
+            assertEquals("APPROVED", status(po4.getId()));
+        }
+
+        @Test
+        void d1_rejectedAnsweredAgain_409PurchaseOrderClosedForBoth_noStockAdded() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.REJECTED);
+            line(part, null, purchaseOrder, 4);
+            String before = row("purchase_order", purchaseOrder.getId());
+            List<String> linesBefore = lines(purchaseOrder);
+
+            assertConflict(respond(purchaseOrder, true, data.o1().admin()), "PURCHASE_ORDER_CLOSED");
+            assertConflict(respond(purchaseOrder, false, data.o1().admin()), "PURCHASE_ORDER_CLOSED");
+            assertUnchanged(purchaseOrder, before, linesBefore, part, 0, data);
+            assertEquals("REJECTED", status(purchaseOrder.getId()));
+        }
+
+        @Test
+        void pendingApproved_200_stockAdded_pendingRejected_200_stockUnchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 1);
+            PurchaseOrder approved = purchaseOrder(company, ApprovalStatus.PENDING);
+            line(part, null, approved, 4);
+            PurchaseOrder rejected = purchaseOrder(company, ApprovalStatus.PENDING);
+            line(part, null, rejected, 9);
+
+            Response approval = respond(approved, true, data.o1().admin());
+            Response rejection = respond(rejected, false, data.o1().admin());
+
+            assertEquals(200, approval.status(), approval.toString());
+            assertEquals(200, rejection.status(), rejection.toString());
+            assertEquals("APPROVED", status(approved.getId()));
+            assertEquals("REJECTED", status(rejected.getId()));
+            assertEquals(5, stock(part));
+        }
+
+        @Test
+        void closedAnsweredByTechnician_403_never409() {
+            CommonData data = data();
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.APPROVED);
+
+            Response response = respond(purchaseOrder, true, data.o1().technician());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("PURCHASE_ORDER_CLOSED"), response.toString());
+        }
+
+        @Test
+        void e6_closedEditedWithStatusPending_200_generalDataChanged_stillClosed() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            line(part, null, purchaseOrder, 4);
+
+            Response response = send(patch("/purchase-orders/" + purchaseOrder.getId()),
+                    "{\"name\":\"P-16 renamed\",\"status\":\"PENDING\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("P-16 renamed", jdbc.queryForObject("SELECT name FROM purchase_order WHERE id = ?",
+                    String.class, purchaseOrder.getId()));
+            assertEquals("APPROVED", status(purchaseOrder.getId()));
+            assertEquals(0, stock(part));
+        }
+
+        @Test
+        void c1_createdWithStatusApprovedOrRejected_pending() {
+            CommonData data = data();
+
+            Response approved = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16 PO")
+                    + "\",\"status\":\"APPROVED\"}", data.o1().admin());
+            Response rejected = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16 PO")
+                    + "\",\"status\":\"REJECTED\"}", data.o1().admin());
+
+            assertEquals(200, approved.status(), approved.toString());
+            assertEquals(200, rejected.status(), rejected.toString());
+            assertEquals("PENDING", status(json(approved).get("id").asLong()));
+            assertEquals("PENDING", status(json(rejected).get("id").asLong()));
+        }
+
+        @Test
+        void c1_createdAndApprovedByAWorkflow_approvedAsBefore() {
+            // the approval adds no stock: left for P-16b (D-13)
+            CommonData data = data();
+            purchaseOrderWorkflow(data.o1().company(), WFMainCondition.PURCHASE_ORDER_CREATED,
+                    PurchaseOrderAction.APPROVE, null, null, null, null, null);
+
+            Response response = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16 PO")
+                    + "\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("APPROVED", status(json(response).get("id").asLong()));
+        }
+
+        private ListAppender<ILoggingEvent> workflowLog() {
+            Logger logger = (Logger) LoggerFactory.getLogger(WorkflowService.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            return appender;
+        }
+
+        private void detach(ListAppender<ILoggingEvent> appender) {
+            ((Logger) LoggerFactory.getLogger(WorkflowService.class)).detachAppender(appender);
+        }
+
+        @Test
+        void d4_rejectedEdited_workflowApproveSkipped_logged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.REJECTED);
+            Workflow workflow = purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_UPDATED,
+                    PurchaseOrderAction.APPROVE, null, null, null, null, null);
+            ListAppender<ILoggingEvent> appender = workflowLog();
+            Response response;
+            try {
+                response = send(patch("/purchase-orders/" + purchaseOrder.getId()), "{\"name\":\"P-16 x\"}",
+                        data.o1().admin());
+            } finally {
+                detach(appender);
+            }
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("REJECTED", status(purchaseOrder.getId()));
+            assertTrue(appender.list.stream().anyMatch(event -> event.getFormattedMessage().contains("P-16")
+                    && event.getFormattedMessage().contains(String.valueOf(workflow.getId()))), appender.list.toString());
+        }
+
+        @Test
+        void d4_approvedEdited_workflowRejectSkipped() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_UPDATED, PurchaseOrderAction.REJECT, null,
+                    null, null, null, null);
+
+            Response response = send(patch("/purchase-orders/" + purchaseOrder.getId()), "{\"name\":\"P-16 x\"}",
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("APPROVED", status(purchaseOrder.getId()));
+        }
+
+        @Test
+        void d4_closedEdited_workflowAssignVendorStillRuns() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            Vendor vendor = vendor(company);
+            purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_UPDATED, PurchaseOrderAction.ASSIGN_VENDOR,
+                    vendor, null, null, null, null);
+
+            Response response = send(patch("/purchase-orders/" + purchaseOrder.getId()), "{\"name\":\"P-16 y\"}",
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("APPROVED", status(purchaseOrder.getId()));
+            assertEquals(vendor.getId(), jdbc.queryForObject("SELECT vendor_id FROM purchase_order WHERE id = ?",
+                    Long.class, purchaseOrder.getId()));
+        }
+
+        @Test
+        void otherOrganization_closed_deleteAndRespond_403_never409() {
+            CommonData data = data();
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.APPROVED);
+
+            Response deletion = deletePurchaseOrder(purchaseOrder, data.o2().admin());
+            Response answer = respond(purchaseOrder, true, data.o2().admin());
+
+            assertEquals(403, deletion.status(), deletion.toString());
+            assertEquals(403, answer.status(), answer.toString());
+            assertFalse((deletion.body() + answer.body()).contains("CLOSED"));
+            assertEquals(1, rows("purchase_order", purchaseOrder.getId()));
+        }
+    }
+
+    @Nested
+    class PurchaseOrderLines {
+
+        private Response replace(PurchaseOrder purchaseOrder, String body, User user) {
+            return send(patch("/part-quantities/purchase-order/" + purchaseOrder.getId()), body, user);
+        }
+
+        private String lineBody(Part part, double quantity) {
+            return "{\"part\":{\"id\":" + part.getId() + "},\"quantity\":" + quantity + "}";
+        }
+
+        @Test
+        void ca038_pendingLineRemoved_200_oneLineLeft_recorded() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part kept = part(company, 0);
+            Part removedPart = part(company, 0);
+            PurchaseOrder po3 = purchaseOrder(company, ApprovalStatus.PENDING);
+            line(kept, null, po3, 1);
+            PartQuantity removed = line(removedPart, null, po3, 1);
+
+            Response response = replace(po3, "[" + lineBody(kept, 1) + "]", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, rows("part_quantity", removed.getId()));
+            assertEquals(1, lines(po3).size());
+            Map<String, Object> record = onlyAuditRecord(data);
+            assertAll(
+                    () -> assertEquals("PART_QUANTITY", record.get("entity_type")),
+                    () -> assertEquals(removed.getId(), record.get("entity_id")),
+                    () -> assertEquals(removedPart.getName(), record.get("entity_name")),
+                    () -> assertNull(record.get("entity_folio")));
+        }
+
+        @Test
+        void pendingLinesAddedAndChanged_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part existing = part(company, 0);
+            Part added = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            line(existing, null, purchaseOrder, 1);
+
+            Response response = replace(purchaseOrder, "[" + lineBody(existing, 5) + "," + lineBody(added, 2) + "]",
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(List.of(2.0, 5.0), jdbc.queryForList("SELECT quantity FROM part_quantity "
+                    + "WHERE purchase_order_id = ? ORDER BY quantity", Double.class, purchaseOrder.getId()));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void c2_closedSameLines_200_noRowChanged_noRecord() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part first = part(company, 0);
+            Part second = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            line(first, null, purchaseOrder, 2);
+            line(second, null, purchaseOrder, 3);
+            List<String> before = lines(purchaseOrder);
+
+            Response response = replace(purchaseOrder, "[" + lineBody(second, 3) + "," + lineBody(first, 2) + "]",
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(before, lines(purchaseOrder));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void c2_closedAnyDifference_409PurchaseOrderClosed_unchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part first = part(company, 0);
+            Part other = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.REJECTED);
+            line(first, null, purchaseOrder, 2);
+            List<String> before = lines(purchaseOrder);
+
+            Response added = replace(purchaseOrder, "[" + lineBody(first, 2) + "," + lineBody(other, 1) + "]",
+                    data.o1().admin());
+            Response removed = replace(purchaseOrder, "[]", data.o1().admin());
+            Response changed = replace(purchaseOrder, "[" + lineBody(first, 5) + "]", data.o1().admin());
+
+            assertConflict(added, "PURCHASE_ORDER_CLOSED");
+            assertConflict(removed, "PURCHASE_ORDER_CLOSED");
+            assertConflict(changed, "PURCHASE_ORDER_CLOSED");
+            assertEquals(before, lines(purchaseOrder));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void closedLineCreatedChangedOrDeletedAlone_409PurchaseOrderClosed_unchanged() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            PartQuantity line = line(part, null, purchaseOrder, 2);
+            List<String> before = lines(purchaseOrder);
+
+            Response created = send(post("/part-quantities"), "{\"part\":{\"id\":" + part(company, 0).getId()
+                    + "},\"purchaseOrder\":{\"id\":" + purchaseOrder.getId() + "},\"quantity\":1}",
+                    data.o1().admin());
+            Response changed = send(patch("/part-quantities/" + line.getId()), "{\"quantity\":7}",
+                    data.o1().admin());
+            Response deleted = call(delete("/part-quantities/" + line.getId()), data.o1().admin());
+
+            assertConflict(created, "PURCHASE_ORDER_CLOSED");
+            assertConflict(changed, "PURCHASE_ORDER_CLOSED");
+            assertConflict(deleted, "PURCHASE_ORDER_CLOSED");
+            assertEquals(before, lines(purchaseOrder));
+            assertEquals(0, auditRecords(data));
+        }
+
+        @Test
+        void pendingLineDeletedAlone_200_recorded() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            PartQuantity line = line(part, null, purchaseOrder, 2);
+
+            Response response = call(delete("/part-quantities/" + line.getId()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, rows("part_quantity", line.getId()));
+            assertEquals("PART_QUANTITY", onlyAuditRecord(data).get("entity_type"));
+        }
+
+        @Test
+        void otherOrganization_closedLines_403_never409() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.APPROVED);
+            PartQuantity line = line(part, null, purchaseOrder, 2);
+            Part foreignPart = part(data.o2().company(), 0);
+            List<String> before = lines(purchaseOrder);
+            User o2 = data.o2().admin();
+
+            List<Response> responses = List.of(
+                    replace(purchaseOrder, "[]", o2),
+                    replace(purchaseOrder, "[" + lineBody(foreignPart, 1) + "]", o2),
+                    send(post("/part-quantities"), "{\"part\":{\"id\":" + foreignPart.getId()
+                            + "},\"purchaseOrder\":{\"id\":" + purchaseOrder.getId() + "},\"quantity\":1}", o2),
+                    send(patch("/part-quantities/" + line.getId()), "{\"quantity\":7}", o2),
+                    call(delete("/part-quantities/" + line.getId()), o2));
+
+            responses.forEach(response -> {
+                assertEquals(403, response.status(), response.toString());
+                assertFalse(response.body().contains("CLOSED"), response.toString());
+            });
+            assertEquals(before, lines(purchaseOrder));
+        }
+
+        @Test
+        void ownForeignPartOnAClosedPurchaseOrder_403_never409() {
+            // the body cites a part of another organization: 403 before the state of the purchase order
+            CommonData data = data();
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company(), ApprovalStatus.APPROVED);
+            Part foreignPart = part(data.o2().company(), 0);
+
+            Response response = replace(purchaseOrder, "[" + lineBody(foreignPart, 1) + "]", data.o1().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertFalse(response.body().contains("CLOSED"), response.toString());
         }
     }
 }
