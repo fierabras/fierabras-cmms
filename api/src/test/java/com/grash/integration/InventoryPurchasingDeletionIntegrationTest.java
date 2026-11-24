@@ -570,6 +570,35 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
         }
 
         @Test
+        void everyDependent_409WithEveryType() {
+            // each check reports its type; without one, the others reject before the foreign key and the type is lost
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = part(company, 0);
+            WorkOrder workOrder = records.workOrder(company, null, Status.OPEN, false);
+            line(part, workOrder, null, 1);
+            line(part, null, purchaseOrder(company, ApprovalStatus.PENDING), 1);
+            movement(part, workOrder, 1);
+            partWorkflow(company, part);
+            jdbc.update("INSERT INTO t_part_user_associations (id_part, id_user) VALUES (?, ?)", part.getId(),
+                    data.o1().technician().getId());
+            disable(data.o1().technician());
+            Asset asset = records.asset(company);
+            jdbc.update("INSERT INTO t_asset_part_associations (id_asset, id_part) VALUES (?, ?)", asset.getId(),
+                    part.getId());
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", asset.getId());
+            PreventiveMaintenance preventiveMaintenance = preventiveMaintenance(company);
+            jdbc.update("UPDATE schedule SET disabled = true WHERE id = ?",
+                    preventiveMaintenance.getSchedule().getId());
+            jdbc.update("INSERT INTO part_preventive_maintenances (part_id, preventive_maintenances_id) "
+                    + "VALUES (?, ?)", part.getId(), preventiveMaintenance.getId());
+
+            assertConflict(deletePart(part, data.o1().admin()), "PART_IN_USE", "WORK_ORDER", "PURCHASE_ORDER",
+                    "PART_TRANSACTION", "WORKFLOW_CONDITION", "USER", "ASSET", "PREVENTIVE_MAINTENANCE");
+            assertEquals(1, rows("part", part.getId()));
+        }
+
+        @Test
         void movementAddedBetweenCheckAndDeletion_409WithPartTransaction_never500_noWebhook() {
             CommonData data = data();
             Company company = data.o1().company();
@@ -756,6 +785,22 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
         }
 
         @Test
+        void everyDependent_409WithEveryType() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            PurchaseOrderCategory category = purchaseOrderCategory(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            jdbc.update("UPDATE purchase_order SET category_id = ? WHERE id = ?", category.getId(),
+                    purchaseOrder.getId());
+            purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_CREATED,
+                    PurchaseOrderAction.ASSIGN_CATEGORY, null, category, PurchaseOrderCondition.CATEGORY_IS, null,
+                    category);
+
+            assertConflict(deleteCategory(category, data.o1().admin()), "PURCHASE_ORDER_CATEGORY_IN_USE",
+                    "PURCHASE_ORDER", "WORKFLOW_ACTION", "WORKFLOW_CONDITION");
+        }
+
+        @Test
         void unused_200_deleted_recorded() {
             CommonData data = data();
             PurchaseOrderCategory category = purchaseOrderCategory(data.o1().company());
@@ -882,6 +927,25 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
                     () -> assertEquals(free.getId(), record.get("entity_id")),
                     () -> assertEquals(free.getName(), record.get("entity_name")),
                     () -> assertEquals("{\"t_asset_vendor_associations\": 1}", record.get("cascade_rows")));
+        }
+
+        @Test
+        void everyDependent_409WithEveryType() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor vendor = vendor(company);
+            PurchaseOrder purchaseOrder = purchaseOrder(company, ApprovalStatus.PENDING);
+            jdbc.update("UPDATE purchase_order SET vendor_id = ? WHERE id = ?", vendor.getId(),
+                    purchaseOrder.getId());
+            purchaseOrderWorkflow(company, WFMainCondition.PURCHASE_ORDER_CREATED,
+                    PurchaseOrderAction.ASSIGN_VENDOR, vendor, null, PurchaseOrderCondition.VENDOR_IS, vendor, null);
+            Asset asset = records.asset(company);
+            jdbc.update("INSERT INTO t_asset_vendor_associations (id_asset, id_vendor) VALUES (?, ?)",
+                    asset.getId(), vendor.getId());
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", asset.getId());
+
+            assertConflict(deleteVendor(vendor, data.o1().admin()), "VENDOR_IN_USE", "PURCHASE_ORDER",
+                    "WORKFLOW_ACTION", "WORKFLOW_CONDITION", "ASSET");
         }
 
         @Test
