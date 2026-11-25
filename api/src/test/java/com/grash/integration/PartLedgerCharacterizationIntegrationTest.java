@@ -564,8 +564,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     class DemoPurge {
 
         @Test
-        void partNotDemoSuppliedByAnApprovedDemoPurchaseOrder_200_purchaseOrderKept_stockKept() {
-            // CA-PPB-086; before P-16b: the purge does not delete demo purchase orders and does not compensate
+        void partNotDemoSuppliedByAnApprovedDemoPurchaseOrder_200_purchaseOrderPurged_stockCompensated() {
+            // CA-PPB-086; before P-16b: the purge kept the demo purchase order and its 3 stayed in the stock
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 0);
@@ -579,16 +579,15 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             Response response = call(delete("/demo/demo-data"), admin);
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM purchase_order WHERE id = ?", purchaseOrder.getId()));
+            assertEquals(0, count("SELECT count(*) FROM purchase_order WHERE id = ?", purchaseOrder.getId()));
             assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE id = ?", line.getId()));
-            assertEquals(3, stock(part));
-            // P-16b block 4: the approval left its entry; the compensation comes with block 5 (D-3)
-            assertEquals(List.of("3.0/-/" + admin.getId()), movements(part));
+            assertEquals(0, stock(part));
+            assertEquals(List.of("3.0/-/" + admin.getId(), "-3.0/-/" + admin.getId()), movements(part));
         }
 
         @Test
-        void partNotDemoConsumedOnADemoWorkOrder_200_movementDeletedWithTheWorkOrder_stockKept() {
-            // D-3; before P-16b: the movement falls with the work order (CASCADE)
+        void partNotDemoConsumedOnADemoWorkOrder_200_movementKept_consumptionCompensated() {
+            // D-3; before P-16b: the movement fell with the work order (CASCADE) and the stock stayed at 4
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 5);
@@ -597,12 +596,10 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             Response response = call(delete("/demo/demo-data"), admin);
 
-            // P-16b block 1: work_order_id is a protected reference, so the movement rejects the purge until the
-            // compensation of block 5 (D-3)
-            assertEquals(409, response.status(), response.toString());
-            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", workOrder.getId()));
-            assertEquals(4, stock(part));
-            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ?", workOrder.getId()));
+            assertEquals(5, stock(part));
+            assertEquals(List.of("-1.0/-/" + admin.getId(), "1.0/-/" + admin.getId()), movements(part));
         }
     }
 

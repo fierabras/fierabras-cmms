@@ -17,4 +17,9 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, Lo
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PurchaseOrder p WHERE p.id = :id")
     Optional<PurchaseOrder> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * P-16b (CA-PPB-086): the demo purge deletes the demo purchase orders, with their lines.
+     */
+    void deleteByCompany_IdAndIsDemoTrue(Long companyId);
 }

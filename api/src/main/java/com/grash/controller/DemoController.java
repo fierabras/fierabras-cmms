@@ -93,7 +93,7 @@ public class DemoController {
     @DeleteMapping("/demo-data")
     @PreAuthorize("permitAll()")
     public SuccessResponse deleteDemoData(@Parameter(hidden = true) @CurrentUser User user) {
-        demoDataService.deleteDemoData(user.getCompany().getId());
+        demoDataService.deleteDemoData(user.getCompany().getId(), user);
         return new SuccessResponse(true, "Demo data deleted successfully");
     }
 

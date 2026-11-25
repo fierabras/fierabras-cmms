@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -91,5 +92,43 @@ public class PartLedgerService {
         transaction.setCreatedBy(movement.actor() == null ? null : movement.actor().getId());
         transaction.setDemo(movement.demo());
         return Optional.of(partTransactionRepository.saveAndFlush(transaction));
+    }
+
+    /**
+     * P-16b (D-3, PPB-30): before the demo purge deletes the demo work orders and purchase orders, what each of them
+     * added to or took from a part that is not demo is given back with a movement with origin DEMO_PURGE by
+     * {@code actor}, and the movements stop citing them, keeping their folio in the description. A compensation
+     * below 0 is rejected with 406, as any exit (D-P16b-8).
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void compensateDemoDocuments(Long companyId, User actor) {
+        List<Object[]> nets = partTransactionRepository.findNetOfDemoDocumentsOnPartsNotDemo(companyId);
+        for (Object[] net : nets) {
+            double quantity = ((Number) net[3]).doubleValue();
+            if (quantity == 0) continue;
+            String document = net[1] != null
+                    ? "Demo work order " + folio(em.find(WorkOrder.class, ((Number) net[1]).longValue()))
+                    : purchaseOrder(em.find(PurchaseOrder.class, ((Number) net[2]).longValue()));
+            record(lock(((Number) net[0]).longValue()), -quantity, PartTransactionOrigin.DEMO_PURGE,
+                    Movement.by(actor).describedAs(document + " purged"));
+        }
+        partTransactionRepository.detachFromDemoWorkOrders(companyId);
+        partTransactionRepository.detachFromDemoPurchaseOrders(companyId);
+    }
+
+    /**
+     * P-16b (D-3): deletes the movements of the demo parts that belong to the demo data, for the demo purge.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void deleteDemoMovements(Long companyId) {
+        partTransactionRepository.deleteDemoMovements(companyId);
+    }
+
+    private static String folio(WorkOrder workOrder) {
+        return workOrder.getCustomId() != null ? workOrder.getCustomId() : "#" + workOrder.getId();
+    }
+
+    private static String purchaseOrder(PurchaseOrder purchaseOrder) {
+        return "Demo purchase order " + purchaseOrder.getName() + " (#" + purchaseOrder.getId() + ")";
     }
 }

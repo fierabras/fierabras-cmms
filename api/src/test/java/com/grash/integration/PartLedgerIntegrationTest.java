@@ -27,6 +27,7 @@ import com.grash.model.WorkOrder;
 import com.grash.repository.PartQuantityRepository;
 import com.grash.repository.PurchaseOrderRepository;
 import com.grash.repository.WorkflowRepository;
+import com.grash.service.DemoDataService;
 import com.grash.service.ImportService;
 import com.grash.service.PartLedgerService;
 import com.grash.service.PartLedgerService.Movement;
@@ -77,6 +78,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
     final FaultInjector faults;
     final ImportService importService;
     final WorkflowRepository workflowRepository;
+    final DemoDataService demoDataService;
     final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -85,7 +87,8 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
                               PartQuantityRepository partQuantityRepository,
                               PurchaseOrderRepository purchaseOrderRepository, PartLedgerService ledger,
                               EntityManager em, PlatformTransactionManager transactionManager,
-                              ImportService importService, WorkflowRepository workflowRepository) {
+                              ImportService importService, WorkflowRepository workflowRepository,
+                              DemoDataService demoDataService) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -99,6 +102,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         this.faults = new FaultInjector(jdbc);
         this.importService = importService;
         this.workflowRepository = workflowRepository;
+        this.demoDataService = demoDataService;
     }
 
     @AfterEach
@@ -952,6 +956,171 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
                     movements(part));
             assertEquals(409, respond(purchaseOrder, admin).status());
             assertEquals(2, stock(part));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 5 · Demo data and demo purge (PPB-20 d, PPB-30, D-3, D-P16b-1, D-P16b-7, D-P16b-8)
+    // =====================================================================================================
+
+    @Nested
+    class DemoData {
+
+        Response purge(User user) {
+            return call(delete("/demo/demo-data"), user);
+        }
+
+        /** A demo part with {@code quantity} in stock, explained by a demo movement (as the demo data are born). */
+        Part demoPart(Company company, double quantity) {
+            Part part = records.part(company, null);
+            jdbc.update("UPDATE part SET is_demo = true, quantity = ? WHERE id = ?", quantity, part.getId());
+            jdbc.update("INSERT INTO part_transaction (id, created_at, updated_at, company_id, part_id, quantity, "
+                    + "origin, is_demo) VALUES (nextval('part_transaction_seq'), now(), now(), ?, ?, ?, "
+                    + "'CREATION', true)", company.getId(), part.getId(), quantity);
+            return part;
+        }
+
+        PurchaseOrder approvedDemoPurchaseOrder(Part part, double quantity, User admin) {
+            PurchaseOrder purchaseOrder = purchaseOrder(part.getCompany());
+            PartQuantity line = line(part, null, purchaseOrder, quantity);
+            assertEquals(200, call(patch("/purchase-orders/" + purchaseOrder.getId() + "/respond")
+                    .param("approved", "true"), admin).status());
+            jdbc.update("UPDATE purchase_order SET is_demo = true WHERE id = ?", purchaseOrder.getId());
+            jdbc.update("UPDATE part_quantity SET is_demo = true WHERE id = ?", line.getId());
+            return purchaseOrder;
+        }
+
+        @Test
+        void ca086_partNotDemoSuppliedByAnApprovedDemoPurchaseOrder_purchaseOrderPurged_stockCompensated() {
+            // before P-16b: the demo purchase order was kept and its 3 stayed in the stock
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part p10 = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = approvedDemoPurchaseOrder(p10, 3, admin);
+            assertEquals(3, stock(p10));
+
+            Response response = purge(admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM purchase_order WHERE id = ?", purchaseOrder.getId()));
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+                    purchaseOrder.getId()));
+            assertEquals(0, stock(p10));
+            assertEquals(List.of(movement(3, PartTransactionOrigin.PURCHASE_ORDER, null, null, admin),
+                    movement(-3, PartTransactionOrigin.DEMO_PURGE, null, null, admin)), movements(p10));
+            assertEquals(List.of("Demo purchase order " + purchaseOrder.getName() + " (#" + purchaseOrder.getId()
+                            + ") purged", "[demo purchase order " + purchaseOrder.getName() + " (#"
+                            + purchaseOrder.getId() + ") purged]"),
+                    jdbc.queryForList("SELECT description FROM part_transaction WHERE part_id = ? AND created_by "
+                            + "IS NOT NULL ORDER BY origin", String.class, p10.getId()));
+            assertStockIsTheSumOfItsMovements(p10);
+        }
+
+        @Test
+        void partNotDemoConsumedOnADemoWorkOrder_workOrderPurged_consumptionCompensated() {
+            // before P-16b: the movement fell with the work order (CASCADE) and the stock stayed at 4
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 5);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, true);
+            addByReplacement(workOrder, part, admin);
+            String folio = TestRecords.unique("WO");
+            jdbc.update("UPDATE work_order SET custom_id = ? WHERE id = ?", folio, workOrder.getId());
+
+            Response response = purge(admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ?", workOrder.getId()));
+            assertEquals(5, stock(part));
+            assertEquals(List.of(movement(-1, PartTransactionOrigin.CONSUMPTION, null, null, admin),
+                    movement(1, PartTransactionOrigin.DEMO_PURGE, null, null, admin)), movements(part));
+            assertTrue(jdbc.queryForObject("SELECT description FROM part_transaction WHERE part_id = ? "
+                    + "AND origin = 'CONSUMPTION'", String.class, part.getId())
+                    .contains("[demo work order " + folio + " purged]"));
+            assertStockIsTheSumOfItsMovements(part);
+        }
+
+        @Test
+        void demoPartConsumedOnADemoWorkOrder_purgedWithItsMovements() {
+            // before P-16b: purged too (the movement fell with the work order)
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = demoPart(data.o1().company(), 5);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, true);
+            Long line = addByReplacement(workOrder, part, admin);
+            jdbc.update("UPDATE part_quantity SET is_demo = true WHERE id = ?", line);
+
+            Response response = purge(admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM part WHERE id = ?", part.getId()));
+            assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", part.getId()));
+        }
+
+        @Test
+        void demoPartAdjustedByAUser_409RecordInUse_nothingDeleted() {
+            // D-P16-6 (as a demo part restocked): a movement that is not demo, of a demo part, rejects the purge
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = demoPart(data.o1().company(), 5);
+            assertEquals(200, send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
+                    + "\",\"quantity\":2}", admin).status());
+
+            Response response = purge(admin);
+
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM part WHERE id = ?", part.getId()));
+            assertEquals(2, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", part.getId()));
+        }
+
+        @Test
+        void compensationAboveTheStock_406AsAnyExit_nothingPurged() {
+            // D-P16b-8: what the demo purchase order added was already consumed on a real work order
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = approvedDemoPurchaseOrder(part, 3, admin);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Long line = addByReplacement(workOrder, part, admin);
+            assertEquals(200, changeLine(line, 2, admin).status());
+            List<String> before = rows(part);
+
+            Response response = purge(admin);
+
+            assertEquals(406, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM purchase_order WHERE id = ?", purchaseOrder.getId()));
+            assertEquals(1, stock(part));
+            assertEquals(before, rows(part));
+        }
+
+        @Test
+        void factoryDemoData_bornWithTheirMovements_stockIsTheSum_thenPurged() throws InterruptedException {
+            // D-P16b-7; before P-16b: the demo parts had stock without movement and their line did not consume
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Long companyId = data.o1().company().getId();
+            demoDataService.createDemoData(admin, data.o1().company());
+            // createDemoData is asynchronous
+            for (int i = 0; i < 150 && count("SELECT count(*) FROM request WHERE company_id = ?", companyId) < 1; i++)
+                Thread.sleep(200);
+
+            assertEquals(List.of("Air Filter 9 CREATION:10 CONSUMPTION:-1", "Fuse 2A 20 CREATION:20",
+                    "V-Belt 5 CREATION:5"), jdbc.queryForList("""
+                    SELECT p.name || ' ' || p.quantity || ' ' || string_agg(t.origin || ':' || t.quantity, ' '
+                           ORDER BY t.id)
+                    FROM part p JOIN part_transaction t ON t.part_id = p.id
+                    WHERE p.company_id = ? AND p.is_demo AND t.is_demo AND t.created_by = ?
+                    GROUP BY p.name, p.quantity ORDER BY p.name""", String.class, companyId, admin.getId()));
+            assertEquals(List.of(), jdbc.queryForList("SELECT p.id FROM part p LEFT JOIN part_transaction t "
+                    + "ON t.part_id = p.id WHERE p.company_id = ? GROUP BY p.id, p.quantity "
+                    + "HAVING abs(p.quantity - COALESCE(SUM(t.quantity), 0)) > 1e-9", Long.class, companyId));
+
+            Response response = purge(admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM part WHERE company_id = ?", companyId));
+            assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE company_id = ?", companyId));
         }
     }
 }
