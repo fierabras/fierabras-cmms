@@ -945,4 +945,158 @@ class PreventiveMaintenanceIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(1, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)));
         }
     }
+
+    // =====================================================================================================
+    // B7 · A disabled user is not a new reference (E-8, PPB-08); the ones already cited are kept
+    // =====================================================================================================
+
+    @Nested
+    class DisabledUsers {
+
+        private void disable(User user) {
+            jdbc.update("UPDATE own_user SET enabled = false WHERE id = ?", user.getId());
+        }
+
+        private static String taskBy(String label, User user) {
+            return "{\"label\":\"" + label + "\",\"taskType\":\"SUBTASK\",\"options\":[],\"user\":" + ref(user.getId())
+                    + "}";
+        }
+
+        private long pmCount(CommonData data) {
+            return count("SELECT count(*) FROM preventive_maintenance WHERE company_id = ?",
+                    data.o1().company().getId());
+        }
+
+        @Test
+        void createdWithADisabledPrimaryUser_409UserRetired_notCreated() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            String name = TestRecords.unique("P-15 PM");
+
+            Response response = send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\""
+                    + name + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":"
+                    + "\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\",\"primaryUser\":"
+                    + ref(data.o1().technician().getId()) + "}", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(response, "USER_RETIRED")),
+                    () -> assertEquals(0, pmCount(data)));
+        }
+
+        @Test
+        void createdWithADisabledAssignedUser_409UserRetired_notCreated() {
+            CommonData data = data();
+            disable(data.o1().technician());
+            String name = TestRecords.unique("P-15 PM");
+
+            Response response = send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\""
+                    + name + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":"
+                    + "\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\",\"assignedTo\":["
+                    + ref(data.o1().technician().getId()) + "]}", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(response, "USER_RETIRED")),
+                    () -> assertEquals(0, pmCount(data)));
+        }
+
+        @Test
+        void editedToADisabledUser_409_previousKept_alreadyAssigned_editedKeepingIt_200() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long kept = preventiveMaintenance(data.o1().admin(), ",\"primaryUser\":" + ref(technician.getId()));
+            disable(technician);
+
+            Response change = send(patch("/preventive-maintenances/" + pm), "{\"title\":\"P-15\",\"assignedTo\":["
+                    + ref(technician.getId()) + "]}", data.o1().admin());
+            Response keep = send(patch("/preventive-maintenances/" + kept), "{\"title\":\"P-15\",\"primaryUser\":"
+                    + ref(technician.getId()) + "}", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(change, "USER_RETIRED")),
+                    () -> assertEquals(0, count("SELECT count(*) FROM preventive_maintenance_assigned_to "
+                            + "WHERE preventive_maintenance_id = ?", pm)),
+                    () -> assertEquals(200, keep.status(), keep.toString()),
+                    () -> assertEquals(technician.getId(), jdbc.queryForObject("SELECT primary_user_id FROM "
+                            + "preventive_maintenance WHERE id = ?", Long.class, kept)));
+        }
+
+        @Test
+        void newTaskOfAPreventiveMaintenanceForADisabledUser_409_tasksUnchanged_theCitingOneKept_200() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            assertEquals(200, replaceTasks("preventive-maintenance", pm, "[" + taskBy("P-15 by user", technician)
+                    + "]", data.o1().admin()).status());
+            long fresh = preventiveMaintenance(data.o1().admin(), "");
+            disable(technician);
+
+            Response rejected = replaceTasks("preventive-maintenance", fresh, "[" + taskBy("P-15 new", technician)
+                    + "]", data.o1().admin());
+            Response keep = replaceTasks("preventive-maintenance", pm, "[" + taskBy("P-15 by user", technician) + ","
+                    + task("P-15 other") + "]", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(rejected, "USER_RETIRED")),
+                    () -> assertEquals(0, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?",
+                            fresh)),
+                    () -> assertEquals(200, keep.status(), keep.toString()),
+                    () -> assertEquals(2, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?", pm)));
+        }
+
+        @Test
+        void newTaskOfAWorkOrderForADisabledUser_409_tasksUnchanged() {
+            CommonData data = data();
+            long workOrder = records.workOrder(data.o1().company(), null, com.grash.model.enums.Status.OPEN, false)
+                    .getId();
+            disable(data.o1().technician());
+
+            Response response = replaceTasks("work-order", workOrder, "[" + taskBy("P-15 new",
+                    data.o1().technician()) + "]", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(response, "USER_RETIRED")),
+                    () -> assertEquals(0, count("SELECT count(*) FROM task WHERE work_order_id = ?", workOrder)));
+        }
+
+        @Test
+        void checklistCreatedWithADisabledUser_409_notCreated() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            disable(data.o1().technician());
+
+            Response response = send(post("/checklists"), "{\"name\":\"" + TestRecords.unique("P-15 checklist")
+                    + "\",\"companySettings\":" + ref(company.getCompanySettings().getId()) + ",\"taskBases\":["
+                    + taskBy("P-15 step", data.o1().technician()) + "]}", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(response, "USER_RETIRED")),
+                    () -> assertEquals(0, count("SELECT count(*) FROM checklist c JOIN company_settings s "
+                            + "ON s.id = c.company_settings_id WHERE s.company_id = ?", company.getId())));
+        }
+
+        @Test
+        void checklistEditedToADisabledUser_409_alreadyCiting_editedKeepingIt_200() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            User technician = data.o1().technician();
+            String citing = "{\"name\":\"" + TestRecords.unique("P-15 checklist") + "\",\"companySettings\":"
+                    + ref(company.getCompanySettings().getId()) + ",\"taskBases\":[" + taskBy("P-15 step", technician)
+                    + "]}";
+            Response created = send(post("/checklists"), citing, data.o1().admin());
+            assertEquals(200, created.status(), created.toString());
+            long withUser = json(created).get("id").asLong();
+            long without = checklist(company, data.o1().admin(), "P-15 step");
+            disable(technician);
+
+            Response change = send(patch("/checklists/" + without), citing, data.o1().admin());
+            Response keep = send(patch("/checklists/" + withUser), citing, data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(change, "USER_RETIRED")),
+                    () -> assertEquals(0, count("SELECT count(*) FROM checklist_task_bases c JOIN task_base b "
+                            + "ON b.id = c.task_bases_id WHERE c.checklist_id = ? AND b.user_id IS NOT NULL", without)),
+                    () -> assertEquals(200, keep.status(), keep.toString()));
+        }
+    }
 }

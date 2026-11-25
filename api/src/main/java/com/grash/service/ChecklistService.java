@@ -39,12 +39,15 @@ public class ChecklistService {
     private final LicenseService licenseService;
     private final AssetService assetService;
     private final DeletionService deletionService;
+    private final UserService userService;
 
     @Transactional
     public Checklist createPost(ChecklistPostDTO checklistReq, Company company) {
         checkUsageBasedLimit(company);
         // P-14b (E-3, PPB-08): a task of the checklist does not cite an archived asset
         assetService.rejectRetired(List.of(), checklistReq.getTaskBases().stream().map(TaskBaseDTO::getAsset).toList());
+        // P-15 (E-8, PPB-08): a step of the checklist is not given to a disabled user
+        userService.rejectRetired(List.of(), checklistReq.getTaskBases().stream().map(TaskBaseDTO::getUser).toList());
         List<TaskBase> taskBases = checklistReq.getTaskBases().stream()
                 .map(taskBaseDto -> taskBaseService.createFromTaskBaseDTO(taskBaseDto, company)).collect(Collectors.toList());
         Checklist checklist = Checklist.builder()
@@ -69,6 +72,9 @@ public class ChecklistService {
             // P-14b (E-3, PPB-08): its tasks do not cite an archived asset anew; those they already cite are kept
             assetService.rejectRetired(savedChecklist.getTaskBases().stream().map(TaskBase::getAsset).toList(),
                     checklistReq.getTaskBases().stream().map(TaskBaseDTO::getAsset).toList());
+            // P-15 (E-8, PPB-08): its steps are not given to a disabled user anew; those they already have are kept
+            userService.rejectRetired(savedChecklist.getTaskBases().stream().map(TaskBase::getUser).toList(),
+                    checklistReq.getTaskBases().stream().map(TaskBaseDTO::getUser).toList());
             savedChecklist.getTaskBases().clear();
             List<TaskBase> taskBases = checklistReq.getTaskBases().stream()
                     .map(taskBaseDto -> taskBaseService.createFromTaskBaseDTO(taskBaseDto, company)).collect(Collectors.toList());

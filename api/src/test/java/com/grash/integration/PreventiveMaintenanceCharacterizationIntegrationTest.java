@@ -557,16 +557,19 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class DisabledUsers {
 
         @Test
-        void disabledUser_assignedToAPreventiveMaintenanceAndToTasks_200() {
+        void disabledUser_assignedToAPreventiveMaintenanceAndToTasks_409UserRetired() {
             CommonData data = data();
             User retired = data.o1().technician();
             disable(retired);
             String user = ref(retired.getId());
+            String name = TestRecords.unique("P-15 PM");
 
-            long pm = preventiveMaintenance(data.o1().admin(), ",\"primaryUser\":" + user + ",\"assignedTo\":["
-                    + user + "]");
-            long other = preventiveMaintenance(data.o1().admin(), "");
-            Response edited = send(patch("/preventive-maintenances/" + other), "{\"title\":\"P-15\",\"primaryUser\":"
+            Response created = send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\""
+                    + name + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":"
+                    + "\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\",\"primaryUser\":" + user
+                    + ",\"assignedTo\":[" + user + "]}", data.o1().admin());
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            Response edited = send(patch("/preventive-maintenances/" + pm), "{\"title\":\"P-15\",\"primaryUser\":"
                     + user + "}", data.o1().admin());
             String withUser = "[{\"label\":\"P-15 by user\",\"taskType\":\"SUBTASK\",\"options\":[],\"user\":"
                     + user + "}]";
@@ -577,14 +580,14 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
                     + "\",\"companySettings\":" + ref(data.o1().company().getCompanySettings().getId())
                     + ",\"taskBases\":" + withUser + "}", data.o1().admin());
 
-            // P-15 (E-8, PPB-08): before, a disabled user was accepted everywhere
+            // P-15 (E-8, PPB-08): before, a disabled user was accepted everywhere (200)
             assertAll(
-                    () -> assertEquals(200, edited.status(), edited.toString()),
-                    () -> assertEquals(200, pmTask.status(), pmTask.toString()),
-                    () -> assertEquals(200, woTask.status(), woTask.toString()),
-                    () -> assertEquals(200, checklist.status(), checklist.toString()),
-                    () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance_assigned_to "
-                            + "WHERE preventive_maintenance_id = ?", pm)));
+                    () -> assertEquals(409, created.status(), created.toString()),
+                    () -> assertEquals(409, edited.status(), edited.toString()),
+                    () -> assertEquals(409, pmTask.status(), pmTask.toString()),
+                    () -> assertEquals(409, woTask.status(), woTask.toString()),
+                    () -> assertEquals(409, checklist.status(), checklist.toString()),
+                    () -> assertTrue(checklist.body().contains("USER_RETIRED"), checklist.toString()));
         }
     }
 

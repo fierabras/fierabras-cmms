@@ -78,6 +78,9 @@ public class PreventiveMaintenanceService {
         checkUsageBasedLimit(user.getCompany());
         // P-14b (E-3, PPB-08): an archived asset is not given to a new preventive maintenance
         assetService.rejectRetired(List.of(), Collections.singletonList(preventiveMaintenancePost.getAsset()));
+        // P-15 (E-8, PPB-08): a disabled user is not given to a new preventive maintenance
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(preventiveMaintenancePost.getPrimaryUser(),
+                preventiveMaintenancePost.getAssignedTo()));
         Company company = user.getCompany();
         Long nextSequence = customSequenceService.getNextPreventiveMaintenanceSequence(company);
         preventiveMaintenance.setCustomId("PM" + String.format("%06d", nextSequence));
@@ -101,6 +104,11 @@ public class PreventiveMaintenanceService {
             // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
             assetService.rejectRetired(Collections.singletonList(savedPreventiveMaintenance.getAsset()),
                     Collections.singletonList(preventiveMaintenance.getAsset()));
+            // P-15 (E-8, PPB-08): a disabled user is not given anew; the ones already assigned are kept
+            userService.rejectRetired(WorkOrderService.assignedUsers(savedPreventiveMaintenance.getPrimaryUser(),
+                            savedPreventiveMaintenance.getAssignedTo()),
+                    WorkOrderService.assignedUsers(preventiveMaintenance.getPrimaryUser(),
+                            preventiveMaintenance.getAssignedTo()));
             if (!preventiveMaintenance.getCustomFields().isEmpty()) {
                 setPMCustomFields(savedPreventiveMaintenance, preventiveMaintenance.getCustomFields(),
                         user.getCompany());
