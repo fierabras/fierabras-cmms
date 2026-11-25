@@ -29,6 +29,7 @@ import useAuth from '../../../../hooks/useAuth';
 import { PlanFeature } from '../../../../models/owns/subscriptionPlan';
 import FeatureErrorMessage from '../../components/FeatureErrorMessage';
 import { getErrorMessage } from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 function Checklists() {
   const { t }: { t: any } = useTranslation();
@@ -49,8 +50,12 @@ function Checklists() {
   const onDeleteSuccess = () => {
     showSnackBar(t('checklist_delete_success'), 'success');
   };
+  // P-15 (E-10): a checklist cited by an automation is not deleted
   const onDeleteFailure = (err) =>
-    showSnackBar(t('checklist_delete_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('checklist_delete_failure')),
+      'error'
+    );
   const onEditSuccess = () => {
     setOpenEditChecklist(false);
     showSnackBar(t('changes_saved_success'), 'success');

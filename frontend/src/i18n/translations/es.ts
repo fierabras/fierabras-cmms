@@ -2208,7 +2208,19 @@ const esJSON = {
   asset_restore_success: 'El activo ha sido restaurado.',
   asset_restore_failure: 'El activo no pudo ser restaurado.',
   asset_archived_notice:
-    'Este activo está archivado. Restáurelo para modificarlo.'
+    'Este activo está archivado. Restáurelo para modificarlo.',
+  preventive_maintenance_in_use:
+    'Este mantenimiento preventivo está en uso y no puede eliminarse. Páuselo en su lugar.',
+  schedule_required:
+    'Un mantenimiento preventivo necesita su programación. Elimine o pause el mantenimiento preventivo.',
+  checklist_in_use:
+    'Esta lista de verificación la usa una automatización y no puede eliminarse. Cambie la automatización primero.',
+  to_pause: 'Pausar',
+  to_resume: 'Reanudar',
+  pm_pause_success: 'El mantenimiento preventivo ha sido pausado.',
+  pm_pause_failure: 'El mantenimiento preventivo no pudo ser pausado.',
+  pm_resume_success: 'El mantenimiento preventivo ha sido reanudado.',
+  pm_resume_failure: 'El mantenimiento preventivo no pudo ser reanudado.'
 };
 
 export default esJSON;

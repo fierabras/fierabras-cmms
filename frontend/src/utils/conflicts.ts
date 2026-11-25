@@ -29,7 +29,10 @@ const conflictKeys: Record<string, string> = {
   PART_CATEGORY_IN_USE: 'part_category_in_use',
   PURCHASE_ORDER_CATEGORY_IN_USE: 'purchase_order_category_in_use',
   VENDOR_IN_USE: 'vendor_in_use',
-  PURCHASE_ORDER_CLOSED: 'purchase_order_closed'
+  PURCHASE_ORDER_CLOSED: 'purchase_order_closed',
+  PREVENTIVE_MAINTENANCE_IN_USE: 'preventive_maintenance_in_use',
+  SCHEDULE_REQUIRED: 'schedule_required',
+  CHECKLIST_IN_USE: 'checklist_in_use'
 };
 
 /**
