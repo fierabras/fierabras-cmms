@@ -34,7 +34,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -124,14 +123,15 @@ public class PurchaseOrderService {
     }
 
     /**
-     * P-16b (E-16): the purchase order, read again and locked until the transaction ends, as the approval locks it:
-     * a change of its lines and its approval happen one after the other.
+     * P-16b (E-16): the purchase order, locked until the transaction ends as the approval locks it, and then read
+     * again: a change of its lines and its approval happen one after the other, and the state read is the committed
+     * one even when the purchase order was loaded before.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public PurchaseOrder lock(Long id) {
-        PurchaseOrder purchaseOrder = em.find(PurchaseOrder.class, id);
-        if (purchaseOrder == null) throw new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND);
-        em.refresh(purchaseOrder, LockModeType.PESSIMISTIC_WRITE);
+        PurchaseOrder purchaseOrder = purchaseOrderRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND));
+        em.refresh(purchaseOrder);
         return purchaseOrder;
     }
 

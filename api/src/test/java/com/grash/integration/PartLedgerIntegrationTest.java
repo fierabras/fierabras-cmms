@@ -1332,4 +1332,75 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             assertEquals(404, call(get("/part-quantities/999999999"), data.o1().admin()).status());
         }
     }
+
+    // =====================================================================================================
+    // Block 8 · Every route at once: the stock of each part is the sum of its movements (PPB-30)
+    // =====================================================================================================
+
+    @Nested
+    class EveryRoute {
+
+        @Test
+        void afterEveryRoute_stockOfEachPartIsTheSumOfItsMovements() throws InterruptedException {
+            CommonData data = data();
+            Company company = data.o1().company();
+            User admin = data.o1().admin();
+            WorkOrder workOrder = records.workOrder(company, null, Status.OPEN, false);
+            // creation, adjustment, restock
+            Long created = json(send(post("/parts"), "{\"name\":\"" + TestRecords.unique("P-16b all")
+                    + "\",\"quantity\":8}", admin)).get("id").asLong();
+            Part a = em.find(Part.class, created);
+            assertEquals(200, send(patch("/parts/" + a.getId()), "{\"name\":\"" + a.getName()
+                    + "\",\"quantity\":12}", admin).status());
+            assertEquals(200, send(post("/parts/" + a.getId() + "/restock"), "{\"quantity\":3}", admin).status());
+            // consumption by every route, raised, reduced, removed
+            Part b = part(company, 20);
+            Long line = addByReplacement(workOrder, a, admin);
+            assertEquals(200, changeLine(line, 4, admin).status());
+            assertEquals(200, changeLine(line, 2, admin).status());
+            Response posted = send(post("/part-quantities"), "{\"part\":{\"id\":" + b.getId()
+                    + "},\"workOrder\":{\"id\":" + workOrder.getId() + "},\"quantity\":5}", admin);
+            assertEquals(200, posted.status(), posted.toString());
+            assertEquals(200, call(delete("/part-quantities/" + json(posted).get("id").asLong()), admin).status());
+            assertEquals(200, send(patch("/part-quantities/work-order/" + workOrder.getId()),
+                    "[" + b.getId() + "]", admin).status());
+            assertEquals(200, send(patch("/part-quantities/work-order/" + workOrder.getId()), "[]", admin)
+                    .status());
+            // import
+            importService.importParts(List.of(PartImportDTO.builder().id(b.getId()).name(b.getName()).quantity(30)
+                    .build()), company, admin);
+            // purchase orders: direct, and by a workflow on creation; then a demo one purged
+            PurchaseOrder direct = purchaseOrder(company);
+            line(a, null, direct, 6);
+            assertEquals(200, call(patch("/purchase-orders/" + direct.getId() + "/respond")
+                    .param("approved", "true"), admin).status());
+            WorkflowAction action = new WorkflowAction();
+            action.setCompany(company);
+            action.setPurchaseOrderAction(PurchaseOrderAction.APPROVE);
+            Workflow workflow = new Workflow();
+            workflow.setCompany(company);
+            workflow.setTitle(TestRecords.unique("P-16b workflow"));
+            workflow.setMainCondition(WFMainCondition.PURCHASE_ORDER_CREATED);
+            workflow.setAction(action);
+            workflow.setSecondaryConditions(new ArrayList<>());
+            workflowRepository.saveAndFlush(workflow);
+            Response automatic = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16b PO")
+                    + "\",\"partQuantities\":[{\"part\":{\"id\":" + b.getId() + "},\"quantity\":4}]}", admin);
+            assertEquals("APPROVED", json(automatic).get("status").asText());
+            Long demo = json(send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16b demo")
+                    + "\",\"partQuantities\":[{\"part\":{\"id\":" + a.getId() + "},\"quantity\":1}]}", admin))
+                    .get("id").asLong();
+            jdbc.update("UPDATE purchase_order SET is_demo = true WHERE id = ?", demo);
+            jdbc.update("UPDATE part_quantity SET is_demo = true WHERE purchase_order_id = ?", demo);
+            assertEquals(200, call(delete("/demo/demo-data"), admin).status());
+
+            assertEquals(List.of(), jdbc.queryForList("SELECT p.id FROM part p LEFT JOIN part_transaction t "
+                    + "ON t.part_id = p.id WHERE p.company_id = ? GROUP BY p.id, p.quantity "
+                    + "HAVING abs(p.quantity - COALESCE(SUM(t.quantity), 0)) > 1e-9", Long.class, company.getId()),
+                    "every part: stock = sum of its movements");
+            assertEquals(List.of("ADJUSTMENT", "CONSUMPTION", "CREATION", "DEMO_PURGE", "IMPORT", "PURCHASE_ORDER",
+                    "RESTOCK", "REVERSAL"), jdbc.queryForList("SELECT DISTINCT origin FROM part_transaction "
+                    + "WHERE company_id = ? ORDER BY origin", String.class, company.getId()));
+        }
+    }
 }

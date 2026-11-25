@@ -508,4 +508,84 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(5, stock(part));
         assertEquals(List.of("5 PURCHASE_ORDER " + purchaseOrder), movements(part));
     }
+
+    /**
+     * P-16b: adds {@code part} to the work order through the bulk replacement, which consumes one.
+     */
+    private Response consumeOne(WorkOrder workOrder, Long part) {
+        return api.call(patch("/part-quantities/work-order/" + workOrder.getId())
+                .contentType(MediaType.APPLICATION_JSON).content("[" + part + "]"), admin);
+    }
+
+    /**
+     * P-16b: a part with {@code quantity} in stock, with the movement that explains it.
+     */
+    private Long partWithStock(double quantity) {
+        Long part = records.part(data.o1().company(), null).getId();
+        jdbc.update("UPDATE part SET quantity = ? WHERE id = ?", quantity, part);
+        jdbc.update("INSERT INTO part_transaction (id, created_at, updated_at, company_id, part_id, quantity, origin, "
+                + "is_demo) VALUES (nextval('part_transaction_seq'), now(), now(), ?, ?, ?, 'ADJUSTMENT', "
+                + "false)", data.o1().company().getId(), part, quantity);
+        return part;
+    }
+
+    private double sumOfMovements(Long part) {
+        return jdbc.queryForObject("SELECT COALESCE(SUM(quantity), 0) FROM part_transaction WHERE part_id = ?",
+                Double.class, part);
+    }
+
+    @Test
+    void lastUnitConsumedOnTwoWorkOrdersAtOnce_one200AndOne406_neverBelowZero() throws Exception {
+        // P-16b (E-1): the ledger locks the part; the second consumption waits and then finds no stock
+        Long part = partWithStock(1);
+        WorkOrder first = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+        WorkOrder second = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+        AtomicReference<Response> held = new AtomicReference<>();
+
+        Response result = compete(() -> held.set(consumeOne(first, part)), () -> consumeOne(second, part));
+
+        assertEquals(200, held.get().status(), held.get().toString());
+        assertEquals(406, result.status(), result.toString());
+        assertEquals(0, stock(part));
+        assertEquals(0, sumOfMovements(part));
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM part_quantity WHERE work_order_id = ?",
+                Integer.class, second.getId()));
+    }
+
+    @Test
+    void twoUnitsConsumedOnTwoWorkOrdersAtOnce_both200_noStockLost() throws Exception {
+        // P-16b (E-1): without the lock both would read 2 and write 1
+        Long part = partWithStock(2);
+        WorkOrder first = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+        WorkOrder second = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+        AtomicReference<Response> held = new AtomicReference<>();
+
+        Response result = compete(() -> held.set(consumeOne(first, part)), () -> consumeOne(second, part));
+
+        assertEquals(200, held.get().status(), held.get().toString());
+        assertEquals(200, result.status(), result.toString());
+        assertEquals(0, stock(part));
+        assertEquals(0, sumOfMovements(part));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM part_transaction WHERE part_id = ? "
+                + "AND origin = 'CONSUMPTION'", Integer.class, part));
+    }
+
+    @Test
+    void purchaseOrderLineChangedAlone_whileItIsBeingApproved_409PurchaseOrderClosed() throws Exception {
+        // P-16b (E-16): the line is read before the lock; the state of its purchase order must be the committed one
+        Long part = records.part(data.o1().company(), null).getId();
+        Long purchaseOrder = pendingPurchaseOrder(part, 3);
+        Long line = jdbc.queryForObject("SELECT id FROM part_quantity WHERE purchase_order_id = ?", Long.class,
+                purchaseOrder);
+        AtomicReference<Response> approval = new AtomicReference<>();
+
+        Response result = compete(() -> approval.set(approvePurchaseOrder(purchaseOrder)),
+                () -> api.call(patch("/part-quantities/" + line).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":5}"), admin));
+
+        assertEquals(200, approval.get().status(), approval.get().toString());
+        assertEquals(409, result.status(), result.toString());
+        assertEquals(3, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class, line));
+        assertEquals(3, stock(part));
+    }
 }

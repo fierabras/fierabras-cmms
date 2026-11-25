@@ -9,15 +9,18 @@ import com.grash.model.WorkOrder;
 import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.repository.PartTransactionRepository;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * P-16b (PPB-30, E-1): the only place that changes the stock of a part, always together with the movement of its
@@ -27,6 +30,9 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class PartLedgerService {
+
+    /** Key of the identifiers of the parts locked by the current transaction. */
+    private static final Object LOCKED_PARTS = PartLedgerService.class.getName() + ".lockedParts";
 
     private final EntityManager em;
     private final PartTransactionRepository partTransactionRepository;
@@ -59,17 +65,38 @@ public class PartLedgerService {
     }
 
     /**
-     * The part, read again and locked until the transaction ends, so that its stock is the committed one and two
-     * changes of the same part happen one after the other. Pending changes are written first: reading the part again
-     * would discard them. Lock several parts in the order of their identifiers.
+     * The part, locked until the transaction ends and then read again, so that its stock is the committed one and two
+     * changes of the same part happen one after the other. Only the row of the part is locked, before it is read
+     * (Hibernate's refresh with a lock reads first and locks afterwards). Pending changes are written first: reading
+     * the part again would discard them. Lock several parts in the order of their identifiers.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public Part lock(Long partId) {
         em.flush();
+        if (em.createNativeQuery("SELECT id FROM part WHERE id = :id FOR UPDATE").setParameter("id", partId)
+                .getResultList().isEmpty())
+            throw new CustomException("Part not found", HttpStatus.NOT_FOUND);
         Part part = em.find(Part.class, partId);
-        if (part == null) throw new CustomException("Part not found", HttpStatus.NOT_FOUND);
-        em.refresh(part, LockModeType.PESSIMISTIC_WRITE);
+        em.refresh(part);
+        lockedParts().add(partId);
         return part;
+    }
+
+    private static Set<Long> lockedParts() {
+        @SuppressWarnings("unchecked")
+        Set<Long> locked = (Set<Long>) TransactionSynchronizationManager.getResource(LOCKED_PARTS);
+        if (locked == null) {
+            Set<Long> parts = new HashSet<>();
+            TransactionSynchronizationManager.bindResource(LOCKED_PARTS, parts);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    TransactionSynchronizationManager.unbindResourceIfPossible(LOCKED_PARTS);
+                }
+            });
+            return parts;
+        }
+        return locked;
     }
 
     /**
@@ -81,7 +108,7 @@ public class PartLedgerService {
     @Transactional(propagation = Propagation.MANDATORY)
     public Optional<PartTransaction> record(Part part, double change, PartTransactionOrigin origin,
                                             Movement movement) {
-        if (!em.contains(part) || em.getLockMode(part) != LockModeType.PESSIMISTIC_WRITE)
+        if (!em.contains(part) || !lockedParts().contains(part.getId()))
             throw new IllegalStateException("P-16b: the stock of part " + part.getId() + " changes only once it is "
                     + "locked (PartLedgerService.lock)");
         if (change == 0 || part.isNonStock()) return Optional.empty();
