@@ -28,6 +28,7 @@ import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
@@ -231,21 +232,19 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
         }
 
         @Test
-        void ca098_withAGeneratedWorkOrder_200_workOrderUnlinked() throws SchedulerException {
+        void ca098_withAGeneratedWorkOrder_409_workOrderKeepsItsLink() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
-            long schedule = scheduleOf(pm);
             long workOrder = generatedWorkOrder(pm, data.o1().admin());
 
             Response response = call(delete("/preventive-maintenances/" + pm), data.o1().admin());
 
-            // P-15 (CA-PPB-098): before, it was deleted and the work order lost its link (SET NULL)
+            // P-15 (CA-PPB-098, E-9): before, 200; it was deleted and the work order lost its link (SET NULL)
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(0, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)),
-                    () -> assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ? "
-                            + "AND parent_preventive_maintenance_id IS NOT NULL", workOrder)),
-                    () -> assertFalse(jobExists(schedule)));
+                    () -> assertEquals(409, response.status(), response.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ? "
+                            + "AND parent_preventive_maintenance_id = ?", workOrder, pm)));
         }
 
         @Test
@@ -395,7 +394,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
         }
 
         @Test
-        void ca048_sharedDefinitionDeletedInTheDatabase_cascadesToTheTasks() {
+        void ca048_sharedDefinitionDeletedInTheDatabase_rejected_theTasksKeepIt() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             assertEquals(200, replaceTasks("preventive-maintenance", pm, "[" + task("P-15 shared") + "]",
@@ -403,12 +402,10 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             long workOrder = generatedWorkOrder(pm, data.o1().admin());
             Long taskBase = (Long) tasksOf(workOrder).get(0).get("task_base_id");
 
-            int deleted = jdbc.update("DELETE FROM task_base WHERE id = ?", taskBase);
-
             // P-15 (CA-PPB-048, E-9): before, task.task_base_id was CASCADE: both tasks went with it
-            assertAll(
-                    () -> assertEquals(1, deleted),
-                    () -> assertEquals(0, count("SELECT count(*) FROM task WHERE task_base_id = ?", taskBase)));
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> jdbc.update("DELETE FROM task_base WHERE id = ?", taskBase));
+            assertEquals(2, count("SELECT count(*) FROM task WHERE task_base_id = ?", taskBase));
         }
 
         @Test
@@ -530,7 +527,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
         }
 
         @Test
-        void citedByAnAutomation_deleted_200_theWholeAutomationGoesWithIt() {
+        void citedByAnAutomation_409_theChecklistAndTheAutomationKept() {
             CommonData data = data();
             long checklist = checklist(data.o1().company(), data.o1().admin(), "P-15 step");
             Response workflow = send(post("/workflows"), "{\"title\":\"" + TestRecords.unique("P-15 workflow")
@@ -542,13 +539,13 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
 
             Response deletion = call(delete("/checklists/" + checklist), data.o1().admin());
 
-            // P-15 (E-7, E-9): before, the action went in cascade with the checklist, and the automation with it
+            // P-15 (E-7, E-9): before, 200; the action went in cascade with the checklist, and the automation with it
             assertAll(
-                    () -> assertEquals(200, deletion.status(), deletion.toString()),
-                    () -> assertEquals(0, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)),
-                    () -> assertEquals(0, count("SELECT count(*) FROM workflow_action WHERE checklist_id = ?",
+                    () -> assertEquals(409, deletion.status(), deletion.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM workflow_action WHERE checklist_id = ?",
                             checklist)),
-                    () -> assertEquals(0, count("SELECT count(*) FROM workflow WHERE id = ?", workflowId)));
+                    () -> assertEquals(1, count("SELECT count(*) FROM workflow WHERE id = ?", workflowId)));
         }
     }
 
@@ -648,15 +645,17 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
                     ORDER BY 1""", String.class);
             System.out.println("P-15 characterization, foreign keys: " + keys);
 
-            // confdeltype: a NO ACTION, c CASCADE, n SET NULL. P-15 (E-9): before, the rules of the CSV
+            // confdeltype: a NO ACTION, c CASCADE, n SET NULL. P-15 (E-9): before, custom_field_value a,
+            // preventive_maintenance.schedule_id n, task c, task_option n, work_order n, work_order_aud n,
+            // workflow_action c
             assertEquals(List.of(
-                    "custom_field_value.preventive_maintenance_id -> preventive_maintenance a",
-                    "preventive_maintenance.schedule_id -> schedule n",
-                    "task.task_base_id -> task_base c",
-                    "task_option.task_base_id -> task_base n",
-                    "work_order.parent_preventive_maintenance_id -> preventive_maintenance n",
-                    "work_order_aud.parent_preventive_maintenance_id -> preventive_maintenance n",
-                    "workflow_action.checklist_id -> checklist c"),
+                    "custom_field_value.preventive_maintenance_id -> preventive_maintenance c",
+                    "preventive_maintenance.schedule_id -> schedule a",
+                    "task.task_base_id -> task_base a",
+                    "task_option.task_base_id -> task_base c",
+                    "work_order.parent_preventive_maintenance_id -> preventive_maintenance a",
+                    "work_order_aud.parent_preventive_maintenance_id -> preventive_maintenance a",
+                    "workflow_action.checklist_id -> checklist a"),
                     keys.stream().map(key -> key.substring(0, key.lastIndexOf(' ', key.indexOf(" index=") - 1)))
                             .toList());
         }
