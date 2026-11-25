@@ -71,18 +71,25 @@ public class PartService {
     private static final String PART_IN_USE_MESSAGE = "This part is used by other records and cannot be deleted";
 
 
+    /**
+     * Creates the part. P-16b (PPB-30, D-P16b-5): its stock is an entry of its ledger with origin CREATION by
+     * {@code user}; a part without stock control is born without stock.
+     */
     @Transactional
     public Part create(Part part, User user) {
         checkUsageBasedLimit(user.getCompany());
         Company company = user.getCompany();
+        double initialQuantity = part.getQuantity();
+        part.setQuantity(0);
         if (part instanceof PartPostDTO partPostDTO) {
             part = partMapper.fromPostDto(partPostDTO);
             if (partPostDTO.getCustomFields() != null && !partPostDTO.getCustomFields().isEmpty()) {
                 setPartCustomFields(part, partPostDTO.getCustomFields(), company);
             }
         }
-        Part savedPart = partRepository.saveAndFlush(part);
-        em.refresh(savedPart);
+        Part savedPart = partLedgerService.lock(partRepository.saveAndFlush(part).getId());
+        partLedgerService.record(savedPart, initialQuantity, PartTransactionOrigin.CREATION,
+                PartLedgerService.Movement.by(user));
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("partId", savedPart.getId());
         Object serializedPart = partMapper.toShowDto(savedPart);
@@ -103,16 +110,25 @@ public class PartService {
         );
     }
 
+    /**
+     * Changes the part. P-16b (PPB-30): a new stock is an adjustment of its ledger by {@code actor}, for the
+     * difference, in the same transaction; without difference, or for a part without stock control (after the
+     * change), the stock does not change and nothing is recorded.
+     */
     @Transactional
-    public Part update(Long id, PartPatchDTO part, Company company) {
+    public Part update(Long id, PartPatchDTO part, Company company, User actor) {
         if (partRepository.existsById(id)) {
-            Part savedPart = partRepository.findById(id).get();
+            Part savedPart = partLedgerService.lock(id);
             if (part.getCustomFields() != null && !part.getCustomFields().isEmpty()) {
                 setPartCustomFields(savedPart, part.getCustomFields(), company);
             }
             double originalPartQuantity = savedPart.getQuantity();
             Collection<PartField> changedFields = detectPatchDTOChangedFields(savedPart, part);
-            Part patchedPart = partRepository.saveAndFlush(partMapper.updatePart(savedPart, part));
+            partMapper.updatePart(savedPart, part);
+            partLedgerService.record(savedPart, part.getQuantity() - originalPartQuantity,
+                    PartTransactionOrigin.ADJUSTMENT, PartLedgerService.Movement.by(actor));
+            if (savedPart.getQuantity() == originalPartQuantity) changedFields.remove(PartField.QUANTITY);
+            Part patchedPart = partRepository.saveAndFlush(savedPart);
             em.refresh(patchedPart);
 
             Map<String, Object> webhookPayload = new HashMap<>();
@@ -307,7 +323,8 @@ public class PartService {
             PartCategory category = partCategoryService.getOrCreate(dto.getCategory(), company.getCompanySettings());
             part.setCategory(category);
         }
-        part.setNonStock(Helper.getBooleanFromString(dto.getCategory()));
+        // P-16b (A-10): nonStock comes from its own column, not from the category
+        part.setNonStock(Helper.getBooleanFromString(dto.getNonStock()));
         if (dto.getBarcode() != null && !dto.getBarcode().trim().isEmpty()) {
             Optional<Part> optionalPartWithSameBarCode = findByBarcodeAndCompany(dto.getBarcode(), company.getId());
             if (optionalPartWithSameBarCode.isPresent()) {
@@ -326,7 +343,7 @@ public class PartService {
         }
         part.setBarcode(dto.getBarcode());
         part.setDescription(dto.getDescription());
-        part.setQuantity(dto.getQuantity());
+        // P-16b: the stock is set by the import through the ledger (ImportService.importParts)
         part.setAdditionalInfos(dto.getAdditionalInfos());
         part.setArea(dto.getArea());
         part.setMinQuantity(dto.getMinQuantity());

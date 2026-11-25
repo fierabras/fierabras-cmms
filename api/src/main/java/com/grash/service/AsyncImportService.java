@@ -122,7 +122,7 @@ public class AsyncImportService {
                 return;
             }
 
-            ImportResponse response = importService.importParts(toImport, user.getCompany());
+            ImportResponse response = importService.importParts(toImport, user.getCompany(), user);
             messagingTemplate.convertAndSend("/imports/" + uuid, response);
             log.info("Import completed for parts, uuid: {}, created: {}, updated: {}", uuid, response.getCreated(),
                     response.getUpdated());

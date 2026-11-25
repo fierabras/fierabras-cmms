@@ -2,6 +2,7 @@ package com.grash.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.dto.imports.PartImportDTO;
 import com.grash.integration.support.FaultInjector;
 import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestApi.Response;
@@ -20,6 +21,7 @@ import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.Status;
 import com.grash.repository.PartQuantityRepository;
 import com.grash.repository.PurchaseOrderRepository;
+import com.grash.service.ImportService;
 import com.grash.service.PartLedgerService;
 import com.grash.service.PartLedgerService.Movement;
 import jakarta.persistence.EntityManager;
@@ -66,6 +68,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
     final EntityManager em;
     final TransactionTemplate transaction;
     final FaultInjector faults;
+    final ImportService importService;
     final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -73,7 +76,8 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
                               ObjectMapper objectMapper, JdbcTemplate jdbc,
                               PartQuantityRepository partQuantityRepository,
                               PurchaseOrderRepository purchaseOrderRepository, PartLedgerService ledger,
-                              EntityManager em, PlatformTransactionManager transactionManager) {
+                              EntityManager em, PlatformTransactionManager transactionManager,
+                              ImportService importService) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -85,6 +89,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         this.em = em;
         this.transaction = new TransactionTemplate(transactionManager);
         this.faults = new FaultInjector(jdbc);
+        this.importService = importService;
     }
 
     @AfterEach
@@ -582,6 +587,218 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             });
 
             assertEquals(before, rows(c.part()));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 3 · Creation, adjustment and import (PPB-30, D-P16b-5, A-10, C-1)
+    // =====================================================================================================
+
+    @Nested
+    class CreationAdjustmentImport {
+
+        PartImportDTO row(Part part, double quantity, String nonStock, String category) {
+            return PartImportDTO.builder().id(part == null ? null : part.getId())
+                    .name(part == null ? TestRecords.unique("P-16b imported") : part.getName())
+                    .quantity(quantity).nonStock(nonStock).category(category).build();
+        }
+
+        Part byName(Company company, String name) {
+            Long id = jdbc.queryForObject("SELECT id FROM part WHERE company_id = ? AND name = ?", Long.class,
+                    company.getId(), name);
+            return em.find(Part.class, id);
+        }
+
+        @Test
+        void ca081_createdWithStock_entryWithOriginCreationByTheUser() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+
+            Response response = send(post("/parts"), "{\"name\":\"" + TestRecords.unique("P-16b P8")
+                    + "\",\"quantity\":5}", admin);
+
+            assertEquals(200, response.status(), response.toString());
+            Part part = em.find(Part.class, json(response).get("id").asLong());
+            assertEquals(5, stock(part));
+            assertEquals(List.of(movement(5, PartTransactionOrigin.CREATION, null, null, admin)), movements(part));
+            assertNotNull(jdbc.queryForObject("SELECT created_at FROM part_transaction WHERE part_id = ?",
+                    java.sql.Timestamp.class, part.getId()));
+            assertStockIsTheSumOfItsMovements(part);
+        }
+
+        @Test
+        void createdWithoutStock_noMovement() {
+            CommonData data = data();
+
+            Response response = send(post("/parts"), "{\"name\":\"" + TestRecords.unique("P-16b part") + "\"}",
+                    data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            Part part = em.find(Part.class, json(response).get("id").asLong());
+            assertEquals(0, stock(part));
+            assertEquals(List.of(), movements(part));
+        }
+
+        @Test
+        void nonStockCreatedWithStock_bornAtZero_noMovement() {
+            // D-P16b-5; before P-16b: born with 5
+            CommonData data = data();
+
+            Response response = send(post("/parts"), "{\"name\":\"" + TestRecords.unique("P-16b part")
+                    + "\",\"nonStock\":true,\"quantity\":5}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            Part part = em.find(Part.class, json(response).get("id").asLong());
+            assertEquals(0, stock(part));
+            assertEquals(List.of(), movements(part));
+        }
+
+        @Test
+        void ca083_patchedWithAnotherQuantity_adjustmentForTheDifference_earlierUnchanged() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 9);
+            List<String> before = rows(part);
+
+            Response response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
+                    + "\",\"quantity\":7}", admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(7, stock(part));
+            assertEquals(List.of(movement(-2, PartTransactionOrigin.ADJUSTMENT, null, null, admin)),
+                    movements(part));
+            assertTrue(rows(part).containsAll(before), "earlier movements unchanged");
+            assertStockIsTheSumOfItsMovements(part);
+        }
+
+        @Test
+        void patchedWithTheSameQuantity_noMovement() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 9);
+
+            Response response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
+                    + "\",\"quantity\":9,\"description\":\"P-16b\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(9, stock(part));
+            assertEquals(List.of(), movements(part));
+        }
+
+        @Test
+        void patchedWithoutQuantity_stockSetToZero_withAnAdjustment() {
+            // D-P16b-11: kept as before (the quantity of the DTO is a primitive), now with its movement
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 9);
+
+            Response response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName() + "\"}",
+                    admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, stock(part));
+            assertEquals(List.of(movement(-9, PartTransactionOrigin.ADJUSTMENT, null, null, admin)),
+                    movements(part));
+            assertStockIsTheSumOfItsMovements(part);
+        }
+
+        @Test
+        void patchedToNonStockWithAnotherQuantity_quantityKept_noMovement() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 9);
+
+            Response response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
+                    + "\",\"nonStock\":true,\"quantity\":3}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(9, stock(part));
+            assertTrue(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class, part.getId()));
+            assertEquals(List.of(), movements(part));
+        }
+
+        @Test
+        void ca087_adjustmentFails_nothingChanged() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 7);
+            List<String> before = rows(part);
+
+            Response response;
+            try (FaultInjector.Fault fault = faults.failOn("part_transaction", FaultInjector.Operation.INSERT)) {
+                response = send(patch("/parts/" + part.getId()), "{\"name\":\"" + part.getName()
+                        + "\",\"quantity\":4,\"description\":\"P-16b changed\"}", data.o1().admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertFalse(response.is2xx(), response.toString());
+            assertEquals(7, stock(part));
+            assertEquals(before, rows(part));
+            assertNull(jdbc.queryForObject("SELECT description FROM part WHERE id = ?", String.class, part.getId()));
+        }
+
+        @Test
+        void ca084_imported_movementForTheDifferenceOnly_byWhoImports() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            User admin = data.o1().admin();
+            Part p8 = part(company, 7);
+            Part p9 = part(company, 3);
+            PartImportDTO created = row(null, 4, null, null);
+
+            importService.importParts(List.of(row(p8, 12, null, null), row(p9, 3, null, null), created), company,
+                    admin);
+
+            assertEquals(12, stock(p8));
+            assertEquals(List.of(movement(5, PartTransactionOrigin.IMPORT, null, null, admin)), movements(p8));
+            assertEquals(3, stock(p9));
+            assertEquals(List.of(), movements(p9));
+            Part newPart = byName(company, created.getName());
+            assertEquals(List.of(movement(4, PartTransactionOrigin.IMPORT, null, null, admin)), movements(newPart));
+            assertStockIsTheSumOfItsMovements(p8);
+            assertStockIsTheSumOfItsMovements(newPart);
+        }
+
+        @Test
+        void importedThroughTheApi_movementByWhoAskedForIt() throws Exception {
+            // C-1: the import runs asynchronously, without the user of the request; the actor is passed down
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 2);
+
+            Response response = send(post("/import/parts").param("uuid", "p16b-import"), "[{\"id\":"
+                    + part.getId() + ",\"name\":\"" + part.getName() + "\",\"quantity\":6}]", admin);
+            assertEquals(200, response.status(), response.toString());
+
+            long deadline = System.currentTimeMillis() + 20_000;
+            while (stock(part) != 6 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+            assertEquals(List.of(movement(4, PartTransactionOrigin.IMPORT, null, null, admin)), movements(part));
+        }
+
+        @Test
+        void a10_nonStockReadFromItsOwnColumn() {
+            // before P-16b: read from the category column
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part ownColumn = part(company, 0);
+            Part categoryColumn = part(company, 0);
+
+            importService.importParts(List.of(row(ownColumn, 0, "true", null), row(categoryColumn, 0, null,
+                    "true")), company, data.o1().admin());
+
+            assertTrue(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class,
+                    ownColumn.getId()));
+            assertFalse(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class,
+                    categoryColumn.getId()));
+        }
+
+        @Test
+        void ca127_nonStockImportedWithStock_noChange_noMovement() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 0);
+            jdbc.update("UPDATE part SET non_stock = true WHERE id = ?", part.getId());
+
+            importService.importParts(List.of(row(part, 10, "true", null)), data.o1().company(), data.o1().admin());
+
+            assertEquals(0, stock(part));
+            assertEquals(List.of(), movements(part));
         }
     }
 }

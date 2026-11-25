@@ -147,7 +147,7 @@ public class PartController {
                         throw new CustomException("Part with same barcode exists", HttpStatus.NOT_ACCEPTABLE);
                     }
                 }
-                Part patchedPart = partService.update(id, part, user.getCompany());
+                Part patchedPart = partService.update(id, part, user.getCompany(), user);
                 Collection<Workflow> workflows =
                         workflowService.findByMainConditionAndCompany(WFMainCondition.PART_UPDATED,
                                 user.getCompany().getId());

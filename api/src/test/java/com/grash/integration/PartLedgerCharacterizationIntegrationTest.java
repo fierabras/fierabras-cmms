@@ -228,11 +228,12 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             assertEquals(200, response.status(), response.toString());
             Long id = json(response).get("id").asLong();
             assertEquals(5, jdbc.queryForObject("SELECT quantity FROM part WHERE id = ?", Double.class, id));
-            assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", id));
+            // P-16b: an entry of 5 with origin CREATION
+            assertEquals(1, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", id));
         }
 
         @Test
-        void partPatchedWithAnotherQuantity_stockSet_noMovement() {
+        void partPatchedWithAnotherQuantity_stockSet_withAnAdjustment() {
             // CA-PPB-083; before P-16b: no movement
             CommonData data = data();
             Part part = part(data.o1().company(), 9);
@@ -242,12 +243,13 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(7, stock(part));
-            assertEquals(List.of(), movements(part));
+            assertEquals(List.of("-2.0/-/" + data.o1().admin().getId()), movements(part));
         }
 
         @Test
-        void partPatchedWithoutQuantity_stockSetToZero_noMovement() {
-            // the quantity of PartPatchDTO is a primitive: a body without it sets the stock to 0
+        void partPatchedWithoutQuantity_stockSetToZero_withAnAdjustment() {
+            // the quantity of PartPatchDTO is a primitive: a body without it sets the stock to 0 (D-P16b-11: kept);
+            // before P-16b: no movement
             CommonData data = data();
             Part part = part(data.o1().company(), 9);
 
@@ -256,7 +258,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, stock(part));
-            assertEquals(List.of(), movements(part));
+            assertEquals(List.of("-9.0/-/" + data.o1().admin().getId()), movements(part));
         }
 
         @Test
@@ -505,53 +507,55 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
         }
 
         @Test
-        void importedQuantities_stockSet_noMovement_importedPartWithoutCreator() {
-            // CA-PPB-084; before P-16b: no movement. The import runs without an authenticated user (asynchronous)
+        void importedQuantities_stockSet_importMovementByWhoImports_importedPartWithoutCreator() {
+            // CA-PPB-084; before P-16b: no movement. The import runs without an authenticated user (asynchronous):
+            // the part has no creator, the movement has the user passed down (C-1)
             CommonData data = data();
             Company company = data.o1().company();
             Part p8 = part(company, 7);
             Part p9 = part(company, 3);
             PartImportDTO newRow = row(null, 4, null, null);
 
-            importService.importParts(List.of(row(p8, 12, null, null), row(p9, 3, null, null), newRow), company);
+            importService.importParts(List.of(row(p8, 12, null, null), row(p9, 3, null, null), newRow), company,
+                    data.o1().admin());
 
             assertEquals(12, stock(p8));
             assertEquals(3, stock(p9));
-            assertEquals(List.of(), movements(p8));
+            assertEquals(List.of("5.0/-/" + data.o1().admin().getId()), movements(p8));
             assertEquals(List.of(), movements(p9));
             Map<String, Object> imported = jdbc.queryForMap("SELECT id, quantity, created_by FROM part "
                     + "WHERE company_id = ? AND name = ?", company.getId(), newRow.getName());
             assertEquals(4.0, ((Number) imported.get("quantity")).doubleValue());
             assertNull(imported.get("created_by"));
-            assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", imported.get("id")));
+            assertEquals(1, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", imported.get("id")));
         }
 
         @Test
-        void nonStockReadFromTheCategoryColumn() {
-            // A-10: the import reads nonStock from the category column
+        void nonStockReadFromItsOwnColumn() {
+            // A-10; before P-16b: the import read nonStock from the category column
             CommonData data = data();
             Company company = data.o1().company();
             Part ownColumn = part(company, 0);
             Part categoryColumn = part(company, 0);
 
             importService.importParts(List.of(row(ownColumn, 0, "true", null), row(categoryColumn, 0, null,
-                    "true")), company);
+                    "true")), company, data.o1().admin());
 
-            assertFalse(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class,
-                    ownColumn.getId()));
             assertTrue(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class,
+                    ownColumn.getId()));
+            assertFalse(jdbc.queryForObject("SELECT non_stock FROM part WHERE id = ?", Boolean.class,
                     categoryColumn.getId()));
         }
 
         @Test
-        void nonStockPartImported_stockSet() {
-            // CA-PPB-127 (import); before P-16b: nonStock ignored
+        void nonStockPartImported_stockKept() {
+            // CA-PPB-127 (import); before P-16b: nonStock ignored (and read from the category), stock 10
             CommonData data = data();
             Part part = nonStockPart(data.o1().company(), 0);
 
-            importService.importParts(List.of(row(part, 10, null, "true")), data.o1().company());
+            importService.importParts(List.of(row(part, 10, "true", null)), data.o1().company(), data.o1().admin());
 
-            assertEquals(10, stock(part));
+            assertEquals(0, stock(part));
             assertEquals(List.of(), movements(part));
         }
     }
