@@ -374,7 +374,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class Tasks {
 
         @Test
-        void ca048_taskOfThePreventiveMaintenanceRemoved_theGeneratedTaskKeepsItsDefinition_noAuditRecord() {
+        void ca048_taskOfThePreventiveMaintenanceRemoved_theGeneratedTaskKeepsItsDefinition_recorded() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             assertEquals(200, replaceTasks("preventive-maintenance", pm, "[" + task("P-15 shared") + "]",
@@ -390,7 +390,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
                     () -> assertEquals(0, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?", pm)),
                     () -> assertEquals(before, tasksOf(workOrder)),
                     // P-15 (E-5): before, removing a task of a preventive maintenance left no record
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("DELETE TASK"), audit(data)));
         }
 
         @Test

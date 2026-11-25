@@ -752,4 +752,99 @@ class PreventiveMaintenanceIntegrationTest extends AbstractIntegrationTest {
                     () -> assertFalse(disabled(scheduleOf(pm))));
         }
     }
+
+    // =====================================================================================================
+    // B5 · Tasks of a preventive maintenance and their definitions (E-5, E-6, CA-PPB-047, 048, V-3)
+    // =====================================================================================================
+
+    @Nested
+    class Tasks {
+
+        private String folioOf(long pm) {
+            return jdbc.queryForObject("SELECT custom_id FROM preventive_maintenance WHERE id = ?", String.class, pm);
+        }
+
+        private List<String> taskRecords(CommonData data) {
+            return jdbc.queryForList("SELECT action || ' ' || entity_type || ' ' || entity_folio || ' ' || entity_name "
+                    + "|| ' ' || coalesce(actor_id::text, '-') FROM audit_log WHERE company_id = ? ORDER BY id",
+                    String.class, data.o1().company().getId());
+        }
+
+        @Test
+        void ca048_e5_taskOfThePreventiveMaintenanceRemoved_recorded_theGeneratedTaskKeepsItsDefinition() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            long pm = preventiveMaintenance(admin, "");
+            assertEquals(200, replaceTasks("preventive-maintenance", pm, "[" + task("P-15 shared") + "]", admin)
+                    .status());
+            long workOrder = generatedWorkOrder(pm, admin);
+            List<Map<String, Object>> before = tasksOf(workOrder);
+
+            Response removed = replaceTasks("preventive-maintenance", pm, "[]", admin);
+
+            assertAll(
+                    () -> assertEquals(200, removed.status(), removed.toString()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?", pm)),
+                    () -> assertEquals(before, tasksOf(workOrder)),
+                    () -> assertEquals("no,yes", tasksOf(workOrder).get(0).get("options")),
+                    () -> assertEquals(List.of("DELETE TASK " + folioOf(pm) + " P-15 shared " + admin.getId()),
+                            taskRecords(data)));
+        }
+
+        @Test
+        void e5_taskOfThePreventiveMaintenanceDeletedByItsEndpoint_recorded() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            long pm = preventiveMaintenance(admin, "");
+            Response tasks = replaceTasks("preventive-maintenance", pm, "[" + task("P-15 alone") + "]", admin);
+            long task = json(tasks).get(0).get("id").asLong();
+
+            Response response = call(delete("/tasks/" + task), admin);
+
+            assertAll(
+                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM task WHERE id = ?", task)),
+                    () -> assertEquals(List.of("DELETE TASK " + folioOf(pm) + " P-15 alone " + admin.getId()),
+                            taskRecords(data)));
+        }
+
+        @Test
+        void e5_theAuditWriteFails_theTaskIsKept() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            assertEquals(200, replaceTasks("preventive-maintenance", pm, "[" + task("P-15 kept") + "]",
+                    data.o1().admin()).status());
+
+            Response response;
+            try (FaultInjector.Fault ignored = faults.failOn("audit_log", FaultInjector.Operation.INSERT)) {
+                response = replaceTasks("preventive-maintenance", pm, "[]", data.o1().admin());
+            }
+
+            Response failed = response;
+            assertAll(
+                    () -> assertNotEquals(200, failed.status(), failed.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?",
+                            pm)));
+        }
+
+        @Test
+        void ca047_v3_assetCitedByTheDefinitionOfATaskOfAClosedWorkOrder_409AssetInUse_taskAndDefinitionKept() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            com.grash.model.Asset asset = records.asset(company);
+            long workOrder = records.workOrder(company, null, com.grash.model.enums.Status.OPEN, false).getId();
+            assertEquals(200, replaceTasks("work-order", workOrder, "[{\"label\":\"P-15 on asset\",\"taskType\":"
+                    + "\"SUBTASK\",\"options\":[],\"asset\":" + ref(asset.getId()) + "}]", data.o1().admin()).status());
+            jdbc.update("UPDATE work_order SET status = ? WHERE id = ?",
+                    com.grash.model.enums.Status.COMPLETE.ordinal(), workOrder);
+            List<Map<String, Object>> before = tasksOf(workOrder);
+
+            Response response = call(delete("/assets/" + asset.getId()), data.o1().admin());
+
+            assertAll(
+                    () -> assertTrue(conflict(response, "ASSET_IN_USE").contains("TASK_BASE"), response.toString()),
+                    () -> assertEquals(before, tasksOf(workOrder)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM task_base WHERE asset_id = ?", asset.getId())));
+        }
+    }
 }

@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.model.PreventiveMaintenance;
 import com.grash.model.WorkOrder;
 import com.grash.model.enums.EntityType;
 
@@ -19,5 +20,14 @@ public record AuditTarget(EntityType type, Long id, String folio, String name, L
      */
     public static AuditTarget childOf(EntityType type, Long id, String name, WorkOrder workOrder) {
         return new AuditTarget(type, id, workOrder.getCustomId(), name, workOrder.getCompany().getId());
+    }
+
+    /**
+     * P-15 (E-5): a child of a preventive maintenance (a task), recorded with the folio of its preventive maintenance.
+     */
+    public static AuditTarget childOf(EntityType type, Long id, String name,
+                                      PreventiveMaintenance preventiveMaintenance) {
+        return new AuditTarget(type, id, preventiveMaintenance.getCustomId(), name,
+                preventiveMaintenance.getCompany().getId());
     }
 }

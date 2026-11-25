@@ -57,16 +57,6 @@ public class DeletionService {
         auditLogService.record(target, actor, AuditAction.DELETE, source, cascadeRows, (int) storageObjects);
     }
 
-    /**
-     * P-17 (C-1): deletes without a rule and without an audit record, for the deletions that P-15 has not migrated
-     * yet; a foreign key that rejects the deletion becomes 409 {@code RECORD_IN_USE}, never a 500, whatever the
-     * HTTP method of the request.
-     */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void deleteUnrecorded(Runnable deletion) {
-        run(null, deletion);
-    }
-
     private void run(DeletionRule rule, Runnable deletion) {
         try {
             deletion.run();
