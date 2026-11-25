@@ -847,4 +847,102 @@ class PreventiveMaintenanceIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(1, count("SELECT count(*) FROM task_base WHERE asset_id = ?", asset.getId())));
         }
     }
+
+    // =====================================================================================================
+    // B6 · Checklists (CA-PPB-046, E-7, PPB-02, PPB-17, PPB-23)
+    // =====================================================================================================
+
+    @Nested
+    class Checklists {
+
+        private long automationWith(long checklist, User user) {
+            Response workflow = send(post("/workflows"), "{\"title\":\"" + TestRecords.unique("P-15 workflow")
+                    + "\",\"mainCondition\":\"WORK_ORDER_CREATED\",\"secondaryConditions\":[],\"action\":"
+                    + "{\"workOrderAction\":\"ADD_CHECKLIST\",\"checklist\":" + ref(checklist) + "}}", user);
+            assertEquals(200, workflow.status(), workflow.toString());
+            return json(workflow).get("id").asLong();
+        }
+
+        @Test
+        void ca046_usedForTheTasksOfAClosedWorkOrder_editedThenDeleted_200_tasksUnchanged_deletionRecorded() {
+            CommonData data = data();
+            Company company = data.o1().company();
+            User admin = data.o1().admin();
+            long checklist = checklist(company, admin, "P-15 first", "P-15 second");
+            long workOrder = records.workOrder(company, null, com.grash.model.enums.Status.OPEN, false).getId();
+            // the web copies the steps of the checklist into new tasks of the work order
+            assertEquals(200, replaceTasks("work-order", workOrder, "[" + task("P-15 first") + "," + task("P-15 second")
+                    + "]", admin).status());
+            jdbc.update("UPDATE task SET value = 'yes' WHERE work_order_id = ?", workOrder);
+            jdbc.update("UPDATE work_order SET status = ? WHERE id = ?",
+                    com.grash.model.enums.Status.COMPLETE.ordinal(), workOrder);
+            List<Map<String, Object>> before = tasksOf(workOrder);
+            String name = jdbc.queryForObject("SELECT name FROM checklist WHERE id = ?", String.class, checklist);
+
+            Response edit = send(patch("/checklists/" + checklist), checklistBody(company, "P-15 first"), admin);
+            String editedName = jdbc.queryForObject("SELECT name FROM checklist WHERE id = ?", String.class,
+                    checklist);
+            Response deletion = call(delete("/checklists/" + checklist), admin);
+
+            assertAll(
+                    () -> assertEquals(200, edit.status(), edit.toString()),
+                    () -> assertNotEquals(name, editedName),
+                    () -> assertEquals(200, deletion.status(), deletion.toString()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)),
+                    () -> assertEquals(before, tasksOf(workOrder), "label, type, options and value kept"),
+                    () -> assertEquals(List.of("DELETE CHECKLIST API " + admin.getId()), audit(data)),
+                    () -> assertEquals(editedName, jdbc.queryForObject("SELECT entity_name FROM audit_log "
+                            + "WHERE company_id = ?", String.class, company.getId())),
+                    () -> assertTrue(cascadeRows(data).contains("\"task_base\": 1"), cascadeRows(data)),
+                    () -> assertTrue(cascadeRows(data).contains("\"task_option\": 2"), cascadeRows(data)));
+        }
+
+        @Test
+        void citedByAnAutomation_409ChecklistInUse_checklistAndAutomationKept_noRecord() {
+            CommonData data = data();
+            long checklist = checklist(data.o1().company(), data.o1().admin(), "P-15 step");
+            long workflow = automationWith(checklist, data.o1().admin());
+
+            Response response = call(delete("/checklists/" + checklist), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of("WORKFLOW_ACTION"), conflict(response, "CHECKLIST_IN_USE")),
+                    () -> assertEquals(1, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM checklist_task_bases WHERE checklist_id = ?",
+                            checklist)),
+                    () -> assertEquals(1, count("SELECT count(*) FROM workflow w JOIN workflow_action a "
+                            + "ON a.id = w.action_id WHERE w.id = ? AND a.checklist_id = ?", workflow, checklist)),
+                    () -> assertEquals(List.of(), audit(data)));
+        }
+
+        @Test
+        void theAuditWriteFails_theChecklistIsKept() {
+            CommonData data = data();
+            long checklist = checklist(data.o1().company(), data.o1().admin(), "P-15 step");
+
+            Response response;
+            try (FaultInjector.Fault ignored = faults.failOn("audit_log", FaultInjector.Operation.INSERT)) {
+                response = call(delete("/checklists/" + checklist), data.o1().admin());
+            }
+
+            Response failed = response;
+            assertAll(
+                    () -> assertNotEquals(200, failed.status(), failed.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)));
+        }
+
+        @Test
+        void inv10_anotherOrganization_403_never409() {
+            CommonData data = data();
+            long checklist = checklist(data.o1().company(), data.o1().admin(), "P-15 step");
+            automationWith(checklist, data.o1().admin());
+
+            Response response = call(delete("/checklists/" + checklist), data.o2().admin());
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(response.body().contains("CHECKLIST_IN_USE"), response.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)));
+        }
+    }
 }

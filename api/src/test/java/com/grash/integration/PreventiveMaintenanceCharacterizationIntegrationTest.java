@@ -501,7 +501,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class Checklists {
 
         @Test
-        void ca046_usedForTheTasksOfAClosedWorkOrder_editedThenDeleted_200_tasksUnchanged_noAuditRecord() {
+        void ca046_usedForTheTasksOfAClosedWorkOrder_editedThenDeleted_200_tasksUnchanged_recorded() {
             CommonData data = data();
             Company company = data.o1().company();
             long checklist = checklist(company, data.o1().admin(), "P-15 first", "P-15 second");
@@ -523,7 +523,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
                     () -> assertEquals(0, count("SELECT count(*) FROM checklist WHERE id = ?", checklist)),
                     () -> assertEquals(before, tasksOf(workOrder.getId())),
                     // P-15 (E-7): before, deleting a checklist left no record
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("DELETE CHECKLIST"), audit(data)));
         }
 
         @Test

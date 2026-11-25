@@ -95,7 +95,7 @@ public class ChecklistController {
             Checklist savedChecklist = optionalChecklist.get();
             checkAccessToChecklist(savedChecklist, user);
             if (user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)) {
-                checklistService.delete(id);
+                checklistService.delete(savedChecklist, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);

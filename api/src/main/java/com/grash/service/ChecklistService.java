@@ -7,6 +7,9 @@ import com.grash.exception.CustomException;
 import com.grash.model.Checklist;
 import com.grash.model.Company;
 import com.grash.model.TaskBase;
+import com.grash.model.User;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.dto.license.LicenseEntitlement;
 import com.grash.repository.CheckListRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,12 +28,17 @@ import static com.grash.utils.Consts.usageBasedLicenseLimits;
 @Service
 @RequiredArgsConstructor
 public class ChecklistService {
+    public static final String CHECKLIST_IN_USE = "CHECKLIST_IN_USE";
+    private static final String CHECKLIST_IN_USE_MESSAGE = "This checklist is used by an automation. Change the "
+            + "automation before deleting it";
+
     private final CheckListRepository checklistRepository;
     private final CompanySettingsService companySettingsService;
     private final TaskBaseService taskBaseService;
     private final EntityManager em;
     private final LicenseService licenseService;
     private final AssetService assetService;
+    private final DeletionService deletionService;
 
     @Transactional
     public Checklist createPost(ChecklistPostDTO checklistReq, Company company) {
@@ -82,8 +90,20 @@ public class ChecklistService {
         return checklistRepository.findAll();
     }
 
-    public void delete(Long id) {
-        checklistRepository.deleteById(id);
+    /**
+     * P-15 (E-7, PPB-02, PPB-17, PPB-23): deletes the checklist and records it, in one transaction, with its steps
+     * (task definitions no task uses: a task copies the steps into definitions of its own). A checklist cited by an
+     * automation is not deleted: 409 CHECKLIST_IN_USE.
+     */
+    @Transactional
+    public void delete(Checklist checklist, User actor) {
+        Long id = checklist.getId();
+        deletionService.delete(new AuditTarget(EntityType.CHECKLIST, id, null, checklist.getName(),
+                        checklist.getCompanySettings().getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(CHECKLIST_IN_USE, CHECKLIST_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.WORKFLOW_ACTION,
+                                () -> deletionService.isCited("workflow_action", "checklist_id", id)),
+                () -> checklistRepository.deleteById(id));
     }
 
     public Optional<Checklist> findById(Long id) {
