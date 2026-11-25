@@ -14,6 +14,7 @@ import com.grash.model.User;
 import com.grash.model.PreventiveMaintenance;
 import com.grash.model.Schedule;
 import com.grash.model.WorkOrder;
+import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleType;
 import com.grash.service.AssetService;
@@ -155,7 +156,7 @@ public class PreventiveMaintenanceController {
             Schedule savedSchedule = scheduleService.save(schedule);
             em.refresh(savedSchedule);
             em.refresh(preventiveMaintenance);
-            scheduleService.scheduleWorkOrder(savedSchedule);
+            scheduleService.scheduleWorkOrder(savedSchedule, AuditSource.API);
             return preventiveMaintenanceMapper.toShowDto(preventiveMaintenance);
         } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
     }
@@ -172,6 +173,10 @@ public class PreventiveMaintenanceController {
             PreventiveMaintenance savedPreventiveMaintenance = optionalPreventiveMaintenance.get();
             if (user.getId().equals(savedPreventiveMaintenance.getCreatedBy())
                     || user.getRole().getEditOtherPermissions().contains(PermissionEntity.PREVENTIVE_MAINTENANCES)) {
+                // P-15 (E-2, D-P15-1): pausing and resuming change only the schedule; the rest of the body is ignored
+                if (preventiveMaintenance.getDisabled() != null)
+                    return preventiveMaintenanceMapper.toShowDto(preventiveMaintenanceService.changeDisabled(id,
+                            preventiveMaintenance.getDisabled(), user));
                 PreventiveMaintenance patchedPreventiveMaintenance = preventiveMaintenanceService.update(id,
                         preventiveMaintenance, user);
                 return preventiveMaintenanceMapper.toShowDto(patchedPreventiveMaintenance);

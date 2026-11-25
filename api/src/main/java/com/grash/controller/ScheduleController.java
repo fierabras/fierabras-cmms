@@ -5,6 +5,7 @@ import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
 import com.grash.model.Schedule;
+import com.grash.model.enums.AuditSource;
 import com.grash.service.ScheduleService;
 import com.grash.service.UserService;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -70,7 +71,7 @@ public class ScheduleController {
             if (!savedSchedule.getPreventiveMaintenance().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             Schedule updatedSchedule = scheduleService.update(id, schedule);
-            scheduleService.reScheduleWorkOrder(updatedSchedule);
+            scheduleService.reScheduleWorkOrder(updatedSchedule, AuditSource.API);
             return updatedSchedule;
         } else throw new CustomException("Schedule not found", HttpStatus.NOT_FOUND);
     }

@@ -291,7 +291,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class Pausing {
 
         @Test
-        void ca097_aPausedOneEdited_isActiveAgain() {
+        void ca097_aPausedOneEdited_staysPaused() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -303,11 +303,11 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             // P-15 (E-2, PPB-07): before, any edit reactivated it
             assertAll(
                     () -> assertEquals(200, edit.status(), edit.toString()),
-                    () -> assertFalse(disabled(schedule)));
+                    () -> assertTrue(disabled(schedule)));
         }
 
         @Test
-        void ca097_theUserCannotPause_disabledIsIgnored() {
+        void ca097_theUserPauses_onlyDisabledChanges_recorded() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -318,12 +318,12 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             // P-15 (E-2, D-1): before, neither the preventive maintenance nor the schedule accepted disabled
             assertAll(
                     () -> assertEquals(200, edit.status(), edit.toString()),
-                    () -> assertFalse(disabled(schedule)),
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertTrue(disabled(schedule)),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE"), audit(data)));
         }
 
         @Test
-        void theSystemPausesAfterFiveWorkOrdersWithoutReaction_withoutAuditRecord() {
+        void theSystemPausesAfterFiveWorkOrdersWithoutReaction_recorded() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -336,7 +336,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             assertAll(
                     () -> assertEquals(200, edit.status(), edit.toString()),
                     () -> assertTrue(disabled(schedule)),
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE"), audit(data)));
         }
     }
 

@@ -65,6 +65,7 @@ public class PreventiveMaintenanceService {
     private final TaskService taskService;
     private final FileService fileService;
     private final DeletionService deletionService;
+    private final AuditLogService auditLogService;
 
 
     @Transactional
@@ -107,12 +108,33 @@ public class PreventiveMaintenanceService {
             PreventiveMaintenance pmToSave =
                     preventiveMaintenanceMapper.updatePreventiveMaintenance(savedPreventiveMaintenance,
                             preventiveMaintenance);
-            pmToSave.getSchedule().setDisabled(false);
             PreventiveMaintenance updatedPM =
                     preventiveMaintenanceRepository.saveAndFlush(pmToSave);
             em.refresh(updatedPM);
             return updatedPM;
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-15 (E-2, PPB-07, PPB-23): pauses ({@code disabled}) or resumes the preventive maintenance and records it, in
+     * one transaction. Only {@code Schedule.disabled} changes. Paused, its jobs stay and generate nothing; resumed,
+     * its jobs are rebuilt without the rule of the 5 work orders without reaction (D-P15-2), so the next occurrence
+     * generates the work order. Asking for the state it already has changes and records nothing.
+     */
+    @Transactional
+    public PreventiveMaintenance changeDisabled(Long id, boolean disabled, User actor) {
+        PreventiveMaintenance preventiveMaintenance = preventiveMaintenanceRepository.findById(id)
+                .orElseThrow(() -> new CustomException("Not found", HttpStatus.NOT_FOUND));
+        Schedule schedule = preventiveMaintenance.getSchedule();
+        if (schedule == null || schedule.isDisabled() == disabled) return preventiveMaintenance;
+        schedule.setDisabled(disabled);
+        scheduleService.save(schedule);
+        auditLogService.record(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, id,
+                        preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                        preventiveMaintenance.getCompany().getId()), actor,
+                disabled ? AuditAction.RETIRE : AuditAction.RESTORE, AuditSource.API, Map.of(), 0);
+        if (!disabled) scheduleService.resumeWorkOrder(schedule);
+        return preventiveMaintenance;
     }
 
     @Transactional
@@ -346,7 +368,7 @@ public class PreventiveMaintenanceService {
                     customSequenceService.getNextPreventiveMaintenanceSequence(company)));
 
         PreventiveMaintenance savedPM = preventiveMaintenanceRepository.save(preventiveMaintenance);
-        scheduleService.reScheduleWorkOrder(savedPM.getSchedule());
+        scheduleService.reScheduleWorkOrder(savedPM.getSchedule(), AuditSource.IMPORT);
     }
 
     private int getDayOfWeekNumber(String day) {

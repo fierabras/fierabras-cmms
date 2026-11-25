@@ -549,4 +549,207 @@ class PreventiveMaintenanceIntegrationTest extends AbstractIntegrationTest {
             assertEquals(404, response.status(), response.toString());
         }
     }
+
+    // =====================================================================================================
+    // B4 · Pausing and resuming (CA-PPB-097, E-2, D-P15-1, D-P15-2, D-P15-3)
+    // =====================================================================================================
+
+    @Nested
+    class PauseAndResume {
+
+        private Response setDisabled(long pm, boolean disabled, User user) {
+            return send(patch("/preventive-maintenances/" + pm), "{\"disabled\":" + disabled + "}", user);
+        }
+
+        private boolean disabled(long schedule) {
+            return Boolean.TRUE.equals(jdbc.queryForObject("SELECT disabled FROM schedule WHERE id = ?",
+                    Boolean.class, schedule));
+        }
+
+        private long workOrdersOf(long pm) {
+            return count("SELECT count(*) FROM work_order WHERE parent_preventive_maintenance_id = ?", pm);
+        }
+
+        /**
+         * The next occurrence: what the work order job does when its trigger fires.
+         */
+        private void occurrence(long schedule) throws Exception {
+            JobDataMap jobData = new JobDataMap();
+            jobData.put("scheduleId", schedule);
+            JobExecutionContext context = mock(JobExecutionContext.class);
+            when(context.getMergedJobDataMap()).thenReturn(jobData);
+            workOrderCreationJob.executeInternal(context);
+        }
+
+        private Response editSchedule(long schedule, User user) {
+            return send(patch("/schedules/" + schedule), "{\"frequency\":2,\"recurrenceType\":\"DAILY\","
+                    + "\"recurrenceBasedOn\":\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\"}", user);
+        }
+
+        @Test
+        void ca097_pausedGeneratesNothing_editedStaysPaused_resumedTheNextOccurrenceGenerates() throws Exception {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            long pm = preventiveMaintenance(admin, "");
+            long schedule = scheduleOf(pm);
+
+            Response pause = setDisabled(pm, true, admin);
+            boolean pausedAfterPause = disabled(schedule);
+            occurrence(schedule);
+            long whilePaused = workOrdersOf(pm);
+            Response edit = send(patch("/preventive-maintenances/" + pm), "{\"title\":\"P-15 edited\"}", admin);
+            boolean pausedAfterEdit = disabled(schedule);
+            Response resume = setDisabled(pm, false, admin);
+            occurrence(schedule);
+
+            assertAll(
+                    () -> assertEquals(200, pause.status(), pause.toString()),
+                    () -> assertTrue(json(pause).get("schedule").get("disabled").asBoolean()),
+                    () -> assertTrue(pausedAfterPause),
+                    () -> assertEquals(0, whilePaused, "paused: the occurrence generates no work order"),
+                    () -> assertEquals(200, edit.status(), edit.toString()),
+                    () -> assertTrue(pausedAfterEdit, "editing it does not resume it"),
+                    () -> assertEquals(200, resume.status(), resume.toString()),
+                    () -> assertFalse(disabled(schedule)),
+                    () -> assertTrue(jobExists(schedule)),
+                    () -> assertEquals(1, workOrdersOf(pm), "resumed: the next occurrence generates it"),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API " + admin.getId(),
+                            "RESTORE PREVENTIVE_MAINTENANCE API " + admin.getId()), audit(data)));
+        }
+
+        @Test
+        void pausingOrResuming_changesOnlyDisabled() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            Map<String, Object> before = jdbc.queryForMap("SELECT * FROM preventive_maintenance WHERE id = ?", pm);
+
+            Response pause = send(patch("/preventive-maintenances/" + pm), "{\"disabled\":true,\"title\":\"P-15 "
+                    + "other\",\"priority\":\"HIGH\"}", data.o1().admin());
+            Map<String, Object> afterPause = jdbc.queryForMap("SELECT * FROM preventive_maintenance WHERE id = ?", pm);
+            Response resume = send(patch("/preventive-maintenances/" + pm), "{\"disabled\":false,\"title\":\"P-15 "
+                    + "other\"}", data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(200, pause.status(), pause.toString()),
+                    () -> assertEquals(before, afterPause),
+                    () -> assertEquals(200, resume.status(), resume.toString()),
+                    () -> assertEquals(before, jdbc.queryForMap("SELECT * FROM preventive_maintenance WHERE id = ?",
+                            pm)));
+        }
+
+        @Test
+        void theSameState_200_noRecord() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+
+            Response resumeActive = setDisabled(pm, false, data.o1().admin());
+            setDisabled(pm, true, data.o1().admin());
+            Response pauseAgain = setDisabled(pm, true, data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(200, resumeActive.status(), resumeActive.toString()),
+                    () -> assertEquals(200, pauseAgain.status(), pauseAgain.toString()),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API " + data.o1().admin().getId()),
+                            audit(data)));
+        }
+
+        @Test
+        void scheduleEditedWhilePaused_resumed_itsJobsAreBack() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            setDisabled(pm, true, data.o1().admin());
+
+            Response edit = editSchedule(schedule, data.o1().admin());
+            boolean jobWhilePaused = jobExists(schedule);
+            Response resume = setDisabled(pm, false, data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(200, edit.status(), edit.toString()),
+                    () -> assertFalse(jobWhilePaused, "editing the schedule of a paused one does not schedule it"),
+                    () -> assertEquals(200, resume.status(), resume.toString()),
+                    () -> assertFalse(disabled(schedule)),
+                    () -> assertTrue(jobExists(schedule)));
+        }
+
+        @Test
+        void d3_theSystemPausesIt_recordedWithoutActorWithTheOriginOfTheRoute() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            for (int i = 0; i < 5; i++) generatedWorkOrder(pm, data.o1().admin());
+
+            Response edit = editSchedule(schedule, data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(200, edit.status(), edit.toString()),
+                    () -> assertTrue(disabled(schedule)),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API -"), audit(data)));
+        }
+
+        @Test
+        void alreadyPausedByTheUser_theSystemRecordsNothingMore() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            for (int i = 0; i < 5; i++) generatedWorkOrder(pm, data.o1().admin());
+            setDisabled(pm, true, data.o1().admin());
+
+            Response edit = editSchedule(schedule, data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(200, edit.status(), edit.toString()),
+                    () -> assertTrue(disabled(schedule)),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API " + data.o1().admin().getId()),
+                            audit(data)));
+        }
+
+        @Test
+        void d2_pausedByTheSystem_resumed_staysActive_withItsJobs_theNextOccurrenceGenerates() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            for (int i = 0; i < 5; i++) generatedWorkOrder(pm, data.o1().admin());
+            editSchedule(schedule, data.o1().admin());
+            boolean pausedBySystem = disabled(schedule);
+
+            Response resume = setDisabled(pm, false, data.o1().admin());
+            occurrence(schedule);
+
+            assertAll(
+                    () -> assertTrue(pausedBySystem),
+                    () -> assertEquals(200, resume.status(), resume.toString()),
+                    () -> assertFalse(json(resume).get("schedule").get("disabled").asBoolean()),
+                    () -> assertFalse(disabled(schedule), "resuming does not evaluate the rule of 5 (D-P15-2)"),
+                    () -> assertTrue(jobExists(schedule)),
+                    () -> assertEquals(6, workOrdersOf(pm)),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API -",
+                            "RESTORE PREVENTIVE_MAINTENANCE API " + data.o1().admin().getId()), audit(data)));
+        }
+
+        @Test
+        void technicianWhoCannotEditIt_403_unchanged_noRecord() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+
+            Response response = setDisabled(pm, true, data.o1().technician());
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(disabled(scheduleOf(pm))),
+                    () -> assertEquals(List.of(), audit(data)));
+        }
+
+        @Test
+        void inv10_anotherOrganization_403_unchanged() {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+
+            Response response = setDisabled(pm, true, data.o2().admin());
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(disabled(scheduleOf(pm))));
+        }
+    }
 }
