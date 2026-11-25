@@ -333,6 +333,19 @@ public class UserService {
     }
 
     /**
+     * P-18 (E-2): the same rule for users already loaded in the company (a row of an import), without a query. It is
+     * static so that its 409 does not cross the transactional proxy of this service and mark the import for
+     * rollback: the caller turns it into a rejected row.
+     */
+    public static void rejectRetiredLoaded(Collection<User> previous, Collection<User> requested) {
+        Set<Long> previousIds = new HashSet<>();
+        if (previous != null) previous.stream().filter(Objects::nonNull).map(User::getId).forEach(previousIds::add);
+        if (requested != null && requested.stream().filter(Objects::nonNull)
+                .anyMatch(user -> !user.isEnabled() && !previousIds.contains(user.getId())))
+            throw new ConflictException(USER_RETIRED, USER_RETIRED_MESSAGE);
+    }
+
+    /**
      * P-16 (D-P16-10, INV-10): the users a request sets belong to the organization {@code companyId}; otherwise 403,
      * before any 409 on their state. Null elements are ignored.
      */

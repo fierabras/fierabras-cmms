@@ -281,12 +281,14 @@ public class RequestController {
             assertPending(savedRequest);
             if (reason == null || reason.trim().isEmpty())
                 throw new CustomException("Please give a reason", HttpStatus.NOT_ACCEPTABLE);
-            savedRequest.setCancellationReason(reason);
-            savedRequest.setCancelled(true);
+            // P-18 (D-P18-5, TD-P13-01): the automations run while the request is pending, as on approval; a
+            // closed request is not changed after it is closed
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.REQUEST_REJECTED,
                             user.getCompany().getId());
             workflows.forEach(workflow -> workflowService.runRequest(workflow, savedRequest));
+            savedRequest.setCancellationReason(reason);
+            savedRequest.setCancelled(true);
 
             Map<String, Object> webhookPayload = new HashMap<>();
             webhookPayload.put("requestId", savedRequest.getId());

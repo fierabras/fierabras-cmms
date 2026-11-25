@@ -1087,7 +1087,8 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
-        void demoPartAdjustedByAUser_409RecordInUse_nothingDeleted() {
+        void demoPartAdjustedByAUser_409DemoDataInUse_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             // D-P16-6 (as a demo part restocked): a movement that is not demo, of a demo part, rejects the purge
             CommonData data = data();
             User admin = data.o1().admin();
@@ -1098,7 +1099,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             Response response = purge(admin);
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, count("SELECT count(*) FROM part WHERE id = ?", part.getId()));
             assertEquals(2, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", part.getId()));
         }

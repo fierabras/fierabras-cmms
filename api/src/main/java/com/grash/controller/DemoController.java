@@ -4,10 +4,12 @@ import com.grash.dto.SignupSuccessResponse;
 import com.grash.dto.SuccessResponse;
 import com.grash.dto.UserSignupRequest;
 import com.grash.dto.imports.*;
+import com.grash.exception.CustomException;
 import com.grash.model.Asset;
 import com.grash.model.Company;
 import com.grash.model.User;
 import com.grash.model.enums.Language;
+import com.grash.model.enums.PermissionEntity;
 import com.grash.security.CurrentUser;
 import com.grash.security.CustomUserDetail;
 import com.grash.service.*;
@@ -18,6 +20,7 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -93,6 +96,9 @@ public class DemoController {
     @DeleteMapping("/demo-data")
     @PreAuthorize("permitAll()")
     public SuccessResponse deleteDemoData(@Parameter(hidden = true) @CurrentUser User user) {
+        // P-18 (E-4, PPB-27): the purge takes the view of settings, an existing permission; checked first
+        if (user == null || !user.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS))
+            throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
         demoDataService.deleteDemoData(user.getCompany().getId(), user);
         return new SuccessResponse(true, "Demo data deleted successfully");
     }

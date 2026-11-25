@@ -2086,7 +2086,13 @@ const locale = {
   pm_pause_success: 'The preventive maintenance has been paused',
   pm_pause_failure: "The preventive maintenance couldn't be paused",
   pm_resume_success: 'The preventive maintenance has been resumed',
-  pm_resume_failure: "The preventive maintenance couldn't be resumed"
+  pm_resume_failure: "The preventive maintenance couldn't be resumed",
+  demo_data_in_use:
+    'The demo data cannot be deleted: records that are not demo use it. Remove those links first.',
+  demo_data_delete_success: 'Demo data deleted successfully',
+  demo_data_delete_failure: "The demo data couldn't be deleted",
+  import_row_rejected_new: 'Row {{row}}: {{reason}}',
+  entity_type_WORKFLOW: 'Workflow'
 };
 
 export default locale;

@@ -4,6 +4,7 @@ import com.grash.dto.imports.*;
 import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.model.*;
+import com.grash.model.abstracts.WorkOrderBase;
 import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.Status;
@@ -27,6 +28,7 @@ public class ImportService {
     private final MeterService meterService;
     private final WorkOrderService workOrderService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
+    private final UserService userService;
 
     /**
      * Work order import requested by a user. INC-02 (T-11, D-20), approved exception for historical data: a new
@@ -83,7 +85,6 @@ public class ImportService {
 
             if (id == null) {
                 workOrder = new WorkOrder();
-                created++;
             } else if (existingWorkOrders.containsKey(id)) {
                 workOrder = existingWorkOrders.get(id);
                 // P-12c (E-4, PPB-20 b): a closed or archived work order is not changed by an import; the row
@@ -95,11 +96,19 @@ public class ImportService {
                     rejected.add(new ImportRejection(row, id, rejection.getCode(), rejection.getMessage()));
                     continue;
                 }
-                updated++;
             } else {
                 workOrder = new WorkOrder();
-                created++;
             }
+            // P-18 (D-P18-1, E-2): a disabled user or an archived asset is not given anew
+            WorkOrder target = workOrder;
+            Optional<ImportRejection> rejection = rejection(row, id, () -> rejectRetiredReferences(
+                    target.getId() == null ? null : target, dto, company));
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
+            }
+            if (workOrder.getId() == null) created++;
+            else updated++;
 
             workOrderService.importWorkOrder(workOrder, dto, company, importer);
             workOrdersToSave.add(workOrder);
@@ -141,23 +150,32 @@ public class ImportService {
 
         Map<String, Asset> assetsByName = new java.util.HashMap<>();
         List<Asset> assetsToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
+        Map<AssetImportDTO, Integer> rows = positions(toImport);
         int created = 0;
         int updated = 0;
 
         for (AssetImportDTO dto : AssetService.orderAssets(toImport)) {
             Long id = dto.getId();
-            Asset asset;
-
-            if (id == null) {
-                asset = new Asset();
-                created++;
-            } else if (existingAssets.containsKey(id)) {
-                asset = existingAssets.get(id);
-                updated++;
-            } else {
-                asset = new Asset();
-                created++;
+            Asset existing = id == null ? null : existingAssets.get(id);
+            // P-18 (E-1, E-2, PPB-08): an archived asset is not changed, and a disabled user or an archived parent is
+            // not given anew; the row is rejected with its reason and not added to the batch
+            Optional<ImportRejection> rejection = rejection(rows.get(dto), id, () -> {
+                if (existing != null) AssetStateGuard.check(existing);
+                UserService.rejectRetiredLoaded(existing == null ? List.of()
+                                : WorkOrderService.assignedUsers(existing.getPrimaryUser(), existing.getAssignedTo()),
+                        users(company, dto.getPrimaryUserEmail(), dto.getAssignedToEmails()));
+                assetService.rejectRetired(existing == null ? List.of()
+                                : Collections.singletonList(existing.getParentAsset()),
+                        Collections.singletonList(parentAsset(dto.getParentAssetName(), company, assetsByName)));
+            });
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
+            Asset asset = existing == null ? new Asset() : existing;
+            if (existing == null) created++;
+            else updated++;
 
             assetService.setAssetFieldsFromImportDto(asset, dto, company, assetsByName);
             assetsToSave.add(asset);
@@ -168,10 +186,71 @@ public class ImportService {
             assetService.saveAll(assetsToSave);
         }
 
+        rejected.sort(Comparator.comparingInt(ImportRejection::getRow));
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
+    }
+
+    /**
+     * P-18: the position of each row in the file, starting at 1, for the rows that are imported in another order.
+     */
+    private static <T> Map<T, Integer> positions(List<T> toImport) {
+        Map<T, Integer> rows = new IdentityHashMap<>();
+        for (int row = toImport.size(); row >= 1; row--) rows.put(toImport.get(row - 1), row);
+        return rows;
+    }
+
+    /**
+     * P-18 (PPB-20 b): the rejection of the row when {@code check} rejects it with a 409, or nothing.
+     */
+    private static Optional<ImportRejection> rejection(int row, Long id, Runnable check) {
+        try {
+            check.run();
+            return Optional.empty();
+        } catch (ConflictException conflict) {
+            return Optional.of(new ImportRejection(row, id, conflict.getCode(), conflict.getMessage()));
+        }
+    }
+
+    /**
+     * P-18 (E-2): the users that a row cites, found as the import finds them (by email, in the company).
+     */
+    private List<User> users(Company company, String primaryUserEmail, Collection<String> emails) {
+        List<User> users = new ArrayList<>();
+        userService.findByEmailAndCompany(primaryUserEmail, company.getId()).ifPresent(users::add);
+        if (emails != null) emails.forEach(email -> userService.findByEmailAndCompany(email, company.getId())
+                .ifPresent(users::add));
+        return users;
+    }
+
+    /**
+     * P-18 (E-2): the asset that a row cites by name, found as the import finds it: in the batch first, then in the
+     * company.
+     */
+    private Asset parentAsset(String name, Company company, Map<String, Asset> batch) {
+        if (name == null || name.isEmpty()) return null;
+        Asset asset = batch.get(name);
+        return asset != null ? asset : assetNamed(name, company);
+    }
+
+    /**
+     * P-18 (E-2, D-2): the users and the asset that a row of work orders or preventive maintenances gives are not
+     * disabled or archived, unless {@code existing} (null for a new record) already has them.
+     */
+    private void rejectRetiredReferences(WorkOrderBase existing, WorkOrderImportDTO dto, Company company) {
+        UserService.rejectRetiredLoaded(existing == null ? List.of()
+                        : WorkOrderService.assignedUsers(existing.getPrimaryUser(), existing.getAssignedTo()),
+                users(company, dto.getPrimaryUserEmail(), dto.getAssignedToEmails()));
+        assetService.rejectRetired(existing == null ? List.of() : Collections.singletonList(existing.getAsset()),
+                Collections.singletonList(assetNamed(dto.getAssetName(), company)));
+    }
+
+    private Asset assetNamed(String name, Company company) {
+        if (name == null || name.isEmpty()) return null;
+        return assetService.findByNameIgnoreCaseAndCompany(name, company.getId()).stream().findFirst().orElse(null);
     }
 
     @Transactional
@@ -189,23 +268,25 @@ public class ImportService {
 
         Map<String, Location> locationsByName = new java.util.HashMap<>();
         List<Location> locationsToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
+        Map<LocationImportDTO, Integer> rows = positions(toImport);
         int created = 0;
         int updated = 0;
 
         for (LocationImportDTO dto : LocationService.orderLocations(toImport)) {
             Long id = dto.getId();
-            Location location;
-
-            if (id == null) {
-                location = new Location();
-                created++;
-            } else if (existingLocations.containsKey(id)) {
-                location = existingLocations.get(id);
-                updated++;
-            } else {
-                location = new Location();
-                created++;
+            Location existing = id == null ? null : existingLocations.get(id);
+            // P-18 (E-2): a disabled worker is not given anew
+            Optional<ImportRejection> rejection = rejection(rows.get(dto), id, () -> UserService.rejectRetiredLoaded(
+                    existing == null ? List.of() : existing.getWorkers(), users(company, null,
+                            dto.getWorkersEmails())));
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
+            Location location = existing == null ? new Location() : existing;
+            if (existing == null) created++;
+            else updated++;
 
             locationService.setLocationFieldsFromImportDto(location, dto, company, locationsByName);
             locationsToSave.add(location);
@@ -216,9 +297,11 @@ public class ImportService {
             locationService.saveAll(locationsToSave);
         }
 
+        rejected.sort(Comparator.comparingInt(ImportRejection::getRow));
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
     }
 
@@ -236,23 +319,29 @@ public class ImportService {
         }
 
         List<Meter> metersToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
         int created = 0;
         int updated = 0;
 
-        for (MeterImportDTO dto : toImport) {
+        for (int row = 1; row <= toImport.size(); row++) {
+            MeterImportDTO dto = toImport.get(row - 1);
             Long id = dto.getId();
-            Meter meter;
-
-            if (id == null) {
-                meter = new Meter();
-                created++;
-            } else if (existingMeters.containsKey(id)) {
-                meter = existingMeters.get(id);
-                updated++;
-            } else {
-                meter = new Meter();
-                created++;
+            Meter existing = id == null ? null : existingMeters.get(id);
+            // P-18 (E-2): a disabled user or an archived asset is not given anew
+            Optional<ImportRejection> rejection = rejection(row, id, () -> {
+                UserService.rejectRetiredLoaded(existing == null ? List.of() : existing.getUsers(),
+                        users(company, null, dto.getUsersEmails()));
+                assetService.rejectRetired(existing == null ? List.of()
+                                : Collections.singletonList(existing.getAsset()),
+                        Collections.singletonList(assetNamed(dto.getAssetName(), company)));
+            });
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
+            Meter meter = existing == null ? new Meter() : existing;
+            if (existing == null) created++;
+            else updated++;
 
             meterService.importMeter(meter, dto, company);
             metersToSave.add(meter);
@@ -265,6 +354,7 @@ public class ImportService {
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
     }
 
@@ -297,26 +387,30 @@ public class ImportService {
         }
 
         List<Part> partsToSave = new java.util.ArrayList<>();
+        List<PartImportDTO> rowsToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
         int created = 0;
         int updated = 0;
 
-        for (PartImportDTO dto : toImport) {
+        for (int row = 1; row <= toImport.size(); row++) {
+            PartImportDTO dto = toImport.get(row - 1);
             Long id = dto.getId();
-            Part part;
-
-            if (id == null) {
-                part = new Part();
-                created++;
-            } else if (existingParts.containsKey(id)) {
-                part = existingParts.get(id);
-                updated++;
-            } else {
-                part = new Part();
-                created++;
+            Part existing = id == null ? null : existingParts.get(id);
+            // P-18 (E-2): a disabled user is not given anew
+            Optional<ImportRejection> rejection = rejection(row, id, () -> UserService.rejectRetiredLoaded(
+                    existing == null ? List.of() : existing.getAssignedTo(), users(company, null,
+                            dto.getAssignedToEmails())));
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
+            Part part = existing == null ? new Part() : existing;
+            if (existing == null) created++;
+            else updated++;
 
             partService.importPart(part, dto, company);
             partsToSave.add(part);
+            rowsToSave.add(dto);
         }
 
         if (!partsToSave.isEmpty()) {
@@ -326,7 +420,7 @@ public class ImportService {
                     .sorted(Comparator.comparing(i -> savedParts.get(i).getId()))
                     .forEach(i -> {
                         Part part = partLedgerService.lock(savedParts.get(i).getId());
-                        partLedgerService.record(part, toImport.get(i).getQuantity() - part.getQuantity(),
+                        partLedgerService.record(part, rowsToSave.get(i).getQuantity() - part.getQuantity(),
                                 PartTransactionOrigin.IMPORT, PartLedgerService.Movement.by(actor));
                     });
         }
@@ -334,32 +428,35 @@ public class ImportService {
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
     }
 
     public ImportResponse importPreventiveMaintenances(List<PreventiveMaintenanceImportDTO> toImport, Company company) {
-        final int[] created = {0};
-        final int[] updated = {0};
-        toImport.forEach(pmImportDTO -> {
+        int created = 0;
+        int updated = 0;
+        List<ImportRejection> rejected = new ArrayList<>();
+        for (int row = 1; row <= toImport.size(); row++) {
+            PreventiveMaintenanceImportDTO pmImportDTO = toImport.get(row - 1);
             Long id = pmImportDTO.getId();
-            PreventiveMaintenance preventiveMaintenance = new PreventiveMaintenance();
-            if (id == null) {
-                created[0]++;
-            } else {
-                Optional<PreventiveMaintenance> optionalPM = preventiveMaintenanceService.findByIdAndCompany(id,
-                        company.getId());
-                if (optionalPM.isPresent()) {
-                    preventiveMaintenance = optionalPM.get();
-                    updated[0]++;
-                } else {
-                    created[0]++;
-                }
+            PreventiveMaintenance existing = id == null ? null
+                    : preventiveMaintenanceService.findByIdAndCompany(id, company.getId()).orElse(null);
+            // P-18 (E-2): a disabled user or an archived asset is not given anew; checked before the row is saved
+            Optional<ImportRejection> rejection = rejection(row, id, () -> rejectRetiredReferences(existing,
+                    pmImportDTO, company));
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
-            preventiveMaintenanceService.importPreventiveMaintenance(preventiveMaintenance, pmImportDTO, company);
-        });
+            if (existing == null) created++;
+            else updated++;
+            preventiveMaintenanceService.importPreventiveMaintenance(existing == null ? new PreventiveMaintenance()
+                    : existing, pmImportDTO, company);
+        }
         return ImportResponse.builder()
-                .created(created[0])
-                .updated(updated[0])
+                .created(created)
+                .updated(updated)
+                .rejected(rejected)
                 .build();
     }
 

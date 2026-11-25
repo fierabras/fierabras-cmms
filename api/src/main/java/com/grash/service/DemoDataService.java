@@ -1,6 +1,7 @@
 package com.grash.service;
 
 import com.grash.event.CompanyCreatedEvent;
+import com.grash.exception.ConflictException;
 import com.grash.model.*;
 import com.grash.model.enums.*;
 import com.grash.repository.*;
@@ -42,6 +43,8 @@ public class DemoDataService {
     private final AdditionalCostRepository additionalCostRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final PartLedgerService partLedgerService;
+    private final DeletionService deletionService;
+    private final DemoDataDependents demoDataDependents;
     @Autowired
     @Lazy
     private ScheduleService scheduleService;
@@ -442,17 +445,36 @@ public class DemoDataService {
     }
 
     /**
+     * P-18 (PPB-20 d): a record that is not demo depends on a demo one, so the purge is rejected whole.
+     */
+    public static final String DEMO_DATA_IN_USE = "DEMO_DATA_IN_USE";
+    private static final String DEMO_DATA_IN_USE_MESSAGE = "Some records that are not demo use the demo data. "
+            + "Remove those links before deleting the demo data";
+
+    /**
      * Purges the demo data of the company, by {@code actor}. P-16b (D-3): the stock that demo work orders and
      * purchase orders added to or took from a part that is not demo is compensated first; then the movements of the
-     * demo data and the demo purchase orders go with the rest.
+     * demo data and the demo purchase orders go with the rest. P-18 (PPB-20 d, PPB-23): all or nothing; rejected
+     * whole with 409 {@code DEMO_DATA_IN_USE} when a record that is not demo depends on a demo one (an association
+     * that ties them, checked here, or a reference, rejected by its foreign key); recorded as one {@code PURGE}.
      */
     @Transactional
     public void deleteDemoData(Long companyId, User actor) {
+        Company company = actor.getCompany();
+        deletionService.purge(new AuditTarget(EntityType.COMPANY, companyId, null, company.getName(), companyId),
+                actor, DEMO_DATA_IN_USE, DEMO_DATA_IN_USE_MESSAGE, () -> purge(companyId, actor));
+    }
+
+    private void purge(Long companyId, User actor) {
         // P-12b (D-P12b-1): the revisions cite the categories, which are protected references; a revision of a
         // work order that is not demo is kept, so a demo category it cites rejects the whole purge
         workOrderRepository.deleteRevisionsOfDemoWorkOrders(companyId);
         partLedgerService.compensateDemoDocuments(companyId, actor);
         partLedgerService.deleteDemoMovements(companyId);
+        // P-18 (R2, D-P18-7): an association between a demo record and one that is not demo would go in silence
+        Set<EntityType> associated = demoDataDependents.associatedWithDemoData(companyId);
+        if (!associated.isEmpty())
+            throw ConflictException.inUse(DEMO_DATA_IN_USE, DEMO_DATA_IN_USE_MESSAGE, associated);
         additionalCostRepository.deleteByWorkOrder_Company_IdAndIsDemoTrue(companyId);
         partQuantityRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
         purchaseOrderRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
