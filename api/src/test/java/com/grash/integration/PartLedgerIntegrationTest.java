@@ -11,6 +11,7 @@ import com.grash.integration.support.TestRecords;
 import com.grash.model.Company;
 import com.grash.model.Part;
 import com.grash.model.PartQuantity;
+import com.grash.model.PartTransaction;
 import com.grash.model.PurchaseOrder;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -152,7 +154,8 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * Every movement of {@code part}, as JSON rows, to check that earlier movements never change.
+     * Every movement of {@code part}, as JSON rows, to check that earlier movements never change. The identifiers
+     * are not in the order of creation: the starting movement takes its own value of the sequence.
      */
     List<String> rows(Part part) {
         return jdbc.queryForList("SELECT row_to_json(t)::text FROM part_transaction t WHERE part_id = ? ORDER BY id",
@@ -370,6 +373,215 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             assertTrue(response.body().contains("The quantity should not be negative"), response.toString());
             assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE part_id = ?", part.getId()));
             assertEquals(List.of(), movements(part));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 2 · Immutability and reversal of consumptions (PPB-04, PPB-16)
+    // =====================================================================================================
+
+    @Nested
+    class Reversal {
+
+        /** Part with stock 10, consumed 3 on an open work order (one added, then raised to 3): stock 7. */
+        record Consumed(CommonData data, User admin, Part part, WorkOrder workOrder, Long line) {
+        }
+
+        Consumed consumed() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Long line = addByReplacement(workOrder, part, admin);
+            assertEquals(200, changeLine(line, 3, admin).status());
+            assertEquals(7, stock(part));
+            return new Consumed(data, admin, part, workOrder, line);
+        }
+
+        @Test
+        void ca015_lineReduced_reversalForTheDifference_earlierMovementsUnchanged() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response = changeLine(c.line(), 1, c.admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(9, stock(c.part()));
+            assertTrue(rows(c.part()).containsAll(before), "earlier movements unchanged");
+            assertEquals(movement(2, PartTransactionOrigin.REVERSAL, c.workOrder(), null, c.admin()),
+                    movements(c.part()).get(2));
+            assertStockIsTheSumOfItsMovements(c.part());
+        }
+
+        @Test
+        void lineChangedToTheSameQuantity_nothingWritten() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response = changeLine(c.line(), 3, c.admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(7, stock(c.part()));
+            assertEquals(before, rows(c.part()));
+        }
+
+        @Test
+        void ca044_lineDeleted_reversalOfTheLine_earlierMovementsUnchanged() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response = call(delete("/part-quantities/" + c.line()), c.admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(10, stock(c.part()));
+            assertTrue(rows(c.part()).containsAll(before), "earlier movements unchanged");
+            assertEquals(movement(3, PartTransactionOrigin.REVERSAL, c.workOrder(), null, c.admin()),
+                    movements(c.part()).get(2));
+            assertStockIsTheSumOfItsMovements(c.part());
+        }
+
+        @Test
+        void ca044_lineRemovedByReplacement_reversalOfTheLine_earlierMovementsUnchanged() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response = send(patch("/part-quantities/work-order/" + c.workOrder().getId()), "[]",
+                    c.admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE id = ?", c.line()));
+            assertEquals(10, stock(c.part()));
+            assertTrue(rows(c.part()).containsAll(before), "earlier movements unchanged");
+            assertEquals(movement(3, PartTransactionOrigin.REVERSAL, c.workOrder(), null, c.admin()),
+                    movements(c.part()).get(2));
+            assertStockIsTheSumOfItsMovements(c.part());
+        }
+
+        @Test
+        void ca135_reversalFailsOnDelete_nothingChanged() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response;
+            try (FaultInjector.Fault fault = faults.failOn("part_transaction", FaultInjector.Operation.INSERT)) {
+                response = call(delete("/part-quantities/" + c.line()), c.admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertFalse(response.is2xx(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE id = ?", c.line()));
+            assertEquals(7, stock(c.part()));
+            assertEquals(before, rows(c.part()));
+        }
+
+        @Test
+        void ca135_reversalFailsOnReplacement_nothingChanged() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            Response response;
+            try (FaultInjector.Fault fault = faults.failOn("part_transaction", FaultInjector.Operation.INSERT)) {
+                response = send(patch("/part-quantities/work-order/" + c.workOrder().getId()), "[]", c.admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertFalse(response.is2xx(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE id = ?", c.line()));
+            assertEquals(7, stock(c.part()));
+            assertEquals(before, rows(c.part()));
+        }
+
+        @Test
+        void reductionFails_lineKept() {
+            Consumed c = consumed();
+
+            try (FaultInjector.Fault fault = faults.failOn("part_transaction", FaultInjector.Operation.INSERT)) {
+                assertFalse(changeLine(c.line(), 1, c.admin()).is2xx());
+            }
+
+            assertEquals(3.0, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class,
+                    c.line()));
+            assertEquals(7, stock(c.part()));
+        }
+
+        @Test
+        void lineCreatedByPost_consumed() {
+            // D-P16b-6; before P-16b: the line was created without consumption
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 5);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            Response response = send(post("/part-quantities"), "{\"part\":{\"id\":" + part.getId()
+                    + "},\"workOrder\":{\"id\":" + workOrder.getId() + "},\"quantity\":3}", admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(2, stock(part));
+            assertEquals(List.of(movement(-3, PartTransactionOrigin.CONSUMPTION, workOrder, null, admin)),
+                    movements(part));
+        }
+
+        @Test
+        void lineWithoutMovementDeleted_200_reversalOfTheLine() {
+            // before P-16b: 500 (no movement to delete)
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 5);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            PartQuantity line = line(part, workOrder, null, 3);
+
+            Response response = call(delete("/part-quantities/" + line.getId()), admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(8, stock(part));
+            assertEquals(List.of(movement(3, PartTransactionOrigin.REVERSAL, workOrder, null, admin)),
+                    movements(part));
+        }
+
+        @Test
+        void replacementAddingTwoParts_secondWithoutStock_406_nothingConsumed() {
+            CommonData data = data();
+            Part enough = part(data.o1().company(), 5);
+            Part none = part(data.o1().company(), 0);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+
+            Response response = send(patch("/part-quantities/work-order/" + workOrder.getId()),
+                    "[" + enough.getId() + "," + none.getId() + "]", data.o1().admin());
+
+            assertEquals(406, response.status(), response.toString());
+            assertEquals(5, stock(enough));
+            assertEquals(List.of(), movements(enough));
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE work_order_id = ?", workOrder.getId()));
+        }
+
+        @Test
+        void nonStockLineRemoved_nothingWritten() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 0);
+            jdbc.update("UPDATE part SET non_stock = true, quantity = 4 WHERE id = ?", part.getId());
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Long line = addByReplacement(workOrder, part, data.o1().admin());
+
+            assertEquals(200, call(delete("/part-quantities/" + line), data.o1().admin()).status());
+
+            assertEquals(4, stock(part));
+            assertEquals(List.of(), movements(part));
+        }
+
+        @Test
+        void movementChangedThroughTheEntity_notWritten() {
+            Consumed c = consumed();
+            List<String> before = rows(c.part());
+
+            transaction.executeWithoutResult(status -> {
+                PartTransaction movement = em.createQuery("SELECT t FROM PartTransaction t WHERE t.part.id = :part",
+                        PartTransaction.class).setParameter("part", c.part().getId()).getResultList().get(0);
+                movement.setQuantity(100);
+                movement.setDescription("changed");
+                em.flush();
+            });
+
+            assertEquals(before, rows(c.part()));
         }
     }
 }

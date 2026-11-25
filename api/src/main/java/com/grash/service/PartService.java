@@ -22,7 +22,6 @@ import com.grash.model.enums.webhook.PartField;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.PartRepository;
 import com.grash.utils.AfterCommit;
-import com.grash.utils.AuditComparator;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,7 +47,6 @@ import static com.grash.utils.Consts.usageBasedLicenseLimits;
 public class PartService {
     private final PartRepository partRepository;
     private final PartCategoryService partCategoryService;
-    private final PartTransactionService partTransactionService;
     private final CompanyService companyService;
     private final CustomerService customerService;
     private final VendorService vendorService;
@@ -143,27 +141,18 @@ public class PartService {
     }
 
     /**
-     * P-16b (PPB-30): consumes {@code quantity} of the part on the work order, with an exit of its ledger by
-     * {@code actor}.
+     * P-16b (PPB-16, PPB-30): consumes {@code quantity} of the part on the work order by {@code actor}: an exit of
+     * its ledger. A negative {@code quantity} gives it back (a consumption reduced or removed): an entry with origin
+     * REVERSAL; the earlier movements never change.
      */
     @Transactional
-    public void consumePart(Long id, double quantity, WorkOrder workOrder, User actor, Locale locale,
-                            boolean deleteConsumption) {
+    public void consumePart(Long id, double quantity, WorkOrder workOrder, User actor, Locale locale) {
         Part part = partLedgerService.lock(id);
-        if (part.isNonStock()) return;
+        if (part.isNonStock() || quantity == 0) return;
         double previousQuantity = part.getQuantity();
-        if (quantity <= 0) {
-            part.setQuantity(part.getQuantity() - quantity);
-            PartTransaction partTransaction =
-                    Collections.max(partTransactionService.findByWorkOrderAndPart(workOrder.getId(), part.getId()),
-                            new AuditComparator());
-            if (deleteConsumption || quantity == 0d) {
-                partTransactionService.delete(partTransaction.getId());
-            } else {
-                partTransaction.setQuantity(partTransaction.getQuantity() - quantity);
-                partRepository.save(part);
-                partTransactionService.save(partTransaction);
-            }
+        if (quantity < 0) {
+            partLedgerService.record(part, -quantity, PartTransactionOrigin.REVERSAL,
+                    PartLedgerService.Movement.onWorkOrder(actor, workOrder));
         } else {
             partLedgerService.record(part, -quantity, PartTransactionOrigin.CONSUMPTION,
                     PartLedgerService.Movement.onWorkOrder(actor, workOrder));
@@ -454,6 +443,10 @@ public class PartService {
                         idExtractor.apply(aItem).equals(idExtractor.apply(bItem))));
     }
 
+    /**
+     * P-16b (C-3): the webhook of a change of stock is sent once the change is committed, never when it is rolled
+     * back; its content is taken before.
+     */
     private void dispatchPartQuantityChangeWebhook(Part part, double previousQuantity, double newQuantity,
                                                    WorkOrder workOrder, Company company) {
         if (previousQuantity == newQuantity) return;
@@ -469,8 +462,8 @@ public class PartService {
         }
         Collection<PartField> changedFields = Collections.singletonList(PartField.QUANTITY);
         Object serializedPart = partMapper.toShowDto(part);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.PART_QUANTITY_CHANGED, webhookPayload,
-                "changedPart", serializedPart, null, null, null, null, changedFields);
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.PART_QUANTITY_CHANGED,
+                webhookPayload, "changedPart", serializedPart, null, null, null, null, changedFields));
     }
 }
 

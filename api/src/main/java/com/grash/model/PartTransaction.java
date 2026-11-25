@@ -14,12 +14,15 @@ import jakarta.persistence.ManyToOne;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Immutable;
 
 /**
  * P-16b (PPB-04, PPB-30): one movement of the ledger of a part. The quantity is signed: an entry is positive, an exit
- * negative, so the stock of the part is the sum of its movements. Only {@code PartLedgerService} creates movements.
+ * negative, so the stock of the part is the sum of its movements. Only {@code PartLedgerService} creates movements;
+ * no operation of the application changes or deletes one ({@code @Immutable}).
  */
 @Entity
+@Immutable
 @Data
 @NoArgsConstructor
 @Schema(description = "Movement of the ledger of a part")

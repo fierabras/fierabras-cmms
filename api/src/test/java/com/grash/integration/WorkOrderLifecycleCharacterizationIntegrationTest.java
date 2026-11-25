@@ -194,8 +194,9 @@ class WorkOrderLifecycleCharacterizationIntegrationTest extends AbstractIntegrat
         assertAll(
                 () -> assertEquals(0, count("task", "work_order_id", f.id())),
                 () -> assertEquals(0, count("part_quantity", "work_order_id", f.id())),
-                // P-16 adds the compensating movement here; P-12 keeps the current stock
-                () -> assertEquals(9.0, stock(f.part())));
+                // before P-16b: 9.0 (the omitted line did not give the part back); P-16b (PPB-16): a reversal
+                () -> assertEquals(10.0, stock(f.part())),
+                () -> assertEquals(2, count("part_transaction", "work_order_id", f.id()), "the exit and its reversal"));
     }
 
     @Test

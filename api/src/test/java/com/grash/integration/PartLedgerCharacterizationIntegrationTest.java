@@ -291,7 +291,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
         }
 
         @Test
-        void lineCreatedByPost_stockKept_noMovement() {
+        void lineCreatedByPost_consumed() {
+            // before P-16b: stock kept, no movement; P-16b (D-P16b-6): the line consumes its quantity
             CommonData data = data();
             Part part = part(data.o1().company(), 5);
             WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
@@ -300,8 +301,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                     + "},\"workOrder\":{\"id\":" + workOrder.getId() + "},\"quantity\":3}", data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals(5, stock(part));
-            assertEquals(List.of(), movements(part));
+            assertEquals(2, stock(part));
+            assertEquals(List.of("-3.0/" + workOrder.getId() + "/" + data.o1().admin().getId()), movements(part));
         }
 
         @Test
@@ -337,8 +338,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     class ConsumptionReduction {
 
         @Test
-        void lineIncreasedThenReduced_newMovementThenTheLatestEdited() {
-            // CA-PPB-015; before P-16b: the reduction edits the latest movement
+        void lineIncreasedThenReduced_newExitThenAReversal() {
+            // CA-PPB-015; before P-16b: the reduction edited the latest movement (to 0); now a reversal of 2
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 10);
@@ -355,11 +356,13 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             assertEquals(200, response.status(), response.toString());
             assertEquals(9, stock(part));
             assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
-                    "0.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+                    "-2.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "2.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
-        void lineChangedToTheSameQuantity_latestMovementDeleted_stockKept() {
+        void lineChangedToTheSameQuantity_nothingWritten() {
+            // before P-16b: the latest movement was deleted (stock 7, sum 9)
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 10);
@@ -371,12 +374,13 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(7, stock(part));
-            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "-2.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
-        void lineDeleted_stockRestored_onlyTheLatestMovementDeleted() {
-            // CA-PPB-044 (individual route); before P-16b: the movement is deleted
+        void lineDeleted_stockRestored_withAReversalOfTheLine() {
+            // CA-PPB-044 (individual route); before P-16b: only the latest movement was deleted (+2), the +1 stayed
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 10);
@@ -388,12 +392,14 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(10, stock(part));
-            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "-2.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "3.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
-        void lineRemovedByReplacement_stockNotRestored_movementKept() {
-            // CA-PPB-044 (bulk route); before P-16b: no restock
+        void lineRemovedByReplacement_stockRestored_withAReversal() {
+            // CA-PPB-044 (bulk route); before P-16b: no restock, stock 9
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 10);
@@ -404,13 +410,15 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE part_id = ?", part.getId()));
-            assertEquals(9, stock(part));
-            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(10, stock(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
-        void lineWithoutMovementDeleted_500_nothingChanged() {
-            // a line created without consumption (POST, or the demo data) has no movement to delete
+        void lineWithoutMovementDeleted_200_reversalOfTheLine() {
+            // a line created without consumption before P-16b (demo data, POST): before P-16b, 500 and nothing
+            // changed; now it gives back its quantity like any other
             CommonData data = data();
             Part part = part(data.o1().company(), 5);
             WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
@@ -418,9 +426,9 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             Response response = call(delete("/part-quantities/" + line.getId()), data.o1().admin());
 
-            assertEquals(500, response.status(), response.toString());
-            assertEquals(5, stock(part));
-            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE id = ?", line.getId()));
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(8, stock(part));
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE id = ?", line.getId()));
         }
     }
 
@@ -748,7 +756,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
         }
 
         @Test
-        void export_showsTheStoredSignInverted() {
+        void export_showsTheStoredSign() {
+            // before P-16b: the export inverted the stored sign; P-16b (D-1) stores it as it is shown
             Facts facts = facts();
             User admin = facts.data().o1().admin();
 
@@ -768,8 +777,11 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                         String[] cells = row.split(",", -1);
                         return cells[3] + "|" + cells[4] + "|" + cells[5] + "|" + cells[7];
                     }).sorted().toList();
+            // before P-16b: the reduction edited the second movement, so the export showed -1 twice; P-16b (PPB-04):
+            // the second exit stays -2 and the reduction is its own entry of +1. The net is the same (-2)
             assertEquals(List.of("-1.0|-10.0|" + facts.workOrder().getId() + "|",
-                    "-1.0|-10.0|" + facts.workOrder().getId() + "|", "5.0|50.0||P-16b restock"), rows, csv);
+                    "-2.0|-20.0|" + facts.workOrder().getId() + "|", "1.0|10.0|" + facts.workOrder().getId() + "|",
+                    "5.0|50.0||P-16b restock"), rows, csv);
         }
     }
 }
