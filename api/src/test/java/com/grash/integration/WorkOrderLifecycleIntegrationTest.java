@@ -877,8 +877,9 @@ class WorkOrderLifecycleIntegrationTest extends AbstractIntegrationTest {
                 assertEquals("a", deleteRule(fk[0], fk[1]), fk[0] + "." + fk[1]);
                 assertTrue(indexed(fk[0], fk[1]), fk[0] + "." + fk[1] + " has no index");
             }
-            // P-16 changes it, with the stock movements
-            assertEquals("c", deleteRule("part_transaction", "work_order_id"));
+            // before P-16b: c (CASCADE). P-16b (E-12): the movements are a historical record of the work order
+            assertEquals("a", deleteRule("part_transaction", "work_order_id"));
+            assertTrue(indexed("part_transaction", "work_order_id"));
         }
 
         private String deleteRule(String table, String column) {

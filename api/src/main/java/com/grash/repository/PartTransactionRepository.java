@@ -25,7 +25,8 @@ public interface PartTransactionRepository extends JpaRepository<PartTransaction
                 FROM PartTransaction pt
                 WHERE pt.company.id = :id
                   AND pt.createdAt BETWEEN :start AND :end
-                  AND pt.quantity > 0
+                  AND pt.origin IN (com.grash.model.enums.PartTransactionOrigin.CONSUMPTION,
+                                    com.grash.model.enums.PartTransactionOrigin.REVERSAL)
             """)
     Collection<PartTransaction> findConsumptionsByCompanyBetween(
             @Param("id") Long id,
@@ -44,14 +45,14 @@ public interface PartTransactionRepository extends JpaRepository<PartTransaction
     Page<PartTransaction> findByCompanyForExport(@Param("companyId") Long companyId, Pageable pageable);
 
     @Query(value = """
-            SELECT a.id, a.name, COALESCE(SUM(p.cost * pt.quantity), 0) AS total_cost
+            SELECT a.id, a.name, COALESCE(SUM(p.cost * -pt.quantity), 0) AS total_cost
             FROM part_transaction pt
             JOIN work_order wo ON pt.work_order_id = wo.id
             JOIN asset a ON wo.asset_id = a.id
             JOIN part p ON pt.part_id = p.id
             WHERE a.company_id = :companyId
               AND wo.created_at BETWEEN :start AND :end
-              AND pt.quantity>0
+              AND pt.origin IN ('CONSUMPTION', 'REVERSAL')
             GROUP BY a.id, a.name
             ORDER BY total_cost DESC
             LIMIT :limit

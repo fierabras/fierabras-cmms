@@ -16,6 +16,7 @@ import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.CustomFieldEntityType;
 import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.webhook.PartField;
 import com.grash.model.enums.webhook.WebhookEvent;
@@ -63,6 +64,7 @@ public class PartService {
     private final CustomFieldValueService customFieldValueService;
     private final MailServiceFactory mailServiceFactory;
     private final DeletionService deletionService;
+    private final PartLedgerService partLedgerService;
 
     @Value("${frontend.url}")
     private String frontendUrl;
@@ -140,26 +142,31 @@ public class PartService {
                     HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * P-16b (PPB-30): consumes {@code quantity} of the part on the work order, with an exit of its ledger by
+     * {@code actor}.
+     */
     @Transactional
-    public void consumePart(Long id, double quantity, WorkOrder workOrder, Locale locale, boolean deleteConsumption) {
-        Part part = findById(id).get();
+    public void consumePart(Long id, double quantity, WorkOrder workOrder, User actor, Locale locale,
+                            boolean deleteConsumption) {
+        Part part = partLedgerService.lock(id);
         if (part.isNonStock()) return;
         double previousQuantity = part.getQuantity();
-        part.setQuantity(part.getQuantity() - quantity);
-        if (part.getQuantity() < 0)
-            throw new CustomException("There is not enough of this part", HttpStatus.NOT_ACCEPTABLE);
         if (quantity <= 0) {
+            part.setQuantity(part.getQuantity() - quantity);
             PartTransaction partTransaction =
                     Collections.max(partTransactionService.findByWorkOrderAndPart(workOrder.getId(), part.getId()),
                             new AuditComparator());
             if (deleteConsumption || quantity == 0d) {
                 partTransactionService.delete(partTransaction.getId());
             } else {
-                partTransaction.setQuantity(partTransaction.getQuantity() + quantity);
+                partTransaction.setQuantity(partTransaction.getQuantity() - quantity);
                 partRepository.save(part);
                 partTransactionService.save(partTransaction);
             }
         } else {
+            partLedgerService.record(part, -quantity, PartTransactionOrigin.CONSUMPTION,
+                    PartLedgerService.Movement.onWorkOrder(actor, workOrder));
             String message = messageSource.getMessage("notification_part_low", new Object[]{part.getName()}, locale);
             if (part.getQuantity() < part.getMinQuantity() && licenseService.hasEntitlement(LicenseEntitlement.LOW_STOCK_ALERTS)) {
                 Map<Long, User> uniqueUsersMap = new TreeMap<>();
@@ -191,22 +198,21 @@ public class PartService {
                     );
                 }
             }
-            partTransactionService.create(new PartTransaction(part, workOrder, quantity));
-            partRepository.save(part);
-
         }
         dispatchPartQuantityChangeWebhook(part, previousQuantity, part.getQuantity(), workOrder,
                 workOrder.getCompany());
     }
 
+    /**
+     * P-16b (PPB-30): adds {@code quantity} to the stock, with an entry of the ledger by {@code actor}.
+     */
     @Transactional
-    public void restockPart(Long id, double quantity, String description) {
-        Part part = findById(id).get();
+    public void restockPart(Long id, double quantity, String description, User actor) {
+        Part part = partLedgerService.lock(id);
         if (part.isNonStock()) return;
         double previousQuantity = part.getQuantity();
-        part.setQuantity(part.getQuantity() + quantity);
-        partRepository.save(part);
-        partTransactionService.create(new PartTransaction(part, -quantity, description));
+        partLedgerService.record(part, quantity, PartTransactionOrigin.RESTOCK,
+                PartLedgerService.Movement.by(actor).describedAs(description));
         dispatchPartQuantityChangeWebhook(part, previousQuantity, part.getQuantity(), null,
                 part.getCompany());
     }

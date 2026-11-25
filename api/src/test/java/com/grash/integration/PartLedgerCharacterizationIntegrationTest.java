@@ -261,6 +261,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
         @Test
         void restocked_stockAdded_negativeMovementWithoutWorkOrder_byTheUser() {
+            // before P-16b: the restock was stored negative; P-16b (D-1): an entry is positive
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 1);
@@ -270,13 +271,14 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(3, stock(part));
-            assertEquals(List.of("-2.0/-/" + admin.getId()), movements(part));
+            assertEquals(List.of("2.0/-/" + admin.getId()), movements(part));
             assertEquals("P-16b restock", jdbc.queryForObject("SELECT description FROM part_transaction "
                     + "WHERE part_id = ?", String.class, part.getId()));
         }
 
         @Test
         void addedByReplacement_oneConsumed_positiveMovementWithTheWorkOrder_byTheUser() {
+            // before P-16b: the consumption was stored positive; P-16b (D-1): an exit is negative
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 5);
@@ -285,7 +287,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             addByReplacement(workOrder, part, admin);
 
             assertEquals(4, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
@@ -345,14 +347,14 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, changeLine(line, 3, admin).status());
             assertEquals(7, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId(),
-                    "2.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
+                    "-2.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
 
             Response response = changeLine(line, 1, admin);
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(9, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId(),
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId(),
                     "0.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
@@ -369,7 +371,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(7, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
@@ -386,7 +388,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(10, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
@@ -403,7 +405,7 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE part_id = ?", part.getId()));
             assertEquals(9, stock(part));
-            assertEquals(List.of("1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
 
         @Test
@@ -582,10 +584,12 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             Response response = call(delete("/demo/demo-data"), admin);
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, count("SELECT count(*) FROM work_order WHERE id = ?", workOrder.getId()));
+            // P-16b block 1: work_order_id is a protected reference, so the movement rejects the purge until the
+            // compensation of block 5 (D-3)
+            assertEquals(409, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", workOrder.getId()));
             assertEquals(4, stock(part));
-            assertEquals(List.of(), movements(part));
+            assertEquals(List.of("-1.0/" + workOrder.getId() + "/" + admin.getId()), movements(part));
         }
     }
 
@@ -632,12 +636,13 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
         @Test
         void ledgerTable_columnsAndForeignKeys() {
-            // E-11, E-12; before P-16b: no origin, no purchase order, work_order_id CASCADE without index
+            // E-11, E-12; before P-16b: no origin, purchase order nor demo flag, work_order_id CASCADE without index
             List<String> columns = jdbc.queryForList("SELECT column_name || ' ' || data_type || ' ' || is_nullable "
                     + "FROM information_schema.columns WHERE table_schema = current_schema() "
                     + "AND table_name = 'part_transaction' ORDER BY column_name", String.class);
             assertEquals(List.of("company_id bigint NO", "created_at timestamp without time zone NO",
-                    "created_by bigint YES", "description text YES", "id bigint NO", "part_id bigint NO",
+                    "created_by bigint YES", "description text YES", "id bigint NO", "is_demo boolean NO",
+                    "origin character varying NO", "part_id bigint NO", "purchase_order_id bigint YES",
                     "quantity double precision NO", "updated_at timestamp without time zone NO",
                     "updated_by bigint YES", "work_order_id bigint YES"), columns);
             List<String> keys = jdbc.queryForList("""
@@ -651,7 +656,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                     ORDER BY 1""", String.class);
             assertEquals(List.of("company_id -> company fkib1h4krpiuuk1meixq7qf9g86 c true",
                     "part_id -> part fkbx2tggt11xc2ofuwui2xsxkg0 a true",
-                    "work_order_id -> work_order fkj99sa2uououd6s977aqyc0yri c false"), keys);
+                    "purchase_order_id -> purchase_order fk_part_transaction_purchase_order a true",
+                    "work_order_id -> work_order fkj99sa2uououd6s977aqyc0yri a true"), keys);
             // Hibernate pooled optimizer: a value of the sequence is the top of a block of 50 identifiers
             assertEquals(50L, count("SELECT increment_by FROM pg_sequences "
                     + "WHERE sequencename = 'part_transaction_seq'"));

@@ -30,6 +30,7 @@ import com.grash.model.Workflow;
 import com.grash.model.WorkflowAction;
 import com.grash.model.WorkflowCondition;
 import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.PartCondition;
@@ -188,7 +189,9 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
     }
 
     private PartTransaction movement(Part part, WorkOrder workOrder, double quantity) {
-        PartTransaction movement = new PartTransaction(part, workOrder, quantity);
+        // P-16b: a consumption is an exit (negative) with its origin
+        PartTransaction movement = new PartTransaction(part, -quantity, workOrder == null
+                ? PartTransactionOrigin.RESTOCK : PartTransactionOrigin.CONSUMPTION, workOrder, null, null);
         movement.setCompany(part.getCompany());
         return partTransactionRepository.saveAndFlush(movement);
     }
@@ -1231,6 +1234,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     "part_quantity.part_id -> part fk21q7kq7mtnvshipi5oym9t2b3 a true",
                     "part_quantity.purchase_order_id -> purchase_order fkb8l63n0csjq7q33wwbkvsj61u c false",
                     "part_transaction.part_id -> part fkbx2tggt11xc2ofuwui2xsxkg0 a true",
+                    // P-16b (E-12): the movement cites the purchase order that added the stock
+                    "part_transaction.purchase_order_id -> purchase_order fk_part_transaction_purchase_order a true",
                     "purchase_order.category_id -> purchase_order_category fk29o4jh7n4ttmsfh50ulu11hjg a true",
                     "purchase_order.vendor_id -> vendor fk20jcn7pw6hvx0uo0sh4y1d9xv a true",
                     "t_asset_part_associations.id_part -> part fkno24a5qbnjjn9xl0x2goppspd c true",

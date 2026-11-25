@@ -96,7 +96,7 @@ public class PartQuantityController {
                     if (!partQuantityMappedPartIds.contains(partId)) {
                         Optional<Part> optionalPart = partService.findById(partId);
                         if (optionalPart.isPresent()) {
-                            partService.consumePart(optionalPart.get().getId(), 1, savedWorkOrder,
+                            partService.consumePart(optionalPart.get().getId(), 1, savedWorkOrder, user,
                                     Helper.getLocale(user), false);
                             PartQuantity partQuantity = new PartQuantity(optionalPart.get(), savedWorkOrder, null, 1);
                             partQuantityService.create(partQuantity);
@@ -222,7 +222,7 @@ public class PartQuantityController {
                 WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                 partService.consumePart(savedPartQuantity.getPart().getId(),
                         partQuantity.getQuantity() - savedPartQuantity.getQuantity(),
-                        savedPartQuantity.getWorkOrder(), Helper.getLocale(user), false);
+                        savedPartQuantity.getWorkOrder(), user, Helper.getLocale(user), false);
             }
             PartQuantity patchedPartQuantity = partQuantityService.update(id, partQuantity);
             return partQuantityMapper.toShowDto(patchedPartQuantity);
@@ -246,7 +246,7 @@ public class PartQuantityController {
                     WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                     partService.consumePart(savedPartQuantity.getPart().getId(),
                             -savedPartQuantity.getQuantity(),
-                            savedPartQuantity.getWorkOrder(), Helper.getLocale(user), true);
+                            savedPartQuantity.getWorkOrder(), user, Helper.getLocale(user), true);
                 }
                 // P-16 (E-7): the line of an approved or rejected purchase order is not removed
                 if (savedPartQuantity.getPurchaseOrder() != null)

@@ -19,6 +19,7 @@ import com.grash.model.PurchaseOrder;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.Status;
 import com.grash.repository.PartCategoryRepository;
 import com.grash.repository.PartQuantityRepository;
@@ -165,7 +166,9 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
     }
 
     PartTransaction movement(Part part, WorkOrder workOrder, double quantity) {
-        PartTransaction movement = new PartTransaction(part, workOrder, quantity);
+        // P-16b: a consumption is an exit (negative) with its origin
+        PartTransaction movement = new PartTransaction(part, -quantity, workOrder == null
+                ? PartTransactionOrigin.RESTOCK : PartTransactionOrigin.CONSUMPTION, workOrder, null, null);
         movement.setCompany(part.getCompany());
         return partTransactionRepository.saveAndFlush(movement);
     }
