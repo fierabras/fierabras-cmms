@@ -348,7 +348,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class Schedules {
 
         @Test
-        void ca039_deleteSchedule_200_scheduleKept_butItsJobsStopped() throws SchedulerException {
+        void ca039_deleteSchedule_409_scheduleAndItsJobsKept() throws SchedulerException {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -358,11 +358,11 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             // P-15 (CA-PPB-039): before, 200 and the jobs were stopped, but the schedule stayed (the preventive
             // maintenance cascades to it, so Hibernate cancels the deletion): it silently generated nothing more
             assertAll(
-                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals(409, response.status(), response.toString()),
                     () -> assertEquals(1, count("SELECT count(*) FROM schedule WHERE id = ?", schedule)),
                     () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ? "
                             + "AND schedule_id = ?", pm, schedule)),
-                    () -> assertFalse(jobExists(schedule)));
+                    () -> assertTrue(jobExists(schedule)));
         }
     }
 

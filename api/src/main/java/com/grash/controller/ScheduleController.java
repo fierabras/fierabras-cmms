@@ -1,7 +1,7 @@
 package com.grash.controller;
 
 import com.grash.dto.SchedulePatchDTO;
-import com.grash.dto.SuccessResponse;
+import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
 import com.grash.model.Schedule;
@@ -26,6 +26,10 @@ import java.util.Optional;
 @Tag(name = "Schedules", description = "Operations on schedules")
 @RequiredArgsConstructor
 public class ScheduleController {
+
+    public static final String SCHEDULE_REQUIRED = "SCHEDULE_REQUIRED";
+    private static final String SCHEDULE_REQUIRED_MESSAGE = "A preventive maintenance needs its schedule: delete "
+            + "or pause the preventive maintenance instead";
 
     private final ScheduleService scheduleService;
     private final UserService userService;
@@ -81,9 +85,8 @@ public class ScheduleController {
             Schedule savedSchedule = optionalSchedule.get();
             if (!savedSchedule.getPreventiveMaintenance().canBeEditedBy(user))
                 throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
-            scheduleService.delete(id);
-            return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
-                    HttpStatus.OK);
+            // P-15 (E-3, PPB-14): a schedule goes only with its preventive maintenance; it and its jobs stay
+            throw new ConflictException(SCHEDULE_REQUIRED, SCHEDULE_REQUIRED_MESSAGE);
         } else throw new CustomException("Schedule not found", HttpStatus.NOT_FOUND);
     }
 

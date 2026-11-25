@@ -490,4 +490,63 @@ class PreventiveMaintenanceIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)));
         }
     }
+
+    // =====================================================================================================
+    // B3 · The schedule is not deleted alone (CA-PPB-039, E-3, PPB-14)
+    // =====================================================================================================
+
+    @Nested
+    class Schedules {
+
+        @Test
+        void ca039_deleteTheSchedule_409ScheduleRequired_scheduleAndJobsKept() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            Map<String, Object> before = jdbc.queryForMap("SELECT * FROM schedule WHERE id = ?", schedule);
+
+            Response response = call(delete("/schedules/" + schedule), data.o1().admin());
+
+            assertAll(
+                    () -> assertEquals(List.of(), conflict(response, "SCHEDULE_REQUIRED")),
+                    () -> assertEquals(before, jdbc.queryForMap("SELECT * FROM schedule WHERE id = ?", schedule)),
+                    () -> assertEquals(schedule, scheduleOf(pm)),
+                    () -> assertTrue(jobExists(schedule)),
+                    () -> assertEquals(List.of(), audit(data)));
+        }
+
+        @Test
+        void withoutPermission_403_beforeThe409() throws Exception {
+            CommonData data = data();
+            long schedule = scheduleOf(preventiveMaintenance(data.o1().admin(), ""));
+
+            Response response = call(delete("/schedules/" + schedule), data.o1().technician());
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertTrue(jobExists(schedule)));
+        }
+
+        @Test
+        void inv10_anotherOrganization_403_never409() throws Exception {
+            CommonData data = data();
+            long schedule = scheduleOf(preventiveMaintenance(data.o1().admin(), ""));
+
+            Response response = call(delete("/schedules/" + schedule), data.o2().admin());
+
+            assertAll(
+                    () -> assertEquals(403, response.status(), response.toString()),
+                    () -> assertFalse(response.body().contains("SCHEDULE_REQUIRED"), response.toString()),
+                    () -> assertTrue(jobExists(schedule)));
+        }
+
+        @Test
+        void unknown_404() {
+            CommonData data = data();
+
+            Response response = call(delete("/schedules/" + Long.MAX_VALUE), data.o1().admin());
+
+            assertEquals(404, response.status(), response.toString());
+        }
+    }
 }
