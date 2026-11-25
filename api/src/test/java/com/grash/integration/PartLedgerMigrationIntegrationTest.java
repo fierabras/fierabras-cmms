@@ -22,8 +22,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * P-16b (E-11, E-12, D-1, D-2): the migration of the ledger on data written before it, in a database created for the
- * test in the same container (never a database of somebody else). Every changeset except those of P-16b is applied,
+ * test in the same container (never a database of somebody else). Every changeset before those of P-16b is applied,
  * data of before is seeded, the changesets of P-16b are applied and checked, then rolled back and checked again.
+ * P-15: the changesets of later packages are neither applied nor rolled back, so the test does not depend on them.
  */
 class PartLedgerMigrationIntegrationTest extends AbstractIntegrationTest {
 
@@ -58,16 +59,19 @@ class PartLedgerMigrationIntegrationTest extends AbstractIntegrationTest {
             List<ChangeSet> unrun = liquibase.listUnrunChangeSets(new Contexts(), new LabelExpression());
             int ledger = (int) unrun.stream().filter(changeSet -> changeSet.getId().contains("_part_ledger_")).count();
             assertEquals(6, ledger);
-            assertTrue(unrun.subList(unrun.size() - ledger, unrun.size()).stream()
-                    .allMatch(changeSet -> changeSet.getId().contains("_part_ledger_")), "P-16b changesets are last");
+            int first = 0;
+            while (!unrun.get(first).getId().contains("_part_ledger_")) first++;
+            assertTrue(unrun.subList(first, first + ledger).stream()
+                    .allMatch(changeSet -> changeSet.getId().contains("_part_ledger_")),
+                    "P-16b changesets are contiguous");
 
-            liquibase.update(unrun.size() - ledger, "");
+            liquibase.update(first, "");
             seedEarlierData(db);
             if (!connection.getAutoCommit()) connection.commit();
             List<String> earlier = db.queryForList("SELECT id || ' ' || quantity FROM part_transaction ORDER BY id",
                     String.class);
 
-            liquibase.update("");
+            liquibase.update(ledger, "");
 
             assertAll(
                     // D-1: the movements of before change sign and get an origin

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-15 (E-9, PPB-17, PPB-21, PPB-22): a preventive maintenance that generated work orders, the schedule of a
+         preventive maintenance, a task definition used by a task and a checklist cited by an automation are
+         protected references (NO ACTION); the custom field values of a preventive maintenance and the options of a
+         task definition are part of them (CASCADE). Each child column leads an index. Earlier changesets are left
+         untouched. -->
+
+    <changeSet id="2026_11_25_1795650000_work_order_parent_preventive_maintenance_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkajaqh96l0dquvxdfw8fj77241"/>
+        <addForeignKeyConstraint baseColumnNames="parent_preventive_maintenance_id" baseTableName="work_order"
+                                 constraintName="fkajaqh96l0dquvxdfw8fj77241" referencedColumnNames="id"
+                                 referencedTableName="preventive_maintenance" onDelete="NO ACTION"/>
+        <createIndex tableName="work_order" indexName="idx_work_order_parent_preventive_maintenance_id">
+            <column name="parent_preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_parent_preventive_maintenance_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order" constraintName="fkajaqh96l0dquvxdfw8fj77241"/>
+            <addForeignKeyConstraint baseColumnNames="parent_preventive_maintenance_id" baseTableName="work_order"
+                                     constraintName="fkajaqh96l0dquvxdfw8fj77241" referencedColumnNames="id"
+                                     referencedTableName="preventive_maintenance" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795650000_work_order_aud_parent_preventive_maintenance_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="work_order_aud"
+                                  constraintName="FK_work_order_AUD_parentPreventiveMaintenance_id"/>
+        <addForeignKeyConstraint baseColumnNames="parent_preventive_maintenance_id" baseTableName="work_order_aud"
+                                 constraintName="FK_work_order_AUD_parentPreventiveMaintenance_id"
+                                 referencedColumnNames="id" referencedTableName="preventive_maintenance"
+                                 onDelete="NO ACTION"/>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_parent_preventive_maintenance_id">
+            <column name="parent_preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_parent_preventive_maintenance_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud"
+                                      constraintName="FK_work_order_AUD_parentPreventiveMaintenance_id"/>
+            <addForeignKeyConstraint baseColumnNames="parent_preventive_maintenance_id"
+                                     baseTableName="work_order_aud"
+                                     constraintName="FK_work_order_AUD_parentPreventiveMaintenance_id"
+                                     referencedColumnNames="id" referencedTableName="preventive_maintenance"
+                                     onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795650000_preventive_maintenance_schedule_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="preventive_maintenance" constraintName="fk3a3u3u7kqwtapl3lskjayyyrl"/>
+        <addForeignKeyConstraint baseColumnNames="schedule_id" baseTableName="preventive_maintenance"
+                                 constraintName="fk3a3u3u7kqwtapl3lskjayyyrl" referencedColumnNames="id"
+                                 referencedTableName="schedule" onDelete="NO ACTION"/>
+        <createIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_schedule_id">
+            <column name="schedule_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance" indexName="idx_preventive_maintenance_schedule_id"/>
+            <dropForeignKeyConstraint baseTableName="preventive_maintenance"
+                                      constraintName="fk3a3u3u7kqwtapl3lskjayyyrl"/>
+            <addForeignKeyConstraint baseColumnNames="schedule_id" baseTableName="preventive_maintenance"
+                                     constraintName="fk3a3u3u7kqwtapl3lskjayyyrl" referencedColumnNames="id"
+                                     referencedTableName="schedule" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795650000_task_task_base_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="task" constraintName="fk40yui5s4d1qatg5yv31py6fr2"/>
+        <addForeignKeyConstraint baseColumnNames="task_base_id" baseTableName="task"
+                                 constraintName="fk40yui5s4d1qatg5yv31py6fr2" referencedColumnNames="id"
+                                 referencedTableName="task_base" onDelete="NO ACTION"/>
+        <createIndex tableName="task" indexName="idx_task_task_base_id">
+            <column name="task_base_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task" indexName="idx_task_task_base_id"/>
+            <dropForeignKeyConstraint baseTableName="task" constraintName="fk40yui5s4d1qatg5yv31py6fr2"/>
+            <addForeignKeyConstraint baseColumnNames="task_base_id" baseTableName="task"
+                                     constraintName="fk40yui5s4d1qatg5yv31py6fr2" referencedColumnNames="id"
+                                     referencedTableName="task_base" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795650000_workflow_action_checklist_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkbvldf2gcw2fnr9flgnfr76i7i"/>
+        <addForeignKeyConstraint baseColumnNames="checklist_id" baseTableName="workflow_action"
+                                 constraintName="fkbvldf2gcw2fnr9flgnfr76i7i" referencedColumnNames="id"
+                                 referencedTableName="checklist" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow_action" indexName="idx_workflow_action_checklist_id">
+            <column name="checklist_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_action" indexName="idx_workflow_action_checklist_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow_action" constraintName="fkbvldf2gcw2fnr9flgnfr76i7i"/>
+            <addForeignKeyConstraint baseColumnNames="checklist_id" baseTableName="workflow_action"
+                                     constraintName="fkbvldf2gcw2fnr9flgnfr76i7i" referencedColumnNames="id"
+                                     referencedTableName="checklist" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <!-- custom_field_value.preventive_maintenance_id already leads an index, so none is created -->
+    <changeSet id="2026_11_25_1795650000_custom_field_value_preventive_maintenance_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="custom_field_value"
+                                  constraintName="fk_custom_field_value_preventive_maintenance"/>
+        <addForeignKeyConstraint baseColumnNames="preventive_maintenance_id" baseTableName="custom_field_value"
+                                 constraintName="fk_custom_field_value_preventive_maintenance"
+                                 referencedColumnNames="id" referencedTableName="preventive_maintenance"
+                                 onDelete="CASCADE"/>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="custom_field_value"
+                                      constraintName="fk_custom_field_value_preventive_maintenance"/>
+            <addForeignKeyConstraint baseColumnNames="preventive_maintenance_id" baseTableName="custom_field_value"
+                                     constraintName="fk_custom_field_value_preventive_maintenance"
+                                     referencedColumnNames="id" referencedTableName="preventive_maintenance"
+                                     onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795650000_task_option_task_base_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="task_option" constraintName="fkko048mkiejn0ikwy5t4rqwf7o"/>
+        <addForeignKeyConstraint baseColumnNames="task_base_id" baseTableName="task_option"
+                                 constraintName="fkko048mkiejn0ikwy5t4rqwf7o" referencedColumnNames="id"
+                                 referencedTableName="task_base" onDelete="CASCADE"/>
+        <createIndex tableName="task_option" indexName="idx_task_option_task_base_id">
+            <column name="task_base_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task_option" indexName="idx_task_option_task_base_id"/>
+            <dropForeignKeyConstraint baseTableName="task_option" constraintName="fkko048mkiejn0ikwy5t4rqwf7o"/>
+            <addForeignKeyConstraint baseColumnNames="task_base_id" baseTableName="task_option"
+                                     constraintName="fkko048mkiejn0ikwy5t4rqwf7o" referencedColumnNames="id"
+                                     referencedTableName="task_base" onDelete="SET NULL"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

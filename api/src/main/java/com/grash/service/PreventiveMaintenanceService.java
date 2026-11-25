@@ -44,6 +44,10 @@ import static com.grash.utils.Consts.usageBasedLicenseLimits;
 @RequiredArgsConstructor
 @Slf4j
 public class PreventiveMaintenanceService {
+    public static final String PREVENTIVE_MAINTENANCE_IN_USE = "PREVENTIVE_MAINTENANCE_IN_USE";
+    private static final String PREVENTIVE_MAINTENANCE_IN_USE_MESSAGE = "This preventive maintenance is used by "
+            + "other records. Pause it instead of deleting it";
+
     private final PreventiveMaintenanceRepository preventiveMaintenanceRepository;
     private final EntityManager em;
     private final CustomSequenceService customSequenceService;
@@ -61,6 +65,7 @@ public class PreventiveMaintenanceService {
     private final TaskService taskService;
     private final FileService fileService;
     private final DeletionService deletionService;
+    private final AuditLogService auditLogService;
 
 
     @Transactional
@@ -73,6 +78,9 @@ public class PreventiveMaintenanceService {
         checkUsageBasedLimit(user.getCompany());
         // P-14b (E-3, PPB-08): an archived asset is not given to a new preventive maintenance
         assetService.rejectRetired(List.of(), Collections.singletonList(preventiveMaintenancePost.getAsset()));
+        // P-15 (E-8, PPB-08): a disabled user is not given to a new preventive maintenance
+        userService.rejectRetired(List.of(), WorkOrderService.assignedUsers(preventiveMaintenancePost.getPrimaryUser(),
+                preventiveMaintenancePost.getAssignedTo()));
         Company company = user.getCompany();
         Long nextSequence = customSequenceService.getNextPreventiveMaintenanceSequence(company);
         preventiveMaintenance.setCustomId("PM" + String.format("%06d", nextSequence));
@@ -96,6 +104,11 @@ public class PreventiveMaintenanceService {
             // P-14b (E-3, PPB-08): an archived asset is not given anew; the one already cited is kept
             assetService.rejectRetired(Collections.singletonList(savedPreventiveMaintenance.getAsset()),
                     Collections.singletonList(preventiveMaintenance.getAsset()));
+            // P-15 (E-8, PPB-08): a disabled user is not given anew; the ones already assigned are kept
+            userService.rejectRetired(WorkOrderService.assignedUsers(savedPreventiveMaintenance.getPrimaryUser(),
+                            savedPreventiveMaintenance.getAssignedTo()),
+                    WorkOrderService.assignedUsers(preventiveMaintenance.getPrimaryUser(),
+                            preventiveMaintenance.getAssignedTo()));
             if (!preventiveMaintenance.getCustomFields().isEmpty()) {
                 setPMCustomFields(savedPreventiveMaintenance, preventiveMaintenance.getCustomFields(),
                         user.getCompany());
@@ -103,12 +116,33 @@ public class PreventiveMaintenanceService {
             PreventiveMaintenance pmToSave =
                     preventiveMaintenanceMapper.updatePreventiveMaintenance(savedPreventiveMaintenance,
                             preventiveMaintenance);
-            pmToSave.getSchedule().setDisabled(false);
             PreventiveMaintenance updatedPM =
                     preventiveMaintenanceRepository.saveAndFlush(pmToSave);
             em.refresh(updatedPM);
             return updatedPM;
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-15 (E-2, PPB-07, PPB-23): pauses ({@code disabled}) or resumes the preventive maintenance and records it, in
+     * one transaction. Only {@code Schedule.disabled} changes. Paused, its jobs stay and generate nothing; resumed,
+     * its jobs are rebuilt without the rule of the 5 work orders without reaction (D-P15-2), so the next occurrence
+     * generates the work order. Asking for the state it already has changes and records nothing.
+     */
+    @Transactional
+    public PreventiveMaintenance changeDisabled(Long id, boolean disabled, User actor) {
+        PreventiveMaintenance preventiveMaintenance = preventiveMaintenanceRepository.findById(id)
+                .orElseThrow(() -> new CustomException("Not found", HttpStatus.NOT_FOUND));
+        Schedule schedule = preventiveMaintenance.getSchedule();
+        if (schedule == null || schedule.isDisabled() == disabled) return preventiveMaintenance;
+        schedule.setDisabled(disabled);
+        scheduleService.save(schedule);
+        auditLogService.record(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, id,
+                        preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                        preventiveMaintenance.getCompany().getId()), actor,
+                disabled ? AuditAction.RETIRE : AuditAction.RESTORE, AuditSource.API, Map.of(), 0);
+        if (!disabled) scheduleService.resumeWorkOrder(schedule);
+        return preventiveMaintenance;
     }
 
     @Transactional
@@ -155,13 +189,29 @@ public class PreventiveMaintenanceService {
     }
 
     /**
-     * P-17 (C-4): the images of its tasks go with it in cascade; their stored objects are deleted after the commit.
-     * A cited image answers 409 (C-1). No rule nor audit record yet (P-15).
+     * Deletes the preventive maintenance and records it, in one transaction (P-15, E-1). One that generated work
+     * orders, or is assigned to a disabled user, is not deleted: 409 PREVENTIVE_MAINTENANCE_IN_USE with every blocking
+     * type (PPB-02, D-P15-4); it is paused instead. Its schedule, tasks, custom field values and associations go with
+     * it; the images of its tasks too, and their stored objects after the commit (P-17, C-4). The caller stops its
+     * jobs only after the commit (TD-P17-06).
      */
     @Transactional
-    public void delete(Long id) {
+    public void delete(PreventiveMaintenance preventiveMaintenance, User actor) {
+        Long id = preventiveMaintenance.getId();
         List<String> images = fileService.objectsOfPreventiveMaintenance(id);
-        deletionService.deleteUnrecorded(() -> preventiveMaintenanceRepository.deleteById(id));
+        deletionService.delete(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, id,
+                        preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                        preventiveMaintenance.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(PREVENTIVE_MAINTENANCE_IN_USE, PREVENTIVE_MAINTENANCE_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.WORK_ORDER,
+                                () -> deletionService.isCited("work_order", "parent_preventive_maintenance_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCitedByAnEarlierRevision("parent_preventive_maintenance_id",
+                                        id))
+                        .blockedBy(EntityType.USER,
+                                () -> deletionService.isLinkedToRetiredUser("preventive_maintenance_assigned_to",
+                                        "preventive_maintenance_id", "assigned_to_id", id)),
+                () -> preventiveMaintenanceRepository.deleteById(id));
         fileService.deleteObjectsAfterCommit(images);
     }
 
@@ -326,7 +376,7 @@ public class PreventiveMaintenanceService {
                     customSequenceService.getNextPreventiveMaintenanceSequence(company)));
 
         PreventiveMaintenance savedPM = preventiveMaintenanceRepository.save(preventiveMaintenance);
-        scheduleService.reScheduleWorkOrder(savedPM.getSchedule());
+        scheduleService.reScheduleWorkOrder(savedPM.getSchedule(), AuditSource.IMPORT);
     }
 
     private int getDayOfWeekNumber(String day) {

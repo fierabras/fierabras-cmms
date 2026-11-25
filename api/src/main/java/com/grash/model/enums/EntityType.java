@@ -10,6 +10,7 @@ public enum EntityType {
     ASSET("asset"),
     ASSET_CATEGORY("asset_category"),
     ASSET_DOWNTIME("asset_downtime"),
+    CHECKLIST("checklist"),
     COMMENT("comment"),
     COMPANY("company"),
     COST_CATEGORY("cost_category"),

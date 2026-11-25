@@ -8,6 +8,9 @@ import com.grash.mapper.ScheduleMapper;
 import com.grash.model.PreventiveMaintenance;
 import com.grash.model.Schedule;
 import com.grash.model.WorkOrder;
+import com.grash.model.enums.AuditAction;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.RecurrenceType;
 import com.grash.model.enums.Status;
 import com.grash.repository.ScheduleRepository;
@@ -38,6 +41,7 @@ public class ScheduleService {
     private final ScheduleRepository scheduleRepository;
     private final ScheduleMapper scheduleMapper;
     private final WorkOrderService workOrderService;
+    private final AuditLogService auditLogService;
 
     // Quartz Scheduler
     private final Scheduler scheduler;
@@ -71,17 +75,43 @@ public class ScheduleService {
         return scheduleRepository.findByCompany_Id(id);
     }
 
-    public void scheduleWorkOrder(Schedule schedule) {
+    /**
+     * Schedules the jobs of the schedule. A schedule whose last 5 work orders got no reaction is paused by the
+     * system; P-15 (E-2, D-P15-3) records it, without actor and with the {@code source} of the route that caused it,
+     * only when it goes from active to paused.
+     */
+    public void scheduleWorkOrder(Schedule schedule, AuditSource source) {
+        schedule(schedule, source);
+    }
+
+    /**
+     * P-15 (E-2, D-P15-2): the jobs of a schedule the user resumes, rebuilt without evaluating the rule of the 5
+     * work orders without reaction, which stays where it was (creation and edition of the schedule).
+     */
+    public void resumeWorkOrder(Schedule schedule) {
+        stopScheduleJobs(schedule.getId());
+        schedule(schedule, null);
+    }
+
+    /**
+     * @param source the origin of the route, or {@code null} to leave out the rule of the 5 work orders
+     */
+    private void schedule(Schedule schedule, AuditSource source) {
         int limit = 5;
         PreventiveMaintenance preventiveMaintenance = schedule.getPreventiveMaintenance();
         Page<WorkOrder> workOrdersPage = workOrderService.findLastByPM(preventiveMaintenance.getId(), limit);
         TimeZone timeZone = TimeZone.getTimeZone(preventiveMaintenance.getCompany()
                 .getCompanySettings().getGeneralPreferences().getTimeZone());
         boolean isStale = false;
-        if (workOrdersPage.getTotalElements() >= limit && workOrdersPage.getContent().stream().allMatch(workOrder -> workOrder.getFirstTimeToReact() == null)) {
+        if (source != null && workOrdersPage.getTotalElements() >= limit && workOrdersPage.getContent().stream().allMatch(workOrder -> workOrder.getFirstTimeToReact() == null)) {
             isStale = true;
+            boolean wasActive = !schedule.isDisabled();
             schedule.setDisabled(true);
             scheduleRepository.save(schedule);
+            if (wasActive) auditLogService.record(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE,
+                            preventiveMaintenance.getId(), preventiveMaintenance.getCustomId(),
+                            preventiveMaintenance.getName(), preventiveMaintenance.getCompany().getId()), null,
+                    AuditAction.RETIRE, source, Map.of(), 0);
         }
 
         boolean shouldSchedule =
@@ -215,11 +245,11 @@ public class ScheduleService {
         }
     }
 
-    public void reScheduleWorkOrder(Schedule newSchedule) {
+    public void reScheduleWorkOrder(Schedule newSchedule, AuditSource source) {
         // Quartz "reschedule" is best handled by deleting and recreating
         // to ensure all parameters (trigger times, data map) are fresh.
         stopScheduleJobs(newSchedule.getId());
-        scheduleWorkOrder(newSchedule);
+        scheduleWorkOrder(newSchedule, source);
     }
 
     public void stopScheduleJobs(Long scheduleId) {

@@ -316,8 +316,12 @@ function PMs() {
   const onDeleteSuccess = () => {
     showSnackBar(t('wo_trigger_delete_success'), 'success');
   };
+  // P-15 (E-10): a preventive maintenance that generated work orders is paused, not deleted
   const onDeleteFailure = (err) =>
-    showSnackBar(t('wo_trigger_delete_failure'), 'error');
+    showSnackBar(
+      conflictMessage(err, t, t('wo_trigger_delete_failure')),
+      'error'
+    );
 
   const handleOpenDetails = (id: number) => {
     const foundPreventiveMaintenance = preventiveMaintenances.content.find(

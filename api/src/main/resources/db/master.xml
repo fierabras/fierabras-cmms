@@ -273,4 +273,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_24_1795567540_part_ledger.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_25_1795650000_preventive_maintenance_references.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

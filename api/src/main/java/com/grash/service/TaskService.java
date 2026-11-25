@@ -55,20 +55,20 @@ public class TaskService {
     }
 
     /**
-     * P-12 (E-6, PPB-23): removes a task of an open work order and records it, in one transaction. A task of a
-     * preventive maintenance is removed as before (P-15).
+     * P-12 (E-6, PPB-23): removes a task of an open work order and records it, in one transaction. P-15 (E-5,
+     * TD-P17-10): a task of a preventive maintenance too, with the folio of its preventive maintenance. Its task
+     * definition stays: the tasks of the work orders generated from it keep using it (E-6).
      */
     @Transactional
     public void delete(Task task, User actor) {
         // P-17 (E-3): the images of the task go with it in cascade (file.task_id); their objects after the commit
         List<String> images = fileService.objectsOfTask(task.getId());
-        if (task.getWorkOrder() == null) {
-            // P-17 (C-1): an image cited by another record answers 409, never 500; no rule nor record (P-15)
-            deletionService.deleteUnrecorded(() -> delete(task.getId()));
-        } else {
-            deletionService.delete(AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(),
-                    task.getWorkOrder()), actor, AuditSource.API, null, () -> taskRepository.deleteById(task.getId()));
-        }
+        // P-17 (C-1): an image cited by another record answers 409 RECORD_IN_USE, never 500 (no rule)
+        AuditTarget target = task.getWorkOrder() == null
+                ? AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(),
+                task.getPreventiveMaintenance())
+                : AuditTarget.childOf(EntityType.TASK, task.getId(), task.getTaskBase().getLabel(), task.getWorkOrder());
+        deletionService.delete(target, actor, AuditSource.API, null, () -> taskRepository.deleteById(task.getId()));
         fileService.deleteObjectsAfterCommit(images);
     }
 

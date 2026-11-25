@@ -18,6 +18,8 @@ import EditTwoToneIcon from '@mui/icons-material/EditTwoTone';
 import DeleteTwoToneIcon from '@mui/icons-material/DeleteTwoTone';
 import MoreVertTwoToneIcon from '@mui/icons-material/MoreVertTwoTone';
 import PlayArrowTwoToneIcon from '@mui/icons-material/PlayArrowTwoTone';
+import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import PreventiveMaintenance from '../../../models/owns/preventiveMaintenance';
 import { useDispatch } from '../../../store';
 import {
@@ -51,6 +53,7 @@ import { getCustomFieldValuesForDetails } from '../type';
 import { getErrorMessage } from '../../../utils/api';
 import { ContentCopyTwoTone } from '@mui/icons-material';
 import { WorkOrderMini } from '../../../models/owns/workOrder';
+import { conflictMessage } from '../../../utils/conflicts';
 
 interface RequestDetailsProps {
   preventiveMaintenance: PreventiveMaintenance;
@@ -86,6 +89,12 @@ export default function PMDetails({
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const openMenu = Boolean(anchorEl);
   const [triggering, setTriggering] = useState<boolean>(false);
+  const [pausing, setPausing] = useState<boolean>(false);
+  const paused = preventiveMaintenance?.schedule?.disabled;
+  const canEdit = hasEditPermission(
+    PermissionEntity.PREVENTIVE_MAINTENANCES,
+    preventiveMaintenance
+  );
 
   const handleOpenMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     setAnchorEl(event.currentTarget);
@@ -103,6 +112,32 @@ export default function PMDetails({
       })
       .catch((err) => showSnackBar(getErrorMessage(err), 'error'))
       .finally(() => setTriggering(false));
+  };
+
+  // P-15 (E-10, D-1): pausing and resuming change only whether the schedule generates work orders
+  const handlePauseOrResume = () => {
+    handleCloseMenu();
+    setPausing(true);
+    dispatch(
+      editPreventiveMaintenance(preventiveMaintenance.id, { disabled: !paused })
+    )
+      .then(() =>
+        showSnackBar(
+          t(paused ? 'pm_resume_success' : 'pm_pause_success'),
+          'success'
+        )
+      )
+      .catch((err) =>
+        showSnackBar(
+          conflictMessage(
+            err,
+            t,
+            t(paused ? 'pm_resume_failure' : 'pm_pause_failure')
+          ),
+          'error'
+        )
+      )
+      .finally(() => setPausing(false));
   };
 
   const handleChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -185,7 +220,8 @@ export default function PMDetails({
         </Box>
         <Box>
           {(hasCreatePermission(PermissionEntity.PREVENTIVE_MAINTENANCES) ||
-            hasCreatePermission(PermissionEntity.WORK_ORDERS)) && (
+            hasCreatePermission(PermissionEntity.WORK_ORDERS) ||
+            canEdit) && (
             <IconButton style={{ marginRight: 10 }} onClick={handleOpenMenu}>
               <MoreVertTwoToneIcon />
             </IconButton>
@@ -478,6 +514,22 @@ export default function PMDetails({
             <Typography variant="h6">{t('trigger_work_order')}</Typography>
           </Stack>
         </MenuItem>
+        {canEdit && (
+          <MenuItem disabled={pausing} onClick={handlePauseOrResume}>
+            <Stack spacing={2} direction="row">
+              {pausing ? (
+                <CircularProgress size="1rem" />
+              ) : paused ? (
+                <PlayCircleOutlineIcon />
+              ) : (
+                <PauseCircleOutlineIcon />
+              )}
+              <Typography variant="h6">
+                {t(paused ? 'to_resume' : 'to_pause')}
+              </Typography>
+            </Stack>
+          </MenuItem>
+        )}
       </Menu>
     </Grid>
   );

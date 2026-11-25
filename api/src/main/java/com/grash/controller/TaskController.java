@@ -125,6 +125,9 @@ public class TaskController {
         // P-14b (E-3, PPB-08): a new task does not cite an archived asset; those the tasks already cite are kept
         assetService.rejectRetired(savedTasks.stream().map(task -> task.getTaskBase().getAsset()).toList(),
                 incomingTasks.stream().map(TaskBaseDTO::getAsset).toList());
+        // P-15 (E-8, PPB-08): a new task is not given to a disabled user; those the tasks already have are kept
+        userService.rejectRetired(savedTasks.stream().map(task -> task.getTaskBase().getUser()).toList(),
+                incomingTasks.stream().map(TaskBaseDTO::getUser).toList());
 
         // Process each incoming task
         for (int i = 0; i < incomingTasks.size(); i++) {

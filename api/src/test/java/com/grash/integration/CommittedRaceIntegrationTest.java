@@ -11,17 +11,22 @@ import com.grash.integration.support.TestWorkOrders.Fixture;
 import com.grash.model.Asset;
 import com.grash.model.File;
 import com.grash.model.Location;
+import com.grash.model.PreventiveMaintenance;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.WorkOrderCategory;
 import com.grash.model.enums.Status;
 import com.grash.repository.FileRepository;
 import com.grash.repository.PartRepository;
+import com.grash.repository.PreventiveMaintenanceRepository;
 import com.grash.repository.WorkOrderCategoryRepository;
 import com.grash.repository.WorkOrderRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import com.grash.service.PreventiveMaintenanceService;
 import org.junit.jupiter.api.Test;
+import org.quartz.JobKey;
+import org.quartz.Scheduler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -64,6 +69,9 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
     private final WorkOrderCategoryRepository workOrderCategoryRepository;
     private final FileRepository fileRepository;
     private final ObjectMapper objectMapper;
+    private final PreventiveMaintenanceService preventiveMaintenanceService;
+    private final PreventiveMaintenanceRepository preventiveMaintenanceRepository;
+    private final Scheduler scheduler;
     private CommonData data;
     private User superAdmin;
     private String admin;
@@ -73,7 +81,13 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
                                  ObjectMapper objectMapper, JdbcTemplate jdbc, TransactionTemplate transaction,
                                  WorkOrderRepository workOrderRepository, PartRepository partRepository,
                                  FileRepository fileRepository,
-                                 WorkOrderCategoryRepository workOrderCategoryRepository) {
+                                 WorkOrderCategoryRepository workOrderCategoryRepository,
+                                 PreventiveMaintenanceService preventiveMaintenanceService,
+                                 PreventiveMaintenanceRepository preventiveMaintenanceRepository,
+                                 Scheduler scheduler) {
+        this.preventiveMaintenanceService = preventiveMaintenanceService;
+        this.preventiveMaintenanceRepository = preventiveMaintenanceRepository;
+        this.scheduler = scheduler;
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -587,5 +601,108 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(409, result.status(), result.toString());
         assertEquals(3, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class, line));
         assertEquals(3, stock(part));
+    }
+
+    // =====================================================================================================
+    // P-15: deleting a preventive maintenance while a work order is generated from it
+    // =====================================================================================================
+
+    private long createdPreventiveMaintenance() throws Exception {
+        String name = TestRecords.unique("P-15 PM");
+        Response created = api.call(post("/preventive-maintenances").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\",\"title\":\"" + name + "\",\"frequency\":1,"
+                        + "\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":\"SCHEDULED_DATE\","
+                        + "\"startsOn\":\"2099-01-01T00:00:00.000+00:00\"}"), admin);
+        assertEquals(200, created.status(), created.toString());
+        return objectMapper.readTree(created.body()).get("id").asLong();
+    }
+
+    /**
+     * What the work order job does: generates the work order of the preventive maintenance, in its transaction.
+     */
+    private void generate(long preventiveMaintenance) {
+        PreventiveMaintenance loaded = preventiveMaintenanceRepository.findById(preventiveMaintenance).orElseThrow();
+        preventiveMaintenanceService.createWorkOrderFromPreventiveMaintenance(loaded);
+    }
+
+    private int workOrdersOf(long preventiveMaintenance) {
+        return jdbc.queryForObject("SELECT count(*) FROM work_order WHERE parent_preventive_maintenance_id = ?",
+                Integer.class, preventiveMaintenance);
+    }
+
+    private long scheduleOf(long preventiveMaintenance) {
+        return jdbc.queryForObject("SELECT schedule_id FROM preventive_maintenance WHERE id = ?", Long.class,
+                preventiveMaintenance);
+    }
+
+    /**
+     * P-15: the admitted final states: (i) 409 PREVENTIVE_MAINTENANCE_IN_USE, and the preventive maintenance, its
+     * work order and its jobs exist; (ii) the preventive maintenance is deleted and that generation left no work
+     * order. Never a work order without its preventive maintenance, never a 500 of the API.
+     */
+    private void assertAdmittedState(long preventiveMaintenance, long schedule, boolean deleted) throws Exception {
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM work_order w WHERE w.company_id = ? AND NOT EXISTS "
+                + "(SELECT 1 FROM preventive_maintenance p WHERE p.id = w.parent_preventive_maintenance_id)",
+                Integer.class, data.o1().company().getId()), "no work order without its preventive maintenance");
+        int left = jdbc.queryForObject("SELECT count(*) FROM preventive_maintenance WHERE id = ?", Integer.class,
+                preventiveMaintenance);
+        if (deleted) {
+            assertEquals(0, left);
+            assertEquals(0, workOrdersOf(preventiveMaintenance));
+        } else {
+            assertEquals(1, left);
+            assertEquals(1, workOrdersOf(preventiveMaintenance));
+            assertTrue(scheduler.checkExists(new JobKey("wo-job-" + schedule, "wo-group")));
+        }
+    }
+
+    @Test
+    void workOrderGenerated_whileThePreventiveMaintenanceIsDeleted_409InUse_admittedState() throws Exception {
+        // the deletion waits for the transaction that inserts the work order (its foreign key holds a share lock on
+        // the preventive maintenance row); once committed, the protected reference rejects it: state (i)
+        long preventiveMaintenance = createdPreventiveMaintenance();
+        long schedule = scheduleOf(preventiveMaintenance);
+
+        Response result = compete(() -> generate(preventiveMaintenance),
+                () -> api.call(delete("/preventive-maintenances/" + preventiveMaintenance), admin));
+
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("\"code\":\"PREVENTIVE_MAINTENANCE_IN_USE\""), result.toString());
+        assertTrue(result.body().contains("WORK_ORDER"), result.toString());
+        assertAdmittedState(preventiveMaintenance, schedule, false);
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()));
+    }
+
+    @Test
+    void preventiveMaintenanceDeleted_whileAWorkOrderIsGenerated_theGenerationIsRolledBack_admittedState()
+            throws Exception {
+        // the generation waits for the deletion; once committed, its work order is rejected by the foreign key and
+        // the whole generation is rolled back: state (ii)
+        long preventiveMaintenance = createdPreventiveMaintenance();
+        long schedule = scheduleOf(preventiveMaintenance);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        Response generation = compete(() -> preventiveMaintenanceService.delete(
+                        preventiveMaintenanceRepository.findById(preventiveMaintenance).orElseThrow(),
+                        data.o1().admin()),
+                () -> {
+                    try {
+                        transaction.executeWithoutResult(status -> generate(preventiveMaintenance));
+                        return new Response(200, "generated");
+                    } catch (RuntimeException e) {
+                        failure.set(e);
+                        return new Response(500, String.valueOf(e));
+                    }
+                });
+
+        assertEquals(500, generation.status(), "the generation fails: " + generation);
+        assertNotNull(failure.get());
+        assertAdmittedState(preventiveMaintenance, schedule, true);
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM work_order WHERE company_id = ?", Integer.class,
+                data.o1().company().getId()), "no work order nor task of that generation");
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? AND action = "
+                + "'DELETE' AND entity_type = 'PREVENTIVE_MAINTENANCE'", Integer.class,
+                data.o1().company().getId()));
     }
 }

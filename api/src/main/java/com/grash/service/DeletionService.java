@@ -57,16 +57,6 @@ public class DeletionService {
         auditLogService.record(target, actor, AuditAction.DELETE, source, cascadeRows, (int) storageObjects);
     }
 
-    /**
-     * P-17 (C-1): deletes without a rule and without an audit record, for the deletions that P-15 has not migrated
-     * yet; a foreign key that rejects the deletion becomes 409 {@code RECORD_IN_USE}, never a 500, whatever the
-     * HTTP method of the request.
-     */
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void deleteUnrecorded(Runnable deletion) {
-        run(null, deletion);
-    }
-
     private void run(DeletionRule rule, Runnable deletion) {
         try {
             deletion.run();
@@ -104,9 +94,16 @@ public class DeletionService {
      * {@code table} and {@code column} are constants of the caller, never input.
      */
     public boolean isLinkedToRetiredUser(String table, String column, Long id) {
+        return isLinkedToRetiredUser(table, column, "id_user", id);
+    }
+
+    /**
+     * P-15: the same, for an association whose user column is {@code userColumn}, a constant of the caller.
+     */
+    public boolean isLinkedToRetiredUser(String table, String column, String userColumn, Long id) {
         return (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM " + table + " a JOIN own_user u "
-                + "ON u.id = a.id_user WHERE a." + column + " = ?1 AND u.enabled = false)").setParameter(1, id)
-                .getSingleResult();
+                + "ON u.id = a." + userColumn + " WHERE a." + column + " = ?1 AND u.enabled = false)")
+                .setParameter(1, id).getSingleResult();
     }
 
     private Map<String, Long> deletedRows() {

@@ -808,7 +808,16 @@ class FileDeletionIntegrationTest extends AbstractIntegrationTest {
 
             Response response = api.call(delete("/preventive-maintenances/" + preventiveMaintenance.getId()), admin);
 
-            assertKept(response, task, image, asset);
+            // P-15 (D-P15-7): before, RECORD_IN_USE (a deletion without rule); now the rule of the preventive
+            // maintenance answers, without types (the referencing table, asset, is not one of its dependents)
+            assertAll(
+                    () -> assertCode(response, "PREVENTIVE_MAINTENANCE_IN_USE"),
+                    () -> assertFalse(response.body().contains("blockingTypes"), response.toString()),
+                    () -> assertEquals(1, count("SELECT count(*) FROM task WHERE id = ?", task)),
+                    () -> assertEquals(1, files(image)),
+                    () -> assertEquals(image, jdbc.queryForObject("SELECT image_id FROM asset WHERE id = ?",
+                            Long.class, asset)),
+                    () -> assertEquals(List.of(), storageDouble.calls("delete")));
             assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?",
                     preventiveMaintenance.getId()));
         }

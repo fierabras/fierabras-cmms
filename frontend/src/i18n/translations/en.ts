@@ -2074,7 +2074,19 @@ const locale = {
   asset_restore_confirm: 'Are you sure you want to restore this asset?',
   asset_restore_success: 'The asset has been restored',
   asset_restore_failure: "The asset couldn't be restored",
-  asset_archived_notice: 'This asset is archived. Restore it to change it.'
+  asset_archived_notice: 'This asset is archived. Restore it to change it.',
+  preventive_maintenance_in_use:
+    'This preventive maintenance is in use and cannot be deleted. Pause it instead.',
+  schedule_required:
+    'A preventive maintenance needs its schedule. Delete or pause the preventive maintenance instead.',
+  checklist_in_use:
+    'This checklist is used by an automation and cannot be deleted. Change the automation first.',
+  to_pause: 'Pause',
+  to_resume: 'Resume',
+  pm_pause_success: 'The preventive maintenance has been paused',
+  pm_pause_failure: "The preventive maintenance couldn't be paused",
+  pm_resume_success: 'The preventive maintenance has been resumed',
+  pm_resume_failure: "The preventive maintenance couldn't be resumed"
 };
 
 export default locale;
