@@ -772,8 +772,10 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             List<String> lines = csv.lines().toList();
             String[] headers = lines.get(0).split(",");
 
+            // P-16b (D-4): four columns added at the end; the first nine are as before
             assertEquals(List.of("ID", "Part ID", "Part", "Quantity", "Cost", "Work order ID", "Work order Title",
-                    "Description", "Date created"), List.of(headers), lines.get(0));
+                    "Description", "Date created", "Origin", "User", "Purchase order ID", "Purchase order"),
+                    List.of(headers), lines.get(0));
             List<String> rows = lines.subList(1, lines.size()).stream()
                     .map(row -> {
                         String[] cells = row.split(",", -1);

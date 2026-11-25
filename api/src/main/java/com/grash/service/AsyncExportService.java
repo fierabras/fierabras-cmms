@@ -4,6 +4,7 @@ import com.grash.advancedsearch.SearchCriteria;
 import com.grash.factory.StorageServiceFactory;
 import com.grash.model.*;
 import com.grash.model.User;
+import com.grash.repository.UserRepository;
 import com.grash.utils.CsvFileGenerator;
 import com.grash.utils.Helper;
 import com.grash.utils.MultipartFileImpl;
@@ -21,7 +22,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +37,7 @@ public class AsyncExportService {
     private final LocationService locationService;
     private final PartService partService;
     private final PartTransactionService partTransactionService;
+    private final UserRepository userRepository;
     private final MeterService meterService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
     private final CsvFileGenerator csvFileGenerator;
@@ -262,8 +267,13 @@ public class AsyncExportService {
             Locale locale = Helper.getLocale(user);
             do {
                 result = partTransactionService.findByCompanyForExport(user.getCompany().getId(), PageRequest.of(page, 100));
+                // P-16b (D-4): the names of the users of the page
+                Map<Long, String> userNames = userRepository.findByIdInAndCompany_Id(result.getContent().stream()
+                                .map(PartTransaction::getCreatedBy).filter(Objects::nonNull).collect(Collectors.toSet()),
+                        user.getCompany().getId()).stream().collect(Collectors.toMap(User::getId, User::getFullName));
                 csvFileGenerator.writePartTransactionsToCsv(
                         result.getContent(),
+                        userNames,
                         outputStreamWriter,
                         locale,
                         csvSeparator,

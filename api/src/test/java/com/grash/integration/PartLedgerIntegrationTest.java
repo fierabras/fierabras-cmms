@@ -10,7 +10,9 @@ import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Company;
+import com.grash.model.CompanySettings;
 import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.Language;
 import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.webhook.WebhookEvent;
@@ -46,6 +48,7 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -54,6 +57,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -1121,6 +1125,82 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, count("SELECT count(*) FROM part WHERE company_id = ?", companyId));
             assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE company_id = ?", companyId));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 6 · Export of the ledger (E-14, D-4)
+    // =====================================================================================================
+
+    @Nested
+    class Export {
+
+        /** Exports the ledger of the organization of {@code user} and returns its lines. */
+        List<String> export(User user) {
+            Response response = call(get("/export/part-transactions").param("uuid",
+                    TestRecords.unique("p16b-export")), user);
+            assertEquals(200, response.status(), response.toString());
+            String path = (String) storageDouble.awaitCalls("generateSignedUrl", 1, Duration.ofSeconds(20)).get(0)
+                    .arguments().get(0);
+            return new String(storageDouble.download(path), StandardCharsets.UTF_8).lines().toList();
+        }
+
+        /** The last four cells of the row of the movement with {@code origin}, joined by "|". */
+        String lastCells(List<String> lines, String origin) {
+            return lines.subList(1, lines.size()).stream().map(line -> line.split(",", -1))
+                    .filter(cells -> cells[cells.length - 4].equals(origin))
+                    .map(cells -> String.join("|", List.of(cells).subList(cells.length - 4, cells.length)))
+                    .findFirst().orElseThrow(() -> new AssertionError("no " + origin + " in " + lines));
+        }
+
+        void setLanguage(Company company, Language language) {
+            transaction.executeWithoutResult(status -> em.find(CompanySettings.class,
+                    company.getCompanySettings().getId()).getGeneralPreferences().setLanguage(language));
+        }
+
+        PurchaseOrder approved(Part part, double quantity, User admin) {
+            PurchaseOrder purchaseOrder = purchaseOrder(part.getCompany());
+            line(part, null, purchaseOrder, quantity);
+            assertEquals(200, call(patch("/purchase-orders/" + purchaseOrder.getId() + "/respond")
+                    .param("approved", "true"), admin).status());
+            return purchaseOrder;
+        }
+
+        @Test
+        void english_originUserAndPurchaseOrderAtTheEnd() {
+            // before P-16b: no origin, user nor purchase order columns
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 1);
+            PurchaseOrder purchaseOrder = approved(part, 2, admin);
+            String name = jdbc.queryForObject("SELECT first_name || ' ' || last_name FROM own_user WHERE id = ?",
+                    String.class, admin.getId());
+
+            List<String> lines = export(admin);
+
+            assertTrue(lines.get(0).endsWith(",Description,Date created,Origin,User,Purchase order ID,Purchase order"),
+                    lines.get(0));
+            assertEquals("Purchase order|" + name + "|" + purchaseOrder.getId() + "|" + purchaseOrder.getName(),
+                    lastCells(lines, "Purchase order"));
+            assertEquals("Adjustment|||", lastCells(lines, "Adjustment"), "a movement without user");
+        }
+
+        @Test
+        void spanish_headersAndOrigins() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            setLanguage(data.o1().company(), Language.ES);
+            Part part = part(data.o1().company(), 5);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            Long line = addByReplacement(workOrder, part, admin);
+            assertEquals(200, call(delete("/part-quantities/" + line), admin).status());
+            approved(part, 2, admin);
+
+            List<String> lines = export(admin);
+
+            assertTrue(lines.get(0).endsWith(",Origen,Usuario,ID de orden de compra,Orden de compra"), lines.get(0));
+            for (String origin : List.of("Ajuste", "Consumo", "Reversión", "Orden de compra"))
+                lastCells(lines, origin);
         }
     }
 }

@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -238,15 +239,21 @@ public class CsvFileGenerator {
         }
     }
 
-    public void writePartTransactionsToCsv(Collection<PartTransaction> partTransactions, Writer writer, Locale locale,
-                                           String csvSeparator, boolean includeHeaders) {
+    /**
+     * Writes the movements of the ledger. P-16b (D-4, E-14): the quantity and the cost with their stored sign (entry
+     * positive, exit negative) and, at the end, the origin, the user ({@code userNames} by identifier; empty without
+     * user) and the purchase order that the movement cites.
+     */
+    public void writePartTransactionsToCsv(Collection<PartTransaction> partTransactions, Map<Long, String> userNames,
+                                           Writer writer, Locale locale, String csvSeparator,
+                                           boolean includeHeaders) {
         try {
             CSVFormat csvFormat = CSVFormat.DEFAULT.withDelimiter(csvSeparator.charAt(0));
             CSVPrinter printer = new CSVPrinter(writer, csvFormat);
             if (includeHeaders) {
                 List<String> headers = Arrays.asList("ID", "Part_ID", "Part", "Quantity", "Cost", "Work_Order_ID"
                         , "Work_Order_Title",
-                        "Description", "Created_At");
+                        "Description", "Created_At", "Origin", "User", "Purchase_Order_ID", "Purchase_Order");
                 printer.printRecord(headers.stream().map(header -> messageSource.getMessage(header, null, locale)).collect(Collectors.toList()));
             }
             for (PartTransaction pt : partTransactions) {
@@ -258,7 +265,11 @@ public class CsvFileGenerator {
                         pt.getWorkOrder() == null ? null : pt.getWorkOrder().getId(),
                         pt.getWorkOrder() == null ? null : pt.getWorkOrder().getTitle(),
                         pt.getDescription(),
-                        pt.getCreatedAt()
+                        pt.getCreatedAt(),
+                        messageSource.getMessage("part_transaction_origin_" + pt.getOrigin(), null, locale),
+                        pt.getCreatedBy() == null ? null : userNames.get(pt.getCreatedBy()),
+                        pt.getPurchaseOrder() == null ? null : pt.getPurchaseOrder().getId(),
+                        pt.getPurchaseOrder() == null ? null : pt.getPurchaseOrder().getName()
                 );
             }
             printer.flush();

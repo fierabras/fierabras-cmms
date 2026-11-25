@@ -41,6 +41,7 @@ public interface PartTransactionRepository extends JpaRepository<PartTransaction
             SELECT pt FROM PartTransaction pt
             LEFT JOIN FETCH pt.part
             LEFT JOIN FETCH pt.workOrder
+            LEFT JOIN FETCH pt.purchaseOrder
             WHERE pt.company.id = :companyId
             """)
     Page<PartTransaction> findByCompanyForExport(@Param("companyId") Long companyId, Pageable pageable);
