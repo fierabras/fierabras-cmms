@@ -607,23 +607,24 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     class PartQuantityPermissions {
 
         @Test
-        void technicianWithoutEditOnTheWorkOrder_postGetPatch_200() {
-            // E-15 (TD-P12-01); before P-16b: no permission check
+        void technicianWithoutEditOnTheWorkOrder_postAndPatch403_get200() {
+            // E-15 (TD-P12-01); before P-16b: no permission check, 200 for the three. Now the rules of the sibling
+            // routes: the technician sees every work order but cannot edit this one
             CommonData data = data();
             Part part = part(data.o1().company(), 10);
             WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
             User technician = data.o1().technician();
+            long line = line(part, workOrder, null, 1).getId();
 
             Response created = send(post("/part-quantities"), "{\"part\":{\"id\":" + part.getId()
                     + "},\"workOrder\":{\"id\":" + workOrder.getId() + "},\"quantity\":1}", technician);
-            assertEquals(200, created.status(), created.toString());
-            long line = json(created).get("id").asLong();
+            assertEquals(403, created.status(), created.toString());
 
             Response read = call(get("/part-quantities/" + line), technician);
             assertEquals(200, read.status(), read.toString());
 
             Response changed = changeLine(line, 2, technician);
-            assertEquals(200, changed.status(), changed.toString());
+            assertEquals(403, changed.status(), changed.toString());
         }
 
         @Test

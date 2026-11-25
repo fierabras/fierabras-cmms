@@ -1203,4 +1203,133 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
                 lastCells(lines, origin);
         }
     }
+
+    // =====================================================================================================
+    // Block 7 · Permissions of part-quantities (E-15, TD-P12-01, PPB-27): 404, then 403, then 409
+    // =====================================================================================================
+
+    @Nested
+    class PartQuantityPermissions {
+
+        String body(Part part, WorkOrder workOrder, PurchaseOrder purchaseOrder, double quantity) {
+            return "{\"part\":{\"id\":" + part.getId() + "}"
+                    + (workOrder == null ? "" : ",\"workOrder\":{\"id\":" + workOrder.getId() + "}")
+                    + (purchaseOrder == null ? "" : ",\"purchaseOrder\":{\"id\":" + purchaseOrder.getId() + "}")
+                    + ",\"quantity\":" + quantity + "}";
+        }
+
+        @Test
+        void technicianWhoCannotEditTheWorkOrder_postAndPatch403_nothingChanged_get200() {
+            // before P-16b: 200 for the three (no check)
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            PartQuantity line = line(part, workOrder, null, 1);
+
+            assertEquals(403, send(post("/part-quantities"), body(part, workOrder, null, 2), technician).status());
+            assertEquals(403, changeLine(line.getId(), 4, technician).status());
+            // the technician sees every work order (the view rule of GET /part-quantities/work-order/{id})
+            assertEquals(200, call(get("/part-quantities/" + line.getId()), technician).status());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE work_order_id = ?", workOrder.getId()));
+            assertEquals(1.0, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE id = ?", Double.class,
+                    line.getId()));
+            assertEquals(10, stock(part));
+        }
+
+        @Test
+        void technicianAssignedToTheWorkOrder_postAndPatch200() {
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            jdbc.update("UPDATE work_order SET primary_user_id = ? WHERE id = ?", technician.getId(),
+                    workOrder.getId());
+
+            Response created = send(post("/part-quantities"), body(part, workOrder, null, 2), technician);
+            assertEquals(200, created.status(), created.toString());
+            assertEquals(200, changeLine(json(created).get("id").asLong(), 3, technician).status());
+            assertEquals(7, stock(part));
+        }
+
+        @Test
+        void technicianOnAPurchaseOrder_get403_postAndPatch403() {
+            // the technician has no view nor edit of purchase orders and did not create this one
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Part part = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company());
+            PartQuantity line = line(part, null, purchaseOrder, 1);
+
+            assertEquals(403, call(get("/part-quantities/" + line.getId()), technician).status());
+            assertEquals(403, send(post("/part-quantities"), body(part, null, purchaseOrder, 2), technician)
+                    .status());
+            assertEquals(403, changeLine(line.getId(), 4, technician).status());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE purchase_order_id = ?",
+                    purchaseOrder.getId()));
+        }
+
+        @Test
+        void adminOnAPurchaseOrder_postAndPatch200() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company());
+
+            Response created = send(post("/part-quantities"), body(part, null, purchaseOrder, 2), admin);
+            assertEquals(200, created.status(), created.toString());
+            assertEquals(200, changeLine(json(created).get("id").asLong(), 3, admin).status());
+            assertEquals(200, call(get("/part-quantities/" + json(created).get("id").asLong()), admin).status());
+        }
+
+        @Test
+        void otherOrganizationOnClosedParents_403Never409() {
+            // the parent is loaded before any check: another organization gets 403, never the 409 of the state
+            CommonData data = data();
+            User other = data.o2().admin();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            PartQuantity workOrderLine = line(part, closed, null, 1);
+            PurchaseOrder approved = purchaseOrder(data.o1().company());
+            PartQuantity purchaseOrderLine = line(part, null, approved, 1);
+            jdbc.update("UPDATE purchase_order SET status = ? WHERE id = ?", ApprovalStatus.APPROVED.ordinal(),
+                    approved.getId());
+            Part own = part(data.o2().company(), 0);
+
+            assertEquals(403, send(post("/part-quantities"), body(own, closed, null, 1), other).status());
+            assertEquals(403, send(post("/part-quantities"), body(own, null, approved, 1), other).status());
+            assertEquals(403, changeLine(workOrderLine.getId(), 2, other).status());
+            assertEquals(403, changeLine(purchaseOrderLine.getId(), 2, other).status());
+            assertEquals(403, call(get("/part-quantities/" + workOrderLine.getId()), other).status());
+            assertEquals(403, call(get("/part-quantities/" + purchaseOrderLine.getId()), other).status());
+        }
+
+        @Test
+        void sameOrganizationOnClosedParents_409AfterThePermission() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder closed = records.workOrder(data.o1().company(), null, Status.COMPLETE, false);
+            PurchaseOrder approved = purchaseOrder(data.o1().company());
+            jdbc.update("UPDATE purchase_order SET status = ? WHERE id = ?", ApprovalStatus.APPROVED.ordinal(),
+                    approved.getId());
+
+            assertEquals(409, send(post("/part-quantities"), body(part, closed, null, 1), admin).status());
+            assertEquals(409, send(post("/part-quantities"), body(part, null, approved, 1), admin).status());
+            assertEquals(403, send(post("/part-quantities"), body(part, closed, null, 1), data.o1().technician())
+                    .status(), "403 before 409");
+        }
+
+        @Test
+        void unknownParents_404() {
+            CommonData data = data();
+            Part part = part(data.o1().company(), 10);
+
+            assertEquals(404, send(post("/part-quantities"), "{\"part\":{\"id\":" + part.getId()
+                    + "},\"workOrder\":{\"id\":999999999},\"quantity\":1}", data.o1().admin()).status());
+            assertEquals(404, send(post("/part-quantities"), "{\"part\":{\"id\":" + part.getId()
+                    + "},\"purchaseOrder\":{\"id\":999999999},\"quantity\":1}", data.o1().admin()).status());
+            assertEquals(404, call(get("/part-quantities/999999999"), data.o1().admin()).status());
+        }
+    }
 }
