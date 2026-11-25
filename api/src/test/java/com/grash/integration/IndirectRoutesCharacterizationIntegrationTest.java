@@ -274,23 +274,23 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void ca133_rowUpdatesAnArchivedAsset_appliedAndRestoredFromTheFile() {
-            // before P-18: the archived asset changes and the file (without "archived") restores it
+        void ca133_rowUpdatesAnArchivedAsset_rejected_assetUnchanged() {
+            // before P-18: applied, and the file (without "archived") restored the asset. P-18 (E-1): rejected
             CommonData data = data();
             Asset asset = archived(records.asset(data.o1().company()));
+            Map<String, Object> before = row("asset", asset.getId());
 
             ImportResponse response = importService.importAssets(List.of(
                     AssetImportDTO.builder().id(asset.getId()).name("P-18 changed").build()), data.o1().company());
 
-            assertEquals(1, response.getUpdated());
-            assertEquals(List.of(), response.getRejected());
-            assertEquals("P-18 changed", row("asset", asset.getId()).get("name"));
-            assertEquals(false, row("asset", asset.getId()).get("archived"));
+            assertEquals(0, response.getUpdated());
+            assertEquals("ASSET_RETIRED", response.getRejected().get(0).getCode());
+            assertEquals(before, row("asset", asset.getId()));
         }
 
         @Test
-        void archivedColumn_archivesAnActiveAsset_withoutAuditRecord() {
-            // before P-18: the import archives (D-1 makes it ignore the column)
+        void archivedColumn_ignored() {
+            // before P-18: the import archived the asset without audit record. P-18 (D-1): the column is ignored
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             long audit = auditRecords(data.o1().company());
@@ -298,29 +298,30 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             importService.importAssets(List.of(AssetImportDTO.builder().id(asset.getId()).name(asset.getName())
                     .archived("Yes").build()), data.o1().company());
 
-            assertEquals(true, row("asset", asset.getId()).get("archived"));
-            assertEquals(audit, auditRecords(data.o1().company()), "no RETIRE record");
+            assertEquals(false, row("asset", asset.getId()).get("archived"));
+            assertEquals(audit, auditRecords(data.o1().company()));
         }
 
         @Test
-        void disabledUserAndArchivedParent_acceptedAsNewReferences() {
-            // before P-18: a disabled user and an archived parent are given by the file
+        void disabledUserAndArchivedParent_rejectedAsNewReferences() {
+            // before P-18: a disabled user and an archived parent were given by the file. P-18 (E-2): the row is
+            // rejected
             CommonData data = data();
             Company company = data.o1().company();
             User technician = disabled(data.o1().technician());
             Asset parent = archived(records.asset(company));
-            String name = TestRecords.unique("P-18 asset");
+            String byUser = TestRecords.unique("P-18 asset");
+            String byParent = TestRecords.unique("P-18 asset");
 
-            ImportResponse response = importService.importAssets(List.of(AssetImportDTO.builder().name(name)
-                    .primaryUserEmail(technician.getEmail()).assignedToEmails(List.of(technician.getEmail()))
-                    .parentAssetName(parent.getName()).build()), company);
+            ImportResponse response = importService.importAssets(List.of(AssetImportDTO.builder().name(byUser)
+                    .primaryUserEmail(technician.getEmail()).assignedToEmails(List.of(technician.getEmail())).build(),
+                    AssetImportDTO.builder().name(byParent).parentAssetName(parent.getName()).build()), company);
 
-            Long id = jdbc.queryForObject("SELECT id FROM asset WHERE company_id = ? AND name = ?", Long.class,
-                    company.getId(), name);
-            assertEquals(1, response.getCreated());
-            assertEquals(technician.getId(), reference("asset", "primary_user_id", id));
-            assertEquals(List.of(technician.getId()), linked("t_asset_user_associations", "id_asset", id, "id_user"));
-            assertEquals(parent.getId(), reference("asset", "parent_asset_id", id));
+            assertEquals(0, response.getCreated());
+            assertEquals(List.of("USER_RETIRED", "ASSET_RETIRED"), response.getRejected().stream()
+                    .map(rejection -> rejection.getCode()).toList());
+            assertEquals(0, count("SELECT count(*) FROM asset WHERE company_id = ? AND name IN (?, ?)",
+                    company.getId(), byUser, byParent));
         }
 
         @Test

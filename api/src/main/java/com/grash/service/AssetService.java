@@ -478,7 +478,7 @@ public class AssetService {
         }
         asset.setBarCode(dto.getBarCode());
         asset.setArea(dto.getArea());
-        asset.setArchived(Helper.getBooleanFromString(dto.getArchived()));
+        // P-18 (D-1): the import neither archives nor restores; archived is changed only from the web, recorded
         asset.setDescription(dto.getDescription());
         asset.setModel(dto.getModel());
         asset.setPower(dto.getPower());

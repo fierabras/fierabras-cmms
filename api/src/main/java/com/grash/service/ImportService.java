@@ -27,6 +27,7 @@ public class ImportService {
     private final MeterService meterService;
     private final WorkOrderService workOrderService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
+    private final UserService userService;
 
     /**
      * Work order import requested by a user. INC-02 (T-11, D-20), approved exception for historical data: a new
@@ -141,23 +142,32 @@ public class ImportService {
 
         Map<String, Asset> assetsByName = new java.util.HashMap<>();
         List<Asset> assetsToSave = new java.util.ArrayList<>();
+        List<ImportRejection> rejected = new ArrayList<>();
+        Map<AssetImportDTO, Integer> rows = positions(toImport);
         int created = 0;
         int updated = 0;
 
         for (AssetImportDTO dto : AssetService.orderAssets(toImport)) {
             Long id = dto.getId();
-            Asset asset;
-
-            if (id == null) {
-                asset = new Asset();
-                created++;
-            } else if (existingAssets.containsKey(id)) {
-                asset = existingAssets.get(id);
-                updated++;
-            } else {
-                asset = new Asset();
-                created++;
+            Asset existing = id == null ? null : existingAssets.get(id);
+            // P-18 (E-1, E-2, PPB-08): an archived asset is not changed, and a disabled user or an archived parent is
+            // not given anew; the row is rejected with its reason and not added to the batch
+            Optional<ImportRejection> rejection = rejection(rows.get(dto), id, () -> {
+                if (existing != null) AssetStateGuard.check(existing);
+                UserService.rejectRetiredLoaded(existing == null ? List.of()
+                                : WorkOrderService.assignedUsers(existing.getPrimaryUser(), existing.getAssignedTo()),
+                        users(company, dto.getPrimaryUserEmail(), dto.getAssignedToEmails()));
+                assetService.rejectRetired(existing == null ? List.of()
+                                : Collections.singletonList(existing.getParentAsset()),
+                        Collections.singletonList(parentAsset(dto.getParentAssetName(), company, assetsByName)));
+            });
+            if (rejection.isPresent()) {
+                rejected.add(rejection.get());
+                continue;
             }
+            Asset asset = existing == null ? new Asset() : existing;
+            if (existing == null) created++;
+            else updated++;
 
             assetService.setAssetFieldsFromImportDto(asset, dto, company, assetsByName);
             assetsToSave.add(asset);
@@ -168,10 +178,59 @@ public class ImportService {
             assetService.saveAll(assetsToSave);
         }
 
+        rejected.sort(Comparator.comparingInt(ImportRejection::getRow));
         return ImportResponse.builder()
                 .created(created)
                 .updated(updated)
+                .rejected(rejected)
                 .build();
+    }
+
+    /**
+     * P-18: the position of each row in the file, starting at 1, for the rows that are imported in another order.
+     */
+    private static <T> Map<T, Integer> positions(List<T> toImport) {
+        Map<T, Integer> rows = new IdentityHashMap<>();
+        for (int row = toImport.size(); row >= 1; row--) rows.put(toImport.get(row - 1), row);
+        return rows;
+    }
+
+    /**
+     * P-18 (PPB-20 b): the rejection of the row when {@code check} rejects it with a 409, or nothing.
+     */
+    private static Optional<ImportRejection> rejection(int row, Long id, Runnable check) {
+        try {
+            check.run();
+            return Optional.empty();
+        } catch (ConflictException conflict) {
+            return Optional.of(new ImportRejection(row, id, conflict.getCode(), conflict.getMessage()));
+        }
+    }
+
+    /**
+     * P-18 (E-2): the users that a row cites, found as the import finds them (by email, in the company).
+     */
+    private List<User> users(Company company, String primaryUserEmail, Collection<String> emails) {
+        List<User> users = new ArrayList<>();
+        userService.findByEmailAndCompany(primaryUserEmail, company.getId()).ifPresent(users::add);
+        if (emails != null) emails.forEach(email -> userService.findByEmailAndCompany(email, company.getId())
+                .ifPresent(users::add));
+        return users;
+    }
+
+    /**
+     * P-18 (E-2): the asset that a row cites by name, found as the import finds it: in the batch first, then in the
+     * company.
+     */
+    private Asset parentAsset(String name, Company company, Map<String, Asset> batch) {
+        if (name == null || name.isEmpty()) return null;
+        Asset asset = batch.get(name);
+        return asset != null ? asset : assetNamed(name, company);
+    }
+
+    private Asset assetNamed(String name, Company company) {
+        if (name == null || name.isEmpty()) return null;
+        return assetService.findByNameIgnoreCaseAndCompany(name, company.getId()).stream().findFirst().orElse(null);
     }
 
     @Transactional
