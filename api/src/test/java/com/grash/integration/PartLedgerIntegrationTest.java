@@ -1260,6 +1260,28 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void userWhoCannotSeeTheWorkOrder_get403() {
+            // a role that sees only its own work orders (no viewOther): the line of another work order is not shown
+            CommonData data = data();
+            User technician = data.o1().technician();
+            Part part = part(data.o1().company(), 10);
+            WorkOrder workOrder = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            PartQuantity line = line(part, workOrder, null, 1);
+            Long role = jdbc.queryForObject("SELECT role_id FROM own_user WHERE id = ?", Long.class,
+                    technician.getId());
+            jdbc.update("UPDATE own_user SET role_id = ? WHERE id = ?", records.role(data.o1().company()).getId(),
+                    technician.getId());
+            try {
+                assertEquals(403, call(get("/part-quantities/" + line.getId()), technician).status());
+                jdbc.update("UPDATE work_order SET primary_user_id = ? WHERE id = ?", technician.getId(),
+                        workOrder.getId());
+                assertEquals(200, call(get("/part-quantities/" + line.getId()), technician).status());
+            } finally {
+                jdbc.update("UPDATE own_user SET role_id = ? WHERE id = ?", role, technician.getId());
+            }
+        }
+
+        @Test
         void technicianAssignedToTheWorkOrder_postAndPatch200() {
             CommonData data = data();
             User technician = data.o1().technician();
