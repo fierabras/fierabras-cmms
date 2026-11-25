@@ -32,7 +32,8 @@ const conflictKeys: Record<string, string> = {
   PURCHASE_ORDER_CLOSED: 'purchase_order_closed',
   PREVENTIVE_MAINTENANCE_IN_USE: 'preventive_maintenance_in_use',
   SCHEDULE_REQUIRED: 'schedule_required',
-  CHECKLIST_IN_USE: 'checklist_in_use'
+  CHECKLIST_IN_USE: 'checklist_in_use',
+  DEMO_DATA_IN_USE: 'demo_data_in_use'
 };
 
 /**

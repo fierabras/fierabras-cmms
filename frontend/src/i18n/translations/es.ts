@@ -2220,7 +2220,13 @@ const esJSON = {
   pm_pause_success: 'El mantenimiento preventivo ha sido pausado.',
   pm_pause_failure: 'El mantenimiento preventivo no pudo ser pausado.',
   pm_resume_success: 'El mantenimiento preventivo ha sido reanudado.',
-  pm_resume_failure: 'El mantenimiento preventivo no pudo ser reanudado.'
+  pm_resume_failure: 'El mantenimiento preventivo no pudo ser reanudado.',
+  demo_data_in_use:
+    'No se pueden eliminar los datos de demostración: los usan registros que no son de demostración. Quite primero esos vínculos.',
+  demo_data_delete_success: 'Los datos de demostración se eliminaron',
+  demo_data_delete_failure: 'No se pudieron eliminar los datos de demostración',
+  import_row_rejected_new: 'Fila {{row}}: {{reason}}',
+  entity_type_WORKFLOW: 'Flujo de trabajo'
 };
 
 export default esJSON;

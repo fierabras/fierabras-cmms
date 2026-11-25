@@ -26,6 +26,7 @@ import { GeneralPreferences } from '../../../../models/owns/generalPreferences';
 import { CustomSnackBarContext } from '../../../../contexts/CustomSnackBarContext';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import api from '../../../../utils/api';
+import { conflictMessage } from '../../../../utils/conflicts';
 
 function GeneralSettings() {
   const { t }: { t: any } = useTranslation();
@@ -68,13 +69,20 @@ function GeneralSettings() {
     () => debounce(onBrandColorChange, 1300),
     []
   );
+  // P-18 (E-9): a rejected purge (403, 409 DEMO_DATA_IN_USE) or a failure is explained, not ignored
   const onDeleteDemoData = async () => {
-    const { success, message } = await api.deletes<{
-      success: boolean;
-      message: string;
-    }>('demo/demo-data');
-    if (success) {
-      showSnackBar('Demo data deleted successfully', 'success');
+    try {
+      const { success } = await api.deletes<{
+        success: boolean;
+        message: string;
+      }>('demo/demo-data');
+      if (success) showSnackBar(t('demo_data_delete_success'), 'success');
+    } catch (err) {
+      showSnackBar(
+        conflictMessage(err, t, t('demo_data_delete_failure')),
+        'error'
+      );
+    } finally {
       setOpenDeleteDemo(false);
     }
   };

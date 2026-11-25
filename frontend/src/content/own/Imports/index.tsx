@@ -52,7 +52,8 @@ interface OwnProps {}
 // P-12c (W-2): a row rejected by the import, as the API sends it
 interface ImportRejection {
   row: number;
-  id: number;
+  // P-18: null for a rejected row that would have created a record
+  id: number | null;
   code: string;
   message: string;
 }
@@ -273,15 +274,20 @@ const Import = ({}: OwnProps) => {
               total: rejected.length,
               rows: rejected
                 .map((rejection) =>
-                  t('import_row_rejected', {
-                    row: rejection.row,
-                    id: rejection.id,
-                    reason: conflictCodeMessage(
-                      rejection.code,
-                      t,
-                      rejection.message
-                    )
-                  })
+                  t(
+                    rejection.id == null
+                      ? 'import_row_rejected_new'
+                      : 'import_row_rejected',
+                    {
+                      row: rejection.row,
+                      id: rejection.id,
+                      reason: conflictCodeMessage(
+                        rejection.code,
+                        t,
+                        rejection.message
+                      )
+                    }
+                  )
                 )
                 .join(' ')
             }),
