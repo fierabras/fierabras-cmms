@@ -1,5 +1,8 @@
 package com.grash.model.enums;
 
+import java.util.Arrays;
+import java.util.Optional;
+
 /**
  * Type of a record, as written in the audit log and in the list of types that block a deletion (PPB-23, PPB-26),
  * with the table that stores it. Stored as text: adding a value needs no migration.
@@ -68,5 +71,12 @@ public enum EntityType {
 
     public String getTable() {
         return table;
+    }
+
+    /**
+     * P-18: the type stored in {@code table}, if any.
+     */
+    public static Optional<EntityType> ofTable(String table) {
+        return Arrays.stream(values()).filter(type -> type.table.equals(table)).findFirst();
     }
 }

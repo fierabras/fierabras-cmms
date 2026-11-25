@@ -5,6 +5,7 @@ import com.grash.exception.ForeignKeyViolation;
 import com.grash.model.User;
 import com.grash.model.enums.AuditAction;
 import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,31 @@ public class DeletionService {
         // P-17 (D-P17-5): every file row deleted by the operation, the entity's own included
         long storageObjects = after.getOrDefault(FILE_TABLE, 0L) - before.getOrDefault(FILE_TABLE, 0L);
         auditLogService.record(target, actor, AuditAction.DELETE, source, cascadeRows, (int) storageObjects);
+    }
+
+    /**
+     * P-18 (PPB-20 d, PPB-23, PPB-25): runs the demo purge inside the caller's transaction and records it as one
+     * {@code PURGE} with origin {@code DEMO_PURGE} and the rows deleted by table, the demo rows included. A foreign
+     * key that rejects it (a record that is not demo cites a demo one) becomes 409 {@code code}, with the type of the
+     * referencing table when it has one. A purge that deletes nothing is not recorded. Stored objects are not deleted
+     * by the purge (TD-P17-04), so none is recorded.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void purge(AuditTarget target, User actor, String code, String message, Runnable purge) {
+        entityManager.flush();
+        Map<String, Long> before = deletedRows();
+        try {
+            purge.run();
+            entityManager.flush();
+        } catch (RuntimeException failure) {
+            Optional<ForeignKeyViolation> violation = ForeignKeyViolation.in(failure);
+            if (violation.isEmpty()) throw failure;
+            throw ConflictException.inUse(code, message,
+                    EntityType.ofTable(violation.get().referencingTable()).stream().toList());
+        }
+        Map<String, Long> deleted = cascadeRows(before, deletedRows(), target.type().getTable());
+        if (!deleted.isEmpty()) auditLogService.record(target, actor, AuditAction.PURGE, AuditSource.DEMO_PURGE,
+                deleted, 0);
     }
 
     private void run(DeletionRule rule, Runnable deletion) {

@@ -352,7 +352,8 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
     class DemoPurge {
 
         @Test
-        void nonDemoWorkOrderCitesDemoAsset_409RecordInUse_nothingDeleted() {
+        void nonDemoWorkOrderCitesDemoAsset_409DemoDataInUse_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             O1 o1 = newO1();
             Asset demoAsset = records.asset(o1.company(), null, true);
             WorkOrder demoWorkOrder = records.workOrder(o1.company(), null, Status.OPEN, true);
@@ -360,7 +361,7 @@ class DeletionConflictIntegrationTest extends AbstractIntegrationTest {
 
             Response response = api.call(delete("/demo/demo-data"), api.login(o1.admin()));
 
-            assertConflict(response, "RECORD_IN_USE");
+            assertConflict(response, "DEMO_DATA_IN_USE");
             assertAll(
                     () -> assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", demoAsset.getId()),
                             "the demo asset still exists"),

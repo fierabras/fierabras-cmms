@@ -440,6 +440,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
 
         @Test
         void approvedDemoRequest_409_wholePurgeRejected_workOrderKeepsItsRequest() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             // P-13 (D-P13-6): the work order that is not demo cites the demo request (NO ACTION); P-18 gives the code
             CommonData data = data();
             Long request = request(data.o1().admin(), null);
@@ -451,7 +452,7 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
 
             assertAll(
                     () -> assertEquals(409, response.status(), response.toString()),
-                    () -> assertTrue(response.body().contains("RECORD_IN_USE"), response.toString()),
+                    () -> assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString()),
                     () -> assertEquals(1, requests(request)),
                     () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ? AND is_demo = false "
                             + "AND parent_request_id = ?", workOrder, request), "the work order keeps its request"));

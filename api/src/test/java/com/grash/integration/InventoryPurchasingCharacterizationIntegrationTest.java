@@ -1170,7 +1170,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void demoPartRestocked_409RecordInUse_nothingDeleted() {
+        void demoPartRestocked_409DemoDataInUse_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             // before P-16: 200, the movement deleted with the part. D-P16-6: the movement is not demo, so the whole
             // purge is rejected (PPB-20 d); P-18 gives the code DEMO_DATA_IN_USE
             CommonData data = data();
@@ -1184,13 +1185,14 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = call(delete("/demo/demo-data"), data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("part", part.getId()));
             assertEquals(1, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", part.getId()));
         }
 
         @Test
-        void demoVendorCitedByAPurchaseOrder_409RecordInUse_nothingDeleted() {
+        void demoVendorCitedByAPurchaseOrder_409DemoDataInUse_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             // before P-16: 200, the reference set to null. D-P16-6: the purchase order is not demo, so the whole purge
             // is rejected (PPB-20 d); P-18 gives the code DEMO_DATA_IN_USE
             CommonData data = data();
@@ -1204,7 +1206,7 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             Response response = call(delete("/demo/demo-data"), data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("vendor", vendor.getId()));
             assertEquals(vendor.getId(), reference("purchase_order", "vendor_id", purchaseOrder.getId()));
         }

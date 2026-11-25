@@ -1,5 +1,6 @@
 package com.grash.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.grash.dto.imports.AssetImportDTO;
 import com.grash.dto.imports.ImportRejection;
@@ -9,6 +10,9 @@ import com.grash.dto.imports.MeterImportDTO;
 import com.grash.dto.imports.PartImportDTO;
 import com.grash.dto.imports.PreventiveMaintenanceImportDTO;
 import com.grash.dto.imports.WorkOrderImportDTO;
+import com.grash.integration.support.FaultInjector;
+import com.grash.integration.support.FaultInjector.Fault;
+import com.grash.integration.support.FaultInjector.Operation;
 import com.grash.integration.support.TestApi;
 import com.grash.integration.support.TestApi.Response;
 import com.grash.integration.support.TestAssetRecords;
@@ -17,12 +21,24 @@ import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Asset;
 import com.grash.model.Company;
+import com.grash.model.Customer;
 import com.grash.model.Location;
 import com.grash.model.Meter;
 import com.grash.model.Part;
+import com.grash.model.PartQuantity;
+import com.grash.model.PurchaseOrder;
+import com.grash.model.Task;
+import com.grash.model.TaskBase;
+import com.grash.model.Vendor;
 import com.grash.model.WorkOrder;
+import com.grash.model.enums.ApprovalStatus;
 import com.grash.model.enums.Status;
 import com.grash.model.User;
+import com.grash.repository.CustomerRepository;
+import com.grash.repository.PartQuantityRepository;
+import com.grash.repository.PurchaseOrderRepository;
+import com.grash.repository.TaskRepository;
+import com.grash.repository.VendorRepository;
 import com.grash.service.ImportService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 
 /**
  * P-18 (PPB-08, PPB-20, PPB-23, PPB-26, PPB-27): the indirect routes. The imports neither delete rows nor change a
@@ -58,22 +75,40 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
     private final TestApi api;
     private final JdbcTemplate jdbc;
     private final ImportService importService;
+    private final ObjectMapper objectMapper;
+    private final CustomerRepository customerRepository;
+    private final TaskRepository taskRepository;
+    private final PartQuantityRepository partQuantityRepository;
+    private final VendorRepository vendorRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final FaultInjector faults;
     private final List<CommonData> created = new ArrayList<>();
 
     @Autowired
     IndirectRoutesIntegrationTest(TestOrganizations organizations, TestRecords records, TestAssetRecords assetRecords,
                                   MockMvc mockMvc, ObjectMapper objectMapper, JdbcTemplate jdbc,
-                                  ImportService importService) {
+                                  ImportService importService, CustomerRepository customerRepository,
+                                  TaskRepository taskRepository, PartQuantityRepository partQuantityRepository,
+                                  VendorRepository vendorRepository,
+                                  PurchaseOrderRepository purchaseOrderRepository) {
         this.organizations = organizations;
         this.records = records;
         this.assetRecords = assetRecords;
         this.api = new TestApi(mockMvc, objectMapper);
         this.jdbc = jdbc;
         this.importService = importService;
+        this.objectMapper = objectMapper;
+        this.customerRepository = customerRepository;
+        this.taskRepository = taskRepository;
+        this.partQuantityRepository = partQuantityRepository;
+        this.vendorRepository = vendorRepository;
+        this.purchaseOrderRepository = purchaseOrderRepository;
+        this.faults = new FaultInjector(jdbc);
     }
 
     @AfterEach
     void cleanUp() {
+        faults.removeAll();
         created.forEach(records::deleteRequestPortals);
         created.forEach(organizations::delete);
         created.clear();
@@ -655,6 +690,363 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(List.of(), response.getRejected());
             assertNull(reference("work_order", "asset_id", workOrderTitled(company, title)));
+        }
+    }
+
+    // =================================================================================================================
+    // B3 · Demo purge: permission, record, normal case, all or nothing, isolation (E-4, E-6, E-7)
+    // =================================================================================================================
+
+    static final String DEMO_DATA_IN_USE = "DEMO_DATA_IN_USE";
+
+    private void demo(String table, Long id) {
+        jdbc.update("UPDATE " + table + " SET is_demo = true WHERE id = ?", id);
+    }
+
+    private Response purge(User user) {
+        return call(delete("/demo/demo-data"), user);
+    }
+
+    /**
+     * A part with {@code quantity} in stock and its movement, as the ledger leaves it.
+     */
+    private Part partWithStock(Company company, double quantity) {
+        Part part = records.part(company, null);
+        jdbc.update("UPDATE part SET quantity = ? WHERE id = ?", quantity, part.getId());
+        jdbc.update("INSERT INTO part_transaction (id, created_at, updated_at, company_id, part_id, quantity, "
+                + "origin, is_demo) VALUES (nextval('part_transaction_seq'), now(), now(), ?, ?, ?, "
+                + "'ADJUSTMENT', false)", company.getId(), part.getId(), quantity);
+        return part;
+    }
+
+    /**
+     * Demo rows of the company left in the tables with {@code is_demo} and {@code company_id}.
+     */
+    private long demoRows(Company company) {
+        List<String> tables = jdbc.queryForList("SELECT d.table_name FROM information_schema.columns d "
+                + "JOIN information_schema.columns c ON c.table_schema = d.table_schema AND c.table_name = d.table_name "
+                + "AND c.column_name = 'company_id' WHERE d.table_schema = current_schema() AND d.column_name = 'is_demo' "
+                + "AND d.table_name <> 'work_order_aud'", String.class);
+        return tables.stream().mapToLong(table -> count("SELECT count(*) FROM " + table
+                + " WHERE is_demo AND company_id = ?", company.getId())).sum();
+    }
+
+    private JsonNode json(Response response) {
+        try {
+            return objectMapper.readTree(response.body());
+        } catch (Exception failure) {
+            throw new IllegalStateException(response.toString(), failure);
+        }
+    }
+
+    private void assertDemoDataInUse(Response response, String blockingType) {
+        assertEquals(409, response.status(), response.toString());
+        JsonNode body = json(response);
+        assertEquals(DEMO_DATA_IN_USE, body.get("code").asText(), response.toString());
+        assertFalse(body.get("success").asBoolean());
+        assertFalse(body.get("message").asText().isBlank());
+        assertFalse(response.body().contains("constraint") || response.body().contains("SQL")
+                || response.body().contains("fk_"), response.toString());
+        List<String> types = new ArrayList<>();
+        if (body.has("blockingTypes")) body.get("blockingTypes").forEach(type -> types.add(type.asText()));
+        assertEquals(List.of(blockingType), types, response.toString());
+    }
+
+    @Nested
+    class DemoPurge {
+
+        @Test
+        void ca074_technicianWithoutSettings_403_nothingChanged() {
+            // before P-18: 200, the demo data deleted by any authenticated user
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset demoAsset = records.asset(company, null, true);
+            WorkOrder demoWorkOrder = records.workOrder(company, null, Status.OPEN, true);
+
+            Response response = purge(data.o1().technician());
+
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", demoAsset.getId()));
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", demoWorkOrder.getId()));
+            assertEquals(0, auditRecords(company));
+        }
+
+        @Test
+        void ca057_onlyDemoData_withHierarchiesAndMovements_200_noDemoLeft_restUnchanged_purgeRecordByTable() {
+            // before P-18: 200 without audit record. D-P18-3: without readings (D-P14-9)
+            CommonData data = data();
+            Company company = data.o1().company();
+            Location parentLocation = records.location(company);
+            Location childLocation = records.location(company);
+            demo("location", parentLocation.getId());
+            demo("location", childLocation.getId());
+            jdbc.update("UPDATE location SET parent_location_id = ? WHERE id = ?", parentLocation.getId(),
+                    childLocation.getId());
+            Asset parentAsset = records.asset(company, null, true);
+            Asset childAsset = records.asset(company, null, true);
+            jdbc.update("UPDATE asset SET parent_asset_id = ?, location_id = ? WHERE id = ?", parentAsset.getId(),
+                    childLocation.getId(), childAsset.getId());
+            WorkOrder demoWorkOrder = records.workOrder(company, childAsset, Status.OPEN, true);
+            Part demoPart = partWithStock(company, 4);
+            demo("part", demoPart.getId());
+            jdbc.update("UPDATE part_transaction SET is_demo = true WHERE part_id = ?", demoPart.getId());
+            Asset realAsset = records.asset(company);
+            WorkOrder realWorkOrder = records.workOrder(company, realAsset, Status.OPEN, false);
+            Part realPart = partWithStock(company, 2);
+            Map<String, Object> realAssetBefore = row("asset", realAsset.getId());
+            Map<String, Object> realWorkOrderBefore = row("work_order", realWorkOrder.getId());
+            Map<String, Object> realPartBefore = row("part", realPart.getId());
+
+            Response response = purge(data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, demoRows(company), "no demo record is left");
+            assertEquals(realAssetBefore, row("asset", realAsset.getId()));
+            assertEquals(realWorkOrderBefore, row("work_order", realWorkOrder.getId()));
+            assertEquals(realPartBefore, row("part", realPart.getId()));
+            assertEquals(1, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", realPart.getId()));
+            Map<String, Object> record = jdbc.queryForMap("SELECT action, source, entity_type, entity_id, actor_id, "
+                    + "storage_objects, cascade_rows::text AS cascade FROM audit_log WHERE company_id = ?",
+                    company.getId());
+            assertEquals(List.of("PURGE", "DEMO_PURGE", "COMPANY", company.getId(), data.o1().admin().getId()),
+                    List.of(record.get("action"), record.get("source"), record.get("entity_type"),
+                            ((Number) record.get("entity_id")).longValue(),
+                            ((Number) record.get("actor_id")).longValue()), record.toString());
+            String cascade = (String) record.get("cascade");
+            for (String deleted : List.of("\"asset\": 2", "\"location\": 2", "\"work_order\": 1", "\"part\": 1",
+                    "\"part_transaction\": 1"))
+                assertTrue(cascade.contains(deleted), cascade);
+        }
+
+        @Test
+        void nothingToPurge_200_noRecord() {
+            CommonData data = data();
+            records.asset(data.o1().company());
+
+            Response response = purge(data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, auditRecords(data.o1().company()));
+        }
+
+        @Test
+        void ca068_failureHalfway_error_allDemoDataKept_noRecord() {
+            // passed before P-18 (one transaction); now also without audit record
+            CommonData data = data();
+            Company company = data.o1().company();
+            WorkOrder demoWorkOrder = records.workOrder(company, null, Status.OPEN, true);
+            Asset demoAsset = records.asset(company, null, true);
+            Location demoLocation = records.location(company);
+            demo("location", demoLocation.getId());
+            long demoBefore = demoRows(company);
+
+            Response response;
+            try (Fault fault = faults.failOn("asset", Operation.DELETE)) {
+                response = purge(data.o1().admin());
+                assertEquals(1, fault.hits());
+            }
+
+            assertNotEquals(200, response.status(), response.toString());
+            assertEquals(demoBefore, demoRows(company), "every demo record still exists");
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", demoWorkOrder.getId()));
+            assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", demoAsset.getId()));
+            assertEquals(0, auditRecords(company));
+        }
+
+        @Test
+        void otherOrganization_itsDemoDataAndDependentsNeitherPurgedNorBlocking() {
+            CommonData data = data();
+            Company o1 = data.o1().company();
+            Company o2 = data.o2().company();
+            Asset o1Demo = records.asset(o1, null, true);
+            Asset o2Demo = records.asset(o2, null, true);
+            records.workOrder(o2, o2Demo, Status.OPEN, false);
+            Customer o2Customer = customer(o2);
+            demo("customer", o2Customer.getId());
+            WorkOrder o2Real = records.workOrder(o2, null, Status.OPEN, false);
+            associate("work_order_customers", "work_order_id", o2Real.getId(), "customers_id", o2Customer.getId());
+
+            Response response = purge(data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM asset WHERE id = ?", o1Demo.getId()));
+            assertEquals(1, count("SELECT count(*) FROM asset WHERE id = ?", o2Demo.getId()));
+            assertEquals(1, count("SELECT count(*) FROM customer WHERE id = ?", o2Customer.getId()));
+            assertEquals(0, auditRecords(o2));
+        }
+    }
+
+    // =================================================================================================================
+    // B4 · Demo purge: a record that is not demo depends on a demo one (E-5, rules R1 and R2)
+    // =================================================================================================================
+
+    private Customer customer(Company company) {
+        Customer customer = new Customer();
+        customer.setName(TestRecords.unique("P-18 customer"));
+        customer.setCompany(company);
+        return customerRepository.saveAndFlush(customer);
+    }
+
+    @Nested
+    class DemoPurgeDependents {
+
+        @Test
+        void ca056_taskBaseOfARealWorkOrderCitesADemoAsset_409DemoDataInUse_nothingDeleted() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Company company = data.o1().company();
+            Asset demoAsset = records.asset(company, null, true);
+            WorkOrder demoWorkOrder = records.workOrder(company, null, Status.OPEN, true);
+            WorkOrder real = records.workOrder(company, null, Status.OPEN, false);
+            TaskBase taskBase = assetRecords.taskBase(company, demoAsset, null);
+            Task task = new Task(taskBase, real, null, null);
+            task.setCompany(company);
+            taskRepository.saveAndFlush(task);
+            long demoBefore = demoRows(company);
+
+            Response response = purge(data.o1().admin());
+
+            assertDemoDataInUse(response, "TASK_BASE");
+            assertEquals(demoBefore, demoRows(company), "no demo record deleted");
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", demoWorkOrder.getId()));
+            assertEquals(demoAsset.getId(), reference("task_base", "asset_id", taskBase.getId()));
+            assertEquals(0, auditRecords(company));
+        }
+
+        @Test
+        void tdP12b03_demoCustomerOfAClosedRealWorkOrder_409DemoDataInUse_linkKept() {
+            // before P-18: 200, the customer unlinked in silence (R2)
+            CommonData data = data();
+            Company company = data.o1().company();
+            Customer customer = customer(company);
+            demo("customer", customer.getId());
+            WorkOrder closed = records.workOrder(company, null, Status.COMPLETE, false);
+            associate("work_order_customers", "work_order_id", closed.getId(), "customers_id", customer.getId());
+
+            Response response = purge(data.o1().admin());
+
+            assertDemoDataInUse(response, "WORK_ORDER");
+            assertEquals(1, count("SELECT count(*) FROM customer WHERE id = ?", customer.getId()));
+            assertEquals(List.of(customer.getId()), linked("work_order_customers", "work_order_id", closed.getId(),
+                    "customers_id"));
+        }
+
+        @Test
+        void dP18_7_realCustomerOfADemoWorkOrder_409DemoDataInUse() {
+            // before P-18: 200, the link deleted with the demo work order (R2, both ways)
+            CommonData data = data();
+            Company company = data.o1().company();
+            Customer customer = customer(company);
+            WorkOrder demoWorkOrder = records.workOrder(company, null, Status.OPEN, true);
+            associate("work_order_customers", "work_order_id", demoWorkOrder.getId(), "customers_id",
+                    customer.getId());
+
+            Response response = purge(data.o1().admin());
+
+            assertDemoDataInUse(response, "CUSTOMER");
+            assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", demoWorkOrder.getId()));
+        }
+
+        @Test
+        void tdP13_03_approvedDemoRequest_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Company company = data.o1().company();
+            com.grash.model.Request request = assetRecords.request(company);
+            WorkOrder real = records.workOrder(company, null, Status.OPEN, false);
+            demo("request", request.getId());
+            jdbc.update("UPDATE work_order SET parent_request_id = ? WHERE id = ?", request.getId(), real.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "WORK_ORDER");
+            assertEquals(1, count("SELECT count(*) FROM request WHERE id = ?", request.getId()));
+        }
+
+        @Test
+        void dP18_3_readingOfADemoMeter_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE (D-P14-9 kept)
+            CommonData data = data();
+            Company company = data.o1().company();
+            Meter meter = assetRecords.meter(company, records.asset(company));
+            assetRecords.reading(meter, 3);
+            demo("meter", meter.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "READING");
+            assertEquals(1, count("SELECT count(*) FROM meter WHERE id = ?", meter.getId()));
+        }
+
+        @Test
+        void tdP14_07_realChildOfADemoLocation_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Location parent = records.location(data.o1().company());
+            Location child = records.location(data.o1().company());
+            demo("location", parent.getId());
+            jdbc.update("UPDATE location SET parent_location_id = ? WHERE id = ?", parent.getId(), child.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "LOCATION");
+            assertEquals(parent.getId(), reference("location", "parent_location_id", child.getId()));
+        }
+
+        @Test
+        void dP16_6_demoPartRestocked_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Part part = partWithStock(data.o1().company(), 2);
+            demo("part", part.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "PART_TRANSACTION");
+            assertEquals(1, count("SELECT count(*) FROM part WHERE id = ?", part.getId()));
+        }
+
+        @Test
+        void dP16_6_demoPartOnARealWorkOrder_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Company company = data.o1().company();
+            Part part = records.part(company, null);
+            demo("part", part.getId());
+            WorkOrder real = records.workOrder(company, null, Status.OPEN, false);
+            PartQuantity line = new PartQuantity(part, real, null, 1);
+            line.setCompany(company);
+            partQuantityRepository.saveAndFlush(line);
+
+            assertDemoDataInUse(purge(data.o1().admin()), "PART_QUANTITY");
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE id = ?", line.getId()));
+        }
+
+        @Test
+        void dP16_6_demoVendorOnARealPurchaseOrder_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Company company = data.o1().company();
+            Vendor vendor = new Vendor();
+            vendor.setName(TestRecords.unique("P-18 vendor"));
+            vendor.setCompanyName(vendor.getName());
+            vendor.setCompany(company);
+            vendorRepository.saveAndFlush(vendor);
+            demo("vendor", vendor.getId());
+            PurchaseOrder purchaseOrder = new PurchaseOrder();
+            purchaseOrder.setName(TestRecords.unique("P-18 PO"));
+            purchaseOrder.setStatus(ApprovalStatus.PENDING);
+            purchaseOrder.setCompany(company);
+            purchaseOrderRepository.saveAndFlush(purchaseOrder);
+            jdbc.update("UPDATE purchase_order SET vendor_id = ? WHERE id = ?", vendor.getId(), purchaseOrder.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "PURCHASE_ORDER");
+            assertEquals(vendor.getId(), reference("purchase_order", "vendor_id", purchaseOrder.getId()));
+        }
+
+        @Test
+        void p15_demoPreventiveMaintenanceWithARealWorkOrder_409DemoDataInUse() {
+            // before P-18: 409 RECORD_IN_USE
+            CommonData data = data();
+            Long id = preventiveMaintenance(data.o1().company(), TestRecords.unique("P-18 PM"));
+            demo("preventive_maintenance", id);
+            WorkOrder real = records.workOrder(data.o1().company(), null, Status.OPEN, false);
+            jdbc.update("UPDATE work_order SET parent_preventive_maintenance_id = ? WHERE id = ?", id, real.getId());
+
+            assertDemoDataInUse(purge(data.o1().admin()), "WORK_ORDER");
+            assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", id));
         }
     }
 }

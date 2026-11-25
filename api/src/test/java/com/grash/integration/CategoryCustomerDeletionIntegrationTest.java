@@ -695,6 +695,7 @@ class CategoryCustomerDeletionIntegrationTest extends AbstractIntegrationTest {
 
         @Test
         void realWorkOrderCitesDemoCategory_409_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             CommonData data = data();
             WorkOrderCategory demo = demoCategory(data);
             WorkOrder demoWorkOrder = demoWorkOrder(data, demo);
@@ -704,7 +705,7 @@ class CategoryCustomerDeletionIntegrationTest extends AbstractIntegrationTest {
             Response response = purge(data);
 
             assertEquals(409, response.status(), response.toString());
-            assertEquals("RECORD_IN_USE", json(response).get("code").asText());
+            assertEquals("DEMO_DATA_IN_USE", json(response).get("code").asText());
             assertAll(
                     () -> assertTrue(workOrderCategoryRepository.existsById(demo.getId())),
                     () -> assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?",
@@ -717,6 +718,7 @@ class CategoryCustomerDeletionIntegrationTest extends AbstractIntegrationTest {
 
         @Test
         void realWorkOrderCitedDemoCategoryInARevision_409_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             CommonData data = data();
             WorkOrderCategory demo = demoCategory(data);
             WorkOrder demoWorkOrder = demoWorkOrder(data, demo);
@@ -727,7 +729,7 @@ class CategoryCustomerDeletionIntegrationTest extends AbstractIntegrationTest {
             Response response = purge(data);
 
             assertEquals(409, response.status(), response.toString());
-            assertEquals("RECORD_IN_USE", json(response).get("code").asText());
+            assertEquals("DEMO_DATA_IN_USE", json(response).get("code").asText());
             assertTrue(workOrderCategoryRepository.existsById(demo.getId()));
             assertEquals(1, count("SELECT count(*) FROM work_order WHERE id = ?", demoWorkOrder.getId()));
         }

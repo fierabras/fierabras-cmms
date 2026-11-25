@@ -992,7 +992,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
         }
 
         @Test
-        void demoMeterWithAReading_409RecordInUse_nothingDeleted() {
+        void demoMeterWithAReading_409DemoDataInUse_nothingDeleted() {
+            // P-18 (E-5, PPB-20 d): before, 409 RECORD_IN_USE from the global handler
             // before P-14: 200, the reading deleted with its meter. D-P14-9: the reading is not demo, so the whole
             // purge is rejected (PPB-20 d); P-18 gives the code DEMO_DATA_IN_USE
             CommonData data = data();
@@ -1006,7 +1007,7 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
 
             assertAll(
                     () -> assertEquals(409, response.status(), response.toString()),
-                    () -> assertTrue(response.body().contains("RECORD_IN_USE"), response.toString()),
+                    () -> assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString()),
                     () -> assertEquals(1, rows("asset", asset.getId())),
                     () -> assertEquals(1, rows("meter", meter.getId())),
                     () -> assertEquals(1, rows("reading", reading.getId())));

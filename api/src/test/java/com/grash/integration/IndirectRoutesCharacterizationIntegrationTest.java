@@ -555,20 +555,20 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class DemoPurge {
 
         @Test
-        void ca074_technicianWithoutSettings_200_demoDataDeleted() {
-            // before P-18: any authenticated user purges
+        void ca074_technicianWithoutSettings_403_demoDataKept() {
+            // before P-18: 200, any authenticated user purged. P-18 (E-4): the view of settings
             CommonData data = data();
             Asset demoAsset = records.asset(data.o1().company(), null, true);
 
             Response response = purge(data.o1().technician());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("asset", demoAsset.getId()));
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(1, rows("asset", demoAsset.getId()));
         }
 
         @Test
-        void ca057_onlyDemoData_200_withoutAuditRecord() {
-            // before P-18: no PURGE record
+        void ca057_onlyDemoData_200_withItsPurgeRecord() {
+            // before P-18: no audit record. P-18 (E-6): one PURGE record
             CommonData data = data();
             Company company = data.o1().company();
             Asset parent = records.asset(company, null, true);
@@ -584,7 +584,8 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             assertEquals(0, count("SELECT count(*) FROM asset WHERE id IN (?, ?)", parent.getId(), child.getId()));
             assertEquals(0, rows("work_order", demoWorkOrder.getId()));
             assertEquals(realBefore, row("asset", real.getId()));
-            assertEquals(0, auditRecords(company));
+            assertEquals(List.of("PURGE"), jdbc.queryForList("SELECT action FROM audit_log WHERE company_id = ?",
+                    String.class, company.getId()));
         }
 
         @Test
@@ -607,8 +608,8 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
         }
 
         @Test
-        void ca056_taskBaseOfARealWorkOrderCitesDemoAsset_409RecordInUse() {
-            // before P-18: RECORD_IN_USE from the global handler
+        void ca056_taskBaseOfARealWorkOrderCitesDemoAsset_409DemoDataInUse() {
+            // before P-18: RECORD_IN_USE from the global handler. P-18 (E-5): DEMO_DATA_IN_USE
             CommonData data = data();
             Company company = data.o1().company();
             Asset demoAsset = records.asset(company, null, true);
@@ -621,14 +622,14 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("asset", demoAsset.getId()));
             assertEquals(1, rows("task", task.getId()));
         }
 
         @Test
-        void tdP12b03_demoCustomerOfAClosedRealWorkOrder_200_silentlyUnlinked() {
-            // before P-18 (TD-P12b-03)
+        void tdP12b03_demoCustomerOfAClosedRealWorkOrder_409DemoDataInUse_linkKept() {
+            // before P-18 (TD-P12b-03): 200, the customer unlinked in silence. P-18 (R2): rejected whole
             CommonData data = data();
             Company company = data.o1().company();
             Customer customer = customer(company);
@@ -638,13 +639,15 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
 
             Response response = purge(data.o1().admin());
 
-            assertEquals(200, response.status(), response.toString());
-            assertEquals(0, rows("customer", customer.getId()));
-            assertEquals(List.of(), linked("work_order_customers", "work_order_id", closed.getId(), "customers_id"));
+            assertEquals(409, response.status(), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
+            assertEquals(1, rows("customer", customer.getId()));
+            assertEquals(List.of(customer.getId()), linked("work_order_customers", "work_order_id", closed.getId(),
+                    "customers_id"));
         }
 
         @Test
-        void tdP13_03_approvedDemoRequest_409RecordInUse() {
+        void tdP13_03_approvedDemoRequest_409DemoDataInUse() {
             CommonData data = data();
             Company company = data.o1().company();
             Request request = assetRecords.request(company);
@@ -655,12 +658,12 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("request", request.getId()));
         }
 
         @Test
-        void tdP14_07_readingOfADemoMeter_409RecordInUse() {
+        void tdP14_07_readingOfADemoMeter_409DemoDataInUse() {
             CommonData data = data();
             Meter meter = assetRecords.meter(data.o1().company(), records.asset(data.o1().company()));
             assetRecords.reading(meter, 3);
@@ -669,12 +672,12 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("meter", meter.getId()));
         }
 
         @Test
-        void tdP14_07_realChildOfADemoLocation_409RecordInUse() {
+        void tdP14_07_realChildOfADemoLocation_409DemoDataInUse() {
             CommonData data = data();
             Location parent = records.location(data.o1().company());
             Location child = records.location(data.o1().company());
@@ -684,12 +687,12 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(parent.getId(), reference("location", "parent_location_id", child.getId()));
         }
 
         @Test
-        void dP16_6_demoPartOnARealWorkOrder_409RecordInUse() {
+        void dP16_6_demoPartOnARealWorkOrder_409DemoDataInUse() {
             CommonData data = data();
             Company company = data.o1().company();
             Part part = records.part(company, null);
@@ -702,12 +705,12 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("part", part.getId()));
         }
 
         @Test
-        void dP16_6_demoVendorOnARealPurchaseOrder_409RecordInUse() {
+        void dP16_6_demoVendorOnARealPurchaseOrder_409DemoDataInUse() {
             CommonData data = data();
             Company company = data.o1().company();
             Vendor vendor = vendor(company);
@@ -718,12 +721,12 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(vendor.getId(), reference("purchase_order", "vendor_id", purchaseOrder.getId()));
         }
 
         @Test
-        void p15_demoPreventiveMaintenanceWithARealWorkOrder_409RecordInUse() {
+        void p15_demoPreventiveMaintenanceWithARealWorkOrder_409DemoDataInUse() {
             CommonData data = data();
             Long id = preventiveMaintenance(data, TestRecords.unique("P-18 PM"));
             demo("preventive_maintenance", id);
@@ -733,7 +736,7 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             Response response = purge(data.o1().admin());
 
             assertEquals(409, response.status(), response.toString());
-            assertTrue(response.body().contains("RECORD_IN_USE"), response.toString());
+            assertTrue(response.body().contains("DEMO_DATA_IN_USE"), response.toString());
             assertEquals(1, rows("preventive_maintenance", id));
         }
 
