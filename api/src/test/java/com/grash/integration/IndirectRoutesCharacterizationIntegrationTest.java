@@ -343,18 +343,19 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class LocationImport {
 
         @Test
-        void disabledWorker_accepted() {
-            // before P-18
+        void disabledWorker_rejected() {
+            // before P-18: accepted. P-18 (E-2): the row is rejected and the location does not change
             CommonData data = data();
             Location location = records.location(data.o1().company());
             User technician = disabled(data.o1().technician());
 
-            importService.importLocations(List.of(LocationImportDTO.builder().id(location.getId())
-                    .name(location.getName()).workersEmails(List.of(technician.getEmail())).build()),
-                    data.o1().company());
+            ImportResponse response = importService.importLocations(List.of(LocationImportDTO.builder()
+                    .id(location.getId()).name(location.getName()).workersEmails(List.of(technician.getEmail()))
+                    .build()), data.o1().company());
 
-            assertEquals(List.of(technician.getId()), linked("t_location_user_associations", "id_location",
-                    location.getId(), "id_user"));
+            assertEquals("USER_RETIRED", response.getRejected().get(0).getCode());
+            assertEquals(List.of(), linked("t_location_user_associations", "id_location", location.getId(),
+                    "id_user"));
         }
 
         @Test
@@ -377,21 +378,22 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class MeterImport {
 
         @Test
-        void disabledUserAndArchivedAsset_accepted() {
-            // before P-18
+        void disabledUserAndArchivedAsset_rejected() {
+            // before P-18: accepted. P-18 (E-2): the row is rejected and the meter does not change
             CommonData data = data();
             Company company = data.o1().company();
-            Meter meter = assetRecords.meter(company, records.asset(company));
+            Asset previous = records.asset(company);
+            Meter meter = assetRecords.meter(company, previous);
             User technician = disabled(data.o1().technician());
             Asset asset = archived(records.asset(company));
 
-            importService.importMeters(List.of(MeterImportDTO.builder().id(meter.getId()).name(meter.getName())
-                    .updateFrequency(1).assetName(asset.getName()).usersEmails(List.of(technician.getEmail()))
-                    .build()), company);
+            ImportResponse response = importService.importMeters(List.of(MeterImportDTO.builder().id(meter.getId())
+                    .name(meter.getName()).updateFrequency(1).assetName(asset.getName())
+                    .usersEmails(List.of(technician.getEmail())).build()), company);
 
-            assertEquals(asset.getId(), reference("meter", "asset_id", meter.getId()));
-            assertEquals(List.of(technician.getId()), linked("t_meter_user_associations", "id_meter", meter.getId(),
-                    "id_user"));
+            assertEquals("USER_RETIRED", response.getRejected().get(0).getCode());
+            assertEquals(previous.getId(), reference("meter", "asset_id", meter.getId()));
+            assertEquals(List.of(), linked("t_meter_user_associations", "id_meter", meter.getId(), "id_user"));
         }
 
         @Test
@@ -412,18 +414,18 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class PartImport {
 
         @Test
-        void disabledUser_accepted() {
-            // before P-18 (TD-P16-05)
+        void disabledUser_rejected() {
+            // before P-18: accepted (TD-P16-05). P-18 (E-2): the row is rejected
             CommonData data = data();
             Part part = records.part(data.o1().company(), null);
             User technician = disabled(data.o1().technician());
 
-            importService.importParts(List.of(PartImportDTO.builder().id(part.getId()).name(part.getName())
-                    .assignedToEmails(List.of(technician.getEmail())).build()), data.o1().company(),
-                    data.o1().admin());
+            ImportResponse response = importService.importParts(List.of(PartImportDTO.builder().id(part.getId())
+                    .name(part.getName()).assignedToEmails(List.of(technician.getEmail())).build()),
+                    data.o1().company(), data.o1().admin());
 
-            assertEquals(List.of(technician.getId()), linked("t_part_user_associations", "id_part", part.getId(),
-                    "id_user"));
+            assertEquals("USER_RETIRED", response.getRejected().get(0).getCode());
+            assertEquals(List.of(), linked("t_part_user_associations", "id_part", part.getId(), "id_user"));
         }
 
         @Test
@@ -444,8 +446,8 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class PreventiveMaintenanceImport {
 
         @Test
-        void disabledUserAndArchivedAsset_accepted() {
-            // before P-18
+        void disabledUserAndArchivedAsset_rejected() {
+            // before P-18: accepted. P-18 (E-2): the row is rejected and the preventive maintenance does not change
             CommonData data = data();
             Company company = data.o1().company();
             String name = TestRecords.unique("P-18 PM");
@@ -453,13 +455,13 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
             User technician = disabled(data.o1().technician());
             Asset asset = archived(records.asset(company));
 
-            importService.importPreventiveMaintenances(List.of(pmRow(id, name).primaryUserEmail(technician.getEmail())
-                    .assignedToEmails(List.of(technician.getEmail())).assetName(asset.getName()).build()), company);
+            ImportResponse response = importService.importPreventiveMaintenances(List.of(pmRow(id, name)
+                    .primaryUserEmail(technician.getEmail()).assignedToEmails(List.of(technician.getEmail()))
+                    .assetName(asset.getName()).build()), company);
 
-            assertEquals(technician.getId(), reference("preventive_maintenance", "primary_user_id", id));
-            assertEquals(asset.getId(), reference("preventive_maintenance", "asset_id", id));
-            assertEquals(List.of(technician.getId()), linked("preventive_maintenance_assigned_to",
-                    "preventive_maintenance_id", id, "assigned_to_id"));
+            assertEquals("USER_RETIRED", response.getRejected().get(0).getCode());
+            assertNull(reference("preventive_maintenance", "primary_user_id", id));
+            assertNull(reference("preventive_maintenance", "asset_id", id));
         }
 
         @Test
@@ -505,20 +507,22 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class WorkOrderImport {
 
         @Test
-        void disabledUserAndArchivedAsset_accepted() {
-            // not in E-2 of the order: shown for the design (G-1)
+        void disabledUserAndArchivedAsset_rejected() {
+            // before P-18: accepted. P-18 (D-P18-1): the row is rejected and the work order does not change
             CommonData data = data();
             Company company = data.o1().company();
             WorkOrder workOrder = records.workOrder(company, null, Status.OPEN, false);
             User technician = disabled(data.o1().technician());
             Asset asset = archived(records.asset(company));
 
-            importService.importWorkOrders(List.of(WorkOrderImportDTO.builder().id(workOrder.getId())
-                    .title(workOrder.getTitle()).status("Open").primaryUserEmail(technician.getEmail())
-                    .assetName(asset.getName()).build()), company, data.o1().admin());
+            ImportResponse response = importService.importWorkOrders(List.of(WorkOrderImportDTO.builder()
+                    .id(workOrder.getId()).title(workOrder.getTitle()).status("Open")
+                    .primaryUserEmail(technician.getEmail()).assetName(asset.getName()).build()), company,
+                    data.o1().admin());
 
-            assertEquals(technician.getId(), reference("work_order", "primary_user_id", workOrder.getId()));
-            assertEquals(asset.getId(), reference("work_order", "asset_id", workOrder.getId()));
+            assertEquals("USER_RETIRED", response.getRejected().get(0).getCode());
+            assertNull(reference("work_order", "primary_user_id", workOrder.getId()));
+            assertNull(reference("work_order", "asset_id", workOrder.getId()));
         }
     }
 
