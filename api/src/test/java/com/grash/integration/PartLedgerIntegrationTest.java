@@ -514,6 +514,28 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void auditRecordFailsAfterTheReversal_nothingChanged_noWebhook() throws InterruptedException {
+            // PPB-25: the reversal, the removal and its audit record are committed together; the webhook of the change
+            // of stock leaves only after the commit (C-3)
+            Consumed c = consumed();
+            records.endpoint(c.data().o1().company(), WebhookEvent.PART_QUANTITY_CHANGED);
+            List<String> before = rows(c.part());
+
+            Response response;
+            try (FaultInjector.Fault fault = faults.failOn("audit_log", FaultInjector.Operation.INSERT)) {
+                response = call(delete("/part-quantities/" + c.line()), c.admin());
+                assertEquals(1, fault.hits());
+            }
+            Thread.sleep(2000);
+
+            assertFalse(response.is2xx(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM part_quantity WHERE id = ?", c.line()));
+            assertEquals(7, stock(c.part()));
+            assertEquals(before, rows(c.part()));
+            assertEquals(List.of(), webhookDouble.calls("PART_QUANTITY_CHANGED"));
+        }
+
+        @Test
         void reductionFails_lineKept() {
             Consumed c = consumed();
 
