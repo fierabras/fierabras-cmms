@@ -519,6 +519,9 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
             // of stock leaves only after the commit (C-3)
             Consumed c = consumed();
             records.endpoint(c.data().o1().company(), WebhookEvent.PART_QUANTITY_CHANGED);
+            // the webhooks of the committed consumptions are asynchronous: they may still reach this endpoint
+            Thread.sleep(2000);
+            webhookDouble.reset();
             List<String> before = rows(c.part());
 
             Response response;
