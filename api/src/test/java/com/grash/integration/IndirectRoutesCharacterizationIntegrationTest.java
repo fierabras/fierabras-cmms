@@ -770,8 +770,8 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
     class Automations {
 
         @Test
-        void ca112_deleteWorkflow_200_actionConditionsAndLinksDeleted_withoutAuditRecord() {
-            // before P-18: no DELETE record
+        void ca112_deleteWorkflow_200_actionConditionsAndLinksDeleted_withItsAuditRecord() {
+            // before P-18: no DELETE record. P-18 (E-8): one DELETE record of the WORKFLOW
             CommonData data = data();
             Company company = data.o1().company();
             WorkflowAction action = new WorkflowAction();
@@ -793,12 +793,15 @@ class IndirectRoutesCharacterizationIntegrationTest extends AbstractIntegrationT
                     conditions.get(1)));
             assertEquals(0, count("SELECT count(*) FROM workflow_secondary_conditions WHERE workflow_id = ?",
                     workflow.getId()));
-            assertEquals(0, auditRecords(company));
+            assertEquals(List.of("DELETE WORKFLOW"), jdbc.queryForList("SELECT action || ' ' || entity_type "
+                    + "FROM audit_log WHERE company_id = ?", String.class, company.getId()));
         }
 
         @Test
-        void tdP13_01_rejectedRequest_changedByTheRequestRejectedAutomation() {
-            // before P-18 (TD-P13-01): the automation changes the request already marked as rejected
+        void tdP13_01_rejectedRequest_withTheChangeOfTheRequestRejectedAutomation() {
+            // before P-18 (TD-P13-01): the automation changed the request already marked as rejected. P-18
+            // (D-P18-5): it runs while the request is pending; the final row is the same (the order is proven by
+            // RequestRejectedAutomationIntegrationTest)
             CommonData data = data();
             Company company = data.o1().company();
             Request request = assetRecords.request(company);

@@ -31,6 +31,13 @@ import com.grash.model.Task;
 import com.grash.model.TaskBase;
 import com.grash.model.Vendor;
 import com.grash.model.WorkOrder;
+import com.grash.model.Workflow;
+import com.grash.model.WorkflowAction;
+import com.grash.model.WorkflowCondition;
+import com.grash.model.enums.Priority;
+import com.grash.model.enums.workflow.WFMainCondition;
+import com.grash.model.enums.workflow.WorkOrderAction;
+import com.grash.model.enums.workflow.WorkOrderCondition;
 import com.grash.model.enums.ApprovalStatus;
 import com.grash.model.enums.Status;
 import com.grash.model.User;
@@ -39,6 +46,7 @@ import com.grash.repository.PartQuantityRepository;
 import com.grash.repository.PurchaseOrderRepository;
 import com.grash.repository.TaskRepository;
 import com.grash.repository.VendorRepository;
+import com.grash.repository.WorkflowRepository;
 import com.grash.service.ImportService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -81,6 +89,7 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
     private final PartQuantityRepository partQuantityRepository;
     private final VendorRepository vendorRepository;
     private final PurchaseOrderRepository purchaseOrderRepository;
+    private final WorkflowRepository workflowRepository;
     private final FaultInjector faults;
     private final List<CommonData> created = new ArrayList<>();
 
@@ -90,7 +99,8 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
                                   ImportService importService, CustomerRepository customerRepository,
                                   TaskRepository taskRepository, PartQuantityRepository partQuantityRepository,
                                   VendorRepository vendorRepository,
-                                  PurchaseOrderRepository purchaseOrderRepository) {
+                                  PurchaseOrderRepository purchaseOrderRepository,
+                                  WorkflowRepository workflowRepository) {
         this.organizations = organizations;
         this.records = records;
         this.assetRecords = assetRecords;
@@ -103,6 +113,7 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
         this.partQuantityRepository = partQuantityRepository;
         this.vendorRepository = vendorRepository;
         this.purchaseOrderRepository = purchaseOrderRepository;
+        this.workflowRepository = workflowRepository;
         this.faults = new FaultInjector(jdbc);
     }
 
@@ -1047,6 +1058,88 @@ class IndirectRoutesIntegrationTest extends AbstractIntegrationTest {
 
             assertDemoDataInUse(purge(data.o1().admin()), "WORK_ORDER");
             assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", id));
+        }
+    }
+
+    // =================================================================================================================
+    // B5 · Deleting an automation (E-8)
+    // =================================================================================================================
+
+    private Workflow workflowWithTwoConditions(Company company) {
+        WorkflowAction action = new WorkflowAction();
+        action.setCompany(company);
+        action.setWorkOrderAction(WorkOrderAction.ASSIGN_PRIORITY);
+        action.setPriority(Priority.HIGH);
+        List<WorkflowCondition> conditions = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            WorkflowCondition condition = new WorkflowCondition();
+            condition.setCompany(company);
+            condition.setWorkOrderCondition(WorkOrderCondition.ASSET_IS);
+            conditions.add(condition);
+        }
+        Workflow workflow = new Workflow();
+        workflow.setCompany(company);
+        workflow.setTitle(TestRecords.unique("P-18 workflow"));
+        workflow.setMainCondition(WFMainCondition.WORK_ORDER_CREATED);
+        workflow.setAction(action);
+        workflow.setSecondaryConditions(conditions);
+        return workflowRepository.saveAndFlush(workflow);
+    }
+
+    @Nested
+    class Automations {
+
+        @Test
+        void ca112_deleteWorkflow_200_withActionConditionsAndLinks_recordedWithItsSummary() {
+            // before P-18: deleted without audit record
+            CommonData data = data();
+            Company company = data.o1().company();
+            Workflow workflow = workflowWithTwoConditions(company);
+            Long actionId = workflow.getAction().getId();
+
+            Response response = call(delete("/workflows/" + workflow.getId()), data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM workflow WHERE id = ?", workflow.getId()));
+            assertEquals(0, count("SELECT count(*) FROM workflow_action WHERE id = ?", actionId));
+            assertEquals(0, count("SELECT count(*) FROM workflow_secondary_conditions WHERE workflow_id = ?",
+                    workflow.getId()));
+            Map<String, Object> record = jdbc.queryForMap("SELECT action, source, entity_type, entity_id, entity_name, "
+                    + "actor_id, cascade_rows::text AS cascade FROM audit_log WHERE company_id = ?", company.getId());
+            assertEquals(List.of("DELETE", "API", "WORKFLOW", workflow.getId(), workflow.getTitle(),
+                    data.o1().admin().getId()), List.of(record.get("action"), record.get("source"),
+                    record.get("entity_type"), ((Number) record.get("entity_id")).longValue(),
+                    record.get("entity_name"), ((Number) record.get("actor_id")).longValue()), record.toString());
+            String cascade = (String) record.get("cascade");
+            for (String deleted : List.of("\"workflow_action\": 1", "\"workflow_condition\": 2",
+                    "\"workflow_secondary_conditions\": 2"))
+                assertTrue(cascade.contains(deleted), cascade);
+        }
+
+        @Test
+        void workflowOfAnotherOrganization_403_notDeleted_noRecord() {
+            CommonData data = data();
+            Workflow workflow = workflowWithTwoConditions(data.o2().company());
+
+            Response response = call(delete("/workflows/" + workflow.getId()), data.o1().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM workflow WHERE id = ?", workflow.getId()));
+            assertEquals(0, auditRecords(data.o1().company()));
+            assertEquals(0, auditRecords(data.o2().company()));
+        }
+
+        @Test
+        void technicianWithoutSettings_403_notDeleted() {
+            // passed before P-18
+            CommonData data = data();
+            Workflow workflow = workflowWithTwoConditions(data.o1().company());
+
+            Response response = call(delete("/workflows/" + workflow.getId()), data.o1().technician());
+
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(1, count("SELECT count(*) FROM workflow WHERE id = ?", workflow.getId()));
+            assertEquals(0, auditRecords(data.o1().company()));
         }
     }
 }

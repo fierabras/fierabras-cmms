@@ -5,6 +5,8 @@ import com.grash.exception.CustomException;
 import com.grash.mapper.WorkflowMapper;
 import com.grash.model.*;
 import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.AuditSource;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.repository.WorkflowRepository;
 import com.grash.utils.AuditComparator;
@@ -12,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -28,6 +31,7 @@ public class WorkflowService {
     private final RequestService requestService;
     private final AssetService assetService;
     private final PurchaseOrderService purchaseOrderService;
+    private final DeletionService deletionService;
 
     public Workflow create(Workflow Workflow) {
         return workflowRepository.save(Workflow);
@@ -44,8 +48,23 @@ public class WorkflowService {
         return workflowRepository.findAll();
     }
 
+    /**
+     * Deletes and records nothing: the edition of an automation deletes it and creates it again, which is not a
+     * deletion (PPB-23).
+     */
     public void delete(Long id) {
         workflowRepository.deleteById(id);
+    }
+
+    /**
+     * P-18 (E-8, PPB-23): deletes the automation asked for by {@code actor}, with its action and its conditions, and
+     * records it with the rows that go with it, in one transaction.
+     */
+    @Transactional
+    public void delete(Workflow workflow, User actor) {
+        deletionService.delete(new AuditTarget(EntityType.WORKFLOW, workflow.getId(), null, workflow.getTitle(),
+                        workflow.getCompany().getId()), actor, AuditSource.API, null,
+                () -> workflowRepository.deleteById(workflow.getId()));
     }
 
     public Optional<Workflow> findById(Long id) {

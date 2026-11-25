@@ -123,7 +123,8 @@ public class WorkflowController {
         Optional<Workflow> optionalWorkflow = workflowService.findById(id);
         if (optionalWorkflow.isPresent()) {
             Workflow savedWorkflow = optionalWorkflow.get();
-            workflowService.delete(id);
+            // P-18 (E-8): recorded, with its action and conditions
+            workflowService.delete(savedWorkflow, user);
             return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                     HttpStatus.OK);
         } else throw new CustomException("Workflow not found", HttpStatus.NOT_FOUND);

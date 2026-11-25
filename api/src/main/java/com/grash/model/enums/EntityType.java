@@ -53,6 +53,10 @@ public enum EntityType {
     USER("own_user"),
     VENDOR("vendor"),
     WEBHOOK_ENDPOINT("webhook_endpoint"),
+    /**
+     * An automation, with its action and conditions (P-18).
+     */
+    WORKFLOW("workflow"),
     WORK_ORDER("work_order"),
     WORK_ORDER_CATEGORY("work_order_category"),
     /**
