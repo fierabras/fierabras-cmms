@@ -453,4 +453,59 @@ class CommittedRaceIntegrationTest extends AbstractIntegrationTest {
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE company_id = ? AND action = "
                 + "'RETIRE'", Integer.class, data.o1().company().getId()));
     }
+
+    /**
+     * P-16b: replaces the lines of the purchase order by one line of {@code quantity} of {@code part}.
+     */
+    private Response changeLines(Long purchaseOrder, Long part, double quantity) {
+        return api.call(patch("/part-quantities/purchase-order/" + purchaseOrder)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("[{\"part\":{\"id\":" + part + "},\"quantity\":" + quantity + "}]"), admin);
+    }
+
+    /**
+     * P-16b: the movements of {@code part} as "quantity origin purchase order".
+     */
+    private List<String> movements(Long part) {
+        return jdbc.queryForList("SELECT quantity || ' ' || origin || ' ' || COALESCE(purchase_order_id::text, '-') "
+                + "FROM part_transaction WHERE part_id = ? ORDER BY id", String.class, part);
+    }
+
+    @Test
+    void purchaseOrderLinesChanged_whileItIsBeingApproved_409PurchaseOrderClosed_stockOfTheApprovedLine()
+            throws Exception {
+        // P-16b (E-16, TD-P16-04): the approval holds the purchase order; the change of its lines waits for it and then
+        // reads it approved
+        Long part = records.part(data.o1().company(), null).getId();
+        Long purchaseOrder = pendingPurchaseOrder(part, 3);
+        AtomicReference<Response> approval = new AtomicReference<>();
+
+        Response result = compete(() -> approval.set(approvePurchaseOrder(purchaseOrder)),
+                () -> changeLines(purchaseOrder, part, 5));
+
+        assertEquals(200, approval.get().status(), approval.get().toString());
+        assertEquals(409, result.status(), result.toString());
+        assertTrue(result.body().contains("PURCHASE_ORDER_CLOSED"), result.toString());
+        assertEquals(3, jdbc.queryForObject("SELECT quantity FROM part_quantity WHERE purchase_order_id = ?",
+                Double.class, purchaseOrder));
+        assertEquals(3, stock(part));
+        assertEquals(List.of("3 PURCHASE_ORDER " + purchaseOrder), movements(part));
+    }
+
+    @Test
+    void purchaseOrderApproved_whileItsLinesAreBeingChanged_approvedWithTheNewLine() throws Exception {
+        // P-16b (E-16, TD-P16-04): the change of the lines holds the purchase order; the approval waits for it and then
+        // adds the stock of the line that was saved
+        Long part = records.part(data.o1().company(), null).getId();
+        Long purchaseOrder = pendingPurchaseOrder(part, 3);
+        AtomicReference<Response> lines = new AtomicReference<>();
+
+        Response result = compete(() -> lines.set(changeLines(purchaseOrder, part, 5)),
+                () -> approvePurchaseOrder(purchaseOrder));
+
+        assertEquals(200, lines.get().status(), lines.get().toString());
+        assertEquals(200, result.status(), result.toString());
+        assertEquals(5, stock(part));
+        assertEquals(List.of("5 PURCHASE_ORDER " + purchaseOrder), movements(part));
+    }
 }

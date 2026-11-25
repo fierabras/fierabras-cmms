@@ -124,13 +124,17 @@ public class PartQuantityController {
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (E-16): the lines change with the purchase order locked, as its approval locks it.
+     */
     @PatchMapping("/purchase-order/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public Collection<PartQuantityShowDTO> patchPurchaseOrder(@Parameter(description = "List of part quantities to " +
                                                                       "update for purchase order") @Valid @RequestBody List<PartQuantityCompletePatchDTO> partQuantitiesReq, @PathVariable("id") Long id,
                                                               HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findById(id);
+        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findByIdForUpdate(id);
 
         if (optionalPurchaseOrder.isPresent()) {
             PurchaseOrder savedPurchaseOrder = optionalPurchaseOrder.get();
@@ -208,10 +212,9 @@ public class PartQuantityController {
                 .orElseThrow(() -> new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND));
         // P-12 (E-4): a consumption is not added to a closed or archived work order
         if (workOrder != null) WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
-        // P-16 (E-7): a line is not added to an approved or rejected purchase order
+        // P-16 (E-7): a line is not added to an approved or rejected purchase order; P-16b (E-16): locked
         if (partQuantityReq.getPurchaseOrder() != null)
-            PurchaseOrderStateGuard.check(purchaseOrderService.findById(partQuantityReq.getPurchaseOrder().getId())
-                    .orElseThrow(() -> new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND)));
+            PurchaseOrderStateGuard.check(purchaseOrderService.lock(partQuantityReq.getPurchaseOrder().getId()));
         PartQuantity savedPartQuantity = partQuantityService.create(partQuantityReq);
         if (workOrder != null)
             partService.consumePart(savedPartQuantity.getPart().getId(), savedPartQuantity.getQuantity(), workOrder,
@@ -236,9 +239,9 @@ public class PartQuantityController {
             if (savedPartQuantity.getPart().getUnit() == null) {
                 partQuantity.setQuantity((int) partQuantity.getQuantity());
             }
-            // P-16 (E-7): the line of an approved or rejected purchase order does not change
+            // P-16 (E-7): the line of an approved or rejected purchase order does not change; P-16b (E-16): locked
             if (savedPartQuantity.getPurchaseOrder() != null)
-                PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
+                PurchaseOrderStateGuard.check(purchaseOrderService.lock(savedPartQuantity.getPurchaseOrder().getId()));
             if (savedPartQuantity.getWorkOrder() != null) {
                 // P-12 (E-4): the consumption of a closed or archived work order does not change
                 WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
@@ -275,9 +278,10 @@ public class PartQuantityController {
                             -savedPartQuantity.getQuantity(),
                             savedPartQuantity.getWorkOrder(), user, Helper.getLocale(user));
                 }
-                // P-16 (E-7): the line of an approved or rejected purchase order is not removed
+                // P-16 (E-7): the line of an approved or rejected purchase order is not removed; P-16b (E-16): locked
                 if (savedPartQuantity.getPurchaseOrder() != null)
-                    PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
+                    PurchaseOrderStateGuard.check(
+                            purchaseOrderService.lock(savedPartQuantity.getPurchaseOrder().getId()));
                 partQuantityService.delete(savedPartQuantity, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);

@@ -438,8 +438,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     class PurchaseOrderApproval {
 
         @Test
-        void nonStockPartApprovedDirectly_stockAdded_noMovement() {
-            // CA-PPB-127; before P-16b: nonStock ignored
+        void nonStockPartApprovedDirectly_stockKept_noMovement() {
+            // CA-PPB-127; before P-16b: nonStock ignored, stock 2
             CommonData data = data();
             Part part = nonStockPart(data.o1().company(), 0);
             PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company());
@@ -449,13 +449,13 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                     .param("approved", "true"), data.o1().admin());
 
             assertEquals(200, response.status(), response.toString());
-            assertEquals(2, stock(part));
+            assertEquals(0, stock(part));
             assertEquals(List.of(), movements(part));
         }
 
         @Test
-        void approvedByAWorkflowOnUpdate_approvedWithoutStock_thenNotAnsweredAgain() {
-            // CA-PPB-128 (D-13); before P-16b: the workflow approves without adding the stock
+        void approvedByAWorkflowOnUpdate_stockAdded_thenNotAnsweredAgain() {
+            // CA-PPB-128 (D-13); before P-16b: the workflow approved without adding the stock (0, no movement)
             CommonData data = data();
             User admin = data.o1().admin();
             Part part = part(data.o1().company(), 0);
@@ -468,8 +468,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
 
             assertEquals(200, response.status(), response.toString());
             assertEquals("APPROVED", status(purchaseOrder));
-            assertEquals(0, stock(part));
-            assertEquals(List.of(), movements(part));
+            assertEquals(2, stock(part));
+            assertEquals(List.of("2.0/-/" + admin.getId()), movements(part));
             Response answer = call(patch("/purchase-orders/" + purchaseOrder.getId() + "/respond")
                     .param("approved", "true"), admin);
             assertEquals(409, answer.status(), answer.toString());
@@ -582,7 +582,8 @@ class PartLedgerCharacterizationIntegrationTest extends AbstractIntegrationTest 
             assertEquals(1, count("SELECT count(*) FROM purchase_order WHERE id = ?", purchaseOrder.getId()));
             assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE id = ?", line.getId()));
             assertEquals(3, stock(part));
-            assertEquals(List.of(), movements(part));
+            // P-16b block 4: the approval left its entry; the compensation comes with block 5 (D-3)
+            assertEquals(List.of("3.0/-/" + admin.getId()), movements(part));
         }
 
         @Test

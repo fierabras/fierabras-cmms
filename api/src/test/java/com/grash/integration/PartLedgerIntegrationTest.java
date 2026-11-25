@@ -10,17 +10,23 @@ import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
 import com.grash.model.Company;
+import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.PartTransactionOrigin;
+import com.grash.model.enums.Status;
+import com.grash.model.enums.webhook.WebhookEvent;
+import com.grash.model.enums.workflow.PurchaseOrderAction;
+import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.model.Part;
 import com.grash.model.PartQuantity;
 import com.grash.model.PartTransaction;
 import com.grash.model.PurchaseOrder;
 import com.grash.model.User;
+import com.grash.model.Workflow;
+import com.grash.model.WorkflowAction;
 import com.grash.model.WorkOrder;
-import com.grash.model.enums.ApprovalStatus;
-import com.grash.model.enums.PartTransactionOrigin;
-import com.grash.model.enums.Status;
 import com.grash.repository.PartQuantityRepository;
 import com.grash.repository.PurchaseOrderRepository;
+import com.grash.repository.WorkflowRepository;
 import com.grash.service.ImportService;
 import com.grash.service.PartLedgerService;
 import com.grash.service.PartLedgerService.Movement;
@@ -40,6 +46,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -69,6 +76,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
     final TransactionTemplate transaction;
     final FaultInjector faults;
     final ImportService importService;
+    final WorkflowRepository workflowRepository;
     final List<CommonData> created = new ArrayList<>();
 
     @Autowired
@@ -77,7 +85,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
                               PartQuantityRepository partQuantityRepository,
                               PurchaseOrderRepository purchaseOrderRepository, PartLedgerService ledger,
                               EntityManager em, PlatformTransactionManager transactionManager,
-                              ImportService importService) {
+                              ImportService importService, WorkflowRepository workflowRepository) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -90,6 +98,7 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
         this.transaction = new TransactionTemplate(transactionManager);
         this.faults = new FaultInjector(jdbc);
         this.importService = importService;
+        this.workflowRepository = workflowRepository;
     }
 
     @AfterEach
@@ -799,6 +808,150 @@ class PartLedgerIntegrationTest extends AbstractIntegrationTest {
 
             assertEquals(0, stock(part));
             assertEquals(List.of(), movements(part));
+        }
+    }
+
+    // =====================================================================================================
+    // Block 4 · Purchase orders: one approval by every route (PPB-30, D-13, D-P16b-2, D-P16b-3, C-2, C-3)
+    // =====================================================================================================
+
+    @Nested
+    class PurchaseOrders {
+
+        Workflow approvingWorkflow(Company company, WFMainCondition main) {
+            WorkflowAction action = new WorkflowAction();
+            action.setCompany(company);
+            action.setPurchaseOrderAction(PurchaseOrderAction.APPROVE);
+            Workflow workflow = new Workflow();
+            workflow.setCompany(company);
+            workflow.setTitle(TestRecords.unique("P-16b workflow"));
+            workflow.setMainCondition(main);
+            workflow.setAction(action);
+            workflow.setSecondaryConditions(new ArrayList<>());
+            return workflowRepository.saveAndFlush(workflow);
+        }
+
+        String status(Long purchaseOrder) {
+            return ApprovalStatus.values()[jdbc.queryForObject("SELECT status FROM purchase_order WHERE id = ?",
+                    Integer.class, purchaseOrder)].name();
+        }
+
+        Response respond(PurchaseOrder purchaseOrder, User user) {
+            return call(patch("/purchase-orders/" + purchaseOrder.getId() + "/respond").param("approved", "true"),
+                    user);
+        }
+
+        @Test
+        void ca082_approvedDirectly_oneEntryPerLineWithThePurchaseOrder() {
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part p8 = part(data.o1().company(), 0);
+            Part p9 = part(data.o1().company(), 1);
+            PurchaseOrder po5 = purchaseOrder(data.o1().company());
+            line(p8, null, po5, 4);
+            line(p9, null, po5, 2);
+
+            Response response = respond(po5, admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("APPROVED", status(po5.getId()));
+            assertEquals(4, stock(p8));
+            assertEquals(3, stock(p9));
+            assertEquals(List.of(movement(4, PartTransactionOrigin.PURCHASE_ORDER, null, po5, admin)),
+                    movements(p8));
+            assertEquals(List.of(movement(2, PartTransactionOrigin.PURCHASE_ORDER, null, po5, admin)),
+                    movements(p9));
+            assertStockIsTheSumOfItsMovements(p8);
+            assertStockIsTheSumOfItsMovements(p9);
+        }
+
+        @Test
+        void ca127_nonStockPartApproved_noChange_noMovement_otherLinesAdded() {
+            CommonData data = data();
+            Part p11 = part(data.o1().company(), 0);
+            jdbc.update("UPDATE part SET non_stock = true WHERE id = ?", p11.getId());
+            Part stocked = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company());
+            line(p11, null, purchaseOrder, 2);
+            line(stocked, null, purchaseOrder, 1);
+
+            assertEquals(200, respond(purchaseOrder, data.o1().admin()).status());
+
+            assertEquals(0, stock(p11));
+            assertEquals(List.of(), movements(p11));
+            assertEquals(1, stock(stocked));
+        }
+
+        @Test
+        void ca128_createdWithALineAndApprovedByAWorkflow_sameEffectAsTheDirectRoute_webhookAfterCommit() {
+            // D-P16b-2 (b), C-3; before P-16b: approved on creation without lines and without stock
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part p8 = part(data.o1().company(), 0);
+            approvingWorkflow(data.o1().company(), WFMainCondition.PURCHASE_ORDER_CREATED);
+            records.endpoint(data.o1().company(), WebhookEvent.PART_QUANTITY_CHANGED);
+
+            Response response = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16b PO6")
+                    + "\",\"partQuantities\":[{\"part\":{\"id\":" + p8.getId() + "},\"quantity\":2}]}", admin);
+
+            assertEquals(200, response.status(), response.toString());
+            JsonNode body = json(response);
+            Long po6 = body.get("id").asLong();
+            assertEquals("APPROVED", body.get("status").asText());
+            assertEquals("APPROVED", status(po6));
+            assertEquals(1, body.get("partQuantities").size());
+            assertEquals(2, stock(p8));
+            assertEquals(List.of(movement(2, PartTransactionOrigin.PURCHASE_ORDER, null,
+                    em.find(PurchaseOrder.class, po6), admin)), movements(p8));
+            webhookDouble.awaitCalls("PART_QUANTITY_CHANGED", 1, Duration.ofSeconds(10));
+        }
+
+        @Test
+        void createdWithoutLines_pendingAsBefore() {
+            CommonData data = data();
+
+            Response response = send(post("/purchase-orders"), "{\"name\":\"" + TestRecords.unique("P-16b PO")
+                    + "\"}", data.o1().admin());
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("PENDING", json(response).get("status").asText());
+            assertEquals(0, json(response).get("partQuantities").size());
+        }
+
+        @Test
+        void createdWithALineOfAnotherOrganization_403_nothingCreated() {
+            CommonData data = data();
+            Part foreign = part(data.o2().company(), 0);
+            String name = TestRecords.unique("P-16b PO");
+
+            Response response = send(post("/purchase-orders"), "{\"name\":\"" + name + "\",\"partQuantities\":"
+                    + "[{\"part\":{\"id\":" + foreign.getId() + "},\"quantity\":2}]}", data.o1().admin());
+
+            assertEquals(403, response.status(), response.toString());
+            assertEquals(0, count("SELECT count(*) FROM purchase_order WHERE name = ?", name));
+            assertEquals(0, count("SELECT count(*) FROM part_quantity WHERE part_id = ?", foreign.getId()));
+        }
+
+        @Test
+        void approvedByAWorkflowOnUpdate_stockAdded_thenNotAnsweredAgain() {
+            // D-13; before P-16b: approved without stock
+            CommonData data = data();
+            User admin = data.o1().admin();
+            Part part = part(data.o1().company(), 0);
+            PurchaseOrder purchaseOrder = purchaseOrder(data.o1().company());
+            line(part, null, purchaseOrder, 2);
+            approvingWorkflow(data.o1().company(), WFMainCondition.PURCHASE_ORDER_UPDATED);
+
+            Response response = send(patch("/purchase-orders/" + purchaseOrder.getId()), "{\"name\":\""
+                    + purchaseOrder.getName() + "\"}", admin);
+
+            assertEquals(200, response.status(), response.toString());
+            assertEquals("APPROVED", json(response).get("status").asText());
+            assertEquals(2, stock(part));
+            assertEquals(List.of(movement(2, PartTransactionOrigin.PURCHASE_ORDER, null, purchaseOrder, admin)),
+                    movements(part));
+            assertEquals(409, respond(purchaseOrder, admin).status());
+            assertEquals(2, stock(part));
         }
     }
 }

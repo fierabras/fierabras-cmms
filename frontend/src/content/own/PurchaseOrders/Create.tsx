@@ -8,7 +8,7 @@ import {
   addPurchaseOrder,
   respondPurchaseOrder
 } from '../../../slices/purchaseOrder';
-import { useDispatch } from '../../../store';
+import store, { useDispatch } from '../../../store';
 import Form from '../components/form';
 import * as Yup from 'yup';
 import { phoneRegExp } from '../../../utils/validators';
@@ -20,7 +20,6 @@ import useAuth from '../../../hooks/useAuth';
 import { PermissionEntity } from '../../../models/owns/role';
 import FeatureErrorMessage from '../components/FeatureErrorMessage';
 import { PlanFeature } from '../../../models/owns/subscriptionPlan';
-import { editPOPartQuantities } from '../../../slices/partQuantity';
 
 function CreatePurchaseOrder() {
   const { t }: { t: any } = useTranslation();
@@ -263,19 +262,22 @@ function CreatePurchaseOrder() {
                       values,
                       'approveOnSubmit'
                     );
+                    // P-16b: the lines go with the purchase order, so a workflow that approves it on creation
+                    // sees them; it is approved on submit only while it is still pending
                     return dispatch(addPurchaseOrder(values))
                       .then((id: number) => {
-                        dispatch(
-                          editPOPartQuantities(id, values.partQuantities)
+                        const created = store
+                          .getState()
+                          .purchaseOrders.purchaseOrders.content.find(
+                            (purchaseOrder) => purchaseOrder.id === id
+                          );
+                        if (
+                          values.approveOnSubmit &&
+                          created?.status === 'PENDING'
                         )
-                          .then(() => {
-                            if (values.approveOnSubmit) {
-                              dispatch(respondPurchaseOrder(id, true));
-                            }
-                          })
-                          .then(onCreationSuccess)
-                          .catch(onCreationFailure);
+                          return dispatch(respondPurchaseOrder(id, true));
                       })
+                      .then(onCreationSuccess)
                       .catch(onCreationFailure);
                   }}
                 />

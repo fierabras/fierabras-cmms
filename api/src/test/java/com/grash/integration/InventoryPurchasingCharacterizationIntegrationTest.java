@@ -842,7 +842,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
         }
 
         @Test
-        void pendingApproved_200_stockAdded_noMovement() {
+        void pendingApproved_200_stockAdded_withAnEntry() {
+            // before P-16b: no movement; P-16b (CA-PPB-082): an entry with origin PURCHASE_ORDER per line
             CommonData data = data();
             Company company = data.o1().company();
             Part part = part(company, 1);
@@ -854,8 +855,8 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
             assertEquals(200, response.status(), response.toString());
             assertEquals("APPROVED", status(purchaseOrder.getId()));
             assertEquals(5, stock(part));
-            assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?", part.getId()),
-                    "no movement (P-16b)");
+            assertEquals(1, count("SELECT count(*) FROM part_transaction WHERE part_id = ? "
+                    + "AND origin = 'PURCHASE_ORDER' AND purchase_order_id = ?", part.getId(), purchaseOrder.getId()));
         }
 
         @Test

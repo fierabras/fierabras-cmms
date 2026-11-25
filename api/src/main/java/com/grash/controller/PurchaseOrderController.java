@@ -2,20 +2,17 @@ package com.grash.controller;
 
 import com.grash.advancedsearch.SearchCriteria;
 import com.grash.dto.PurchaseOrderPatchDTO;
+import com.grash.dto.PurchaseOrderPostDTO;
 import com.grash.dto.PurchaseOrderShowDTO;
 import com.grash.dto.SuccessResponse;
 import com.grash.exception.CustomException;
-import com.grash.mapper.PartMapper;
 import com.grash.mapper.PartQuantityMapper;
 import com.grash.mapper.PurchaseOrderMapper;
 import com.grash.factory.MailServiceFactory;
 import com.grash.model.*;
 import com.grash.model.enums.*;
-import com.grash.model.enums.webhook.PartField;
-import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.model.enums.workflow.WFMainCondition;
 import com.grash.service.*;
-import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,7 +30,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -52,11 +48,8 @@ public class PurchaseOrderController {
     private final PartQuantityMapper partQuantityMapper;
     private final PurchaseOrderMapper purchaseOrderMapper;
     private final MailServiceFactory mailServiceFactory;
-    private final PartService partService;
     private final NotificationService notificationService;
     private final WorkflowService workflowService;
-    private final WebhookDispatchService webhookDispatchService;
-    private final PartMapper partMapper;
 
     @Value("${frontend.url}")
     private String frontendUrl;
@@ -94,20 +87,26 @@ public class PurchaseOrderController {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (D-P16b-2): the lines, when sent, are created with the purchase order, before its workflows run, so that
+     * a workflow that approves it on creation adds their stock as the direct route does.
+     */
     @PostMapping("")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
-    PurchaseOrderShowDTO create(@Parameter(description = "Purchase order data to create") @Valid @RequestBody PurchaseOrder purchaseOrderReq,
+    PurchaseOrderShowDTO create(@Parameter(description = "Purchase order data to create, optionally with its lines")
+                                @Valid @RequestBody PurchaseOrderPostDTO purchaseOrderReq,
                                 HttpServletRequest req) {
         User user = userService.whoami(req);
         if (user.getRole().getCreatePermissions().contains(PermissionEntity.PURCHASE_ORDERS)
                 && user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.PURCHASE_ORDER)) {
             // P-16 (D-P16-5): a purchase order is born pending; it is closed only by answering it
             purchaseOrderReq.setStatus(ApprovalStatus.PENDING);
-            PurchaseOrder savedPurchaseOrder = purchaseOrderService.create(purchaseOrderReq);
+            PurchaseOrder savedPurchaseOrder = purchaseOrderService.create(
+                    purchaseOrderMapper.fromPostDto(purchaseOrderReq), purchaseOrderReq.getPartQuantities());
             Collection<Workflow> workflows =
                     workflowService.findByMainConditionAndCompany(WFMainCondition.PURCHASE_ORDER_CREATED,
                             user.getCompany().getId());
-            workflows.forEach(workflow -> workflowService.runPurchaseOrder(workflow, savedPurchaseOrder));
+            workflows.forEach(workflow -> workflowService.runPurchaseOrder(workflow, savedPurchaseOrder, user));
             PurchaseOrderShowDTO result = setPartQuantities(purchaseOrderMapper.toShowDto(savedPurchaseOrder));
             double cost =
                     result.getPartQuantities().stream().mapToDouble(partQuantityShowDTO -> partQuantityShowDTO.getQuantity() * partQuantityShowDTO.getPart().getCost()).sum();
@@ -150,7 +149,7 @@ public class PurchaseOrderController {
                 Collection<Workflow> workflows =
                         workflowService.findByMainConditionAndCompany(WFMainCondition.PURCHASE_ORDER_UPDATED,
                                 user.getCompany().getId());
-                workflows.forEach(workflow -> workflowService.runPurchaseOrder(workflow, patchedPurchaseOrder));
+                workflows.forEach(workflow -> workflowService.runPurchaseOrder(workflow, patchedPurchaseOrder, user));
                 return setPartQuantities(purchaseOrderMapper.toShowDto(patchedPurchaseOrder));
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND);
@@ -158,7 +157,8 @@ public class PurchaseOrderController {
 
     /**
      * P-16 (PPB-05, D-1): answers a pending purchase order in one transaction, with the purchase order locked. An
-     * approved or rejected purchase order is not answered again: 409 PURCHASE_ORDER_CLOSED.
+     * approved or rejected purchase order is not answered again: 409 PURCHASE_ORDER_CLOSED. P-16b (PPB-30): the
+     * approval is the same as that of a workflow ({@link PurchaseOrderService#approve}).
      */
     @PatchMapping("/{id}/respond")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
@@ -172,21 +172,10 @@ public class PurchaseOrderController {
             PurchaseOrder savedPurchaseOrder = optionalPurchaseOrder.get();
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.PURCHASE_ORDERS)) {
                 PurchaseOrderStateGuard.check(savedPurchaseOrder);
-                if (approved) {
-                    Collection<PartQuantity> partQuantities =
-                            partQuantityService.findByPurchaseOrder(savedPurchaseOrder.getId());
-                    partQuantities.forEach(partQuantity -> {
-                        Part part = partQuantity.getPart();
-                        double previousQuantity = part.getQuantity();
-                        part.setQuantity(part.getQuantity() + partQuantity.getQuantity());
-                        partService.save(part);
-
-                        // Dispatch webhook for part quantity change from purchase order, once it is committed
-                        AfterCommit.run(() -> dispatchPartQuantityChangeWebhook(part, previousQuantity,
-                                part.getQuantity(), partQuantity, savedPurchaseOrder, user.getCompany()));
-                    });
-                }
-                savedPurchaseOrder.setStatus(approved ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED);
+                if (approved)
+                    return setPartQuantities(purchaseOrderMapper.toShowDto(
+                            purchaseOrderService.approve(savedPurchaseOrder, user)));
+                savedPurchaseOrder.setStatus(ApprovalStatus.REJECTED);
                 return setPartQuantities(purchaseOrderMapper.toShowDto(purchaseOrderService.save(savedPurchaseOrder)));
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND);
@@ -217,24 +206,6 @@ public class PurchaseOrderController {
         Collection<PartQuantity> partQuantities = partQuantityService.findByPurchaseOrder(purchaseOrderShowDTO.getId());
         purchaseOrderShowDTO.setPartQuantities(partQuantities.stream().map(partQuantityMapper::toShowDto).collect(Collectors.toList()));
         return purchaseOrderShowDTO;
-    }
-
-    private void dispatchPartQuantityChangeWebhook(Part part, double previousQuantity, double newQuantity,
-                                                   PartQuantity partQuantity, PurchaseOrder purchaseOrder,
-                                                   Company company) {
-        Map<String, Object> webhookPayload = new HashMap<>();
-        webhookPayload.put("partId", part.getId());
-        webhookPayload.put("partName", part.getName());
-        webhookPayload.put("previousQuantity", previousQuantity);
-        webhookPayload.put("newQuantity", newQuantity);
-        webhookPayload.put("changedAmount", partQuantity.getQuantity());
-        webhookPayload.put("purchaseOrderId", purchaseOrder.getId());
-        webhookPayload.put("purchaseOrderName", purchaseOrder.getName());
-        webhookPayload.put("partQuantityId", partQuantity.getId());
-        Collection<PartField> changedFields = Collections.singletonList(PartField.QUANTITY);
-        Object serializedPart = partMapper.toShowDto(part);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.PART_QUANTITY_CHANGED, webhookPayload,
-                "changedPart", serializedPart, null, null, null, null, changedFields);
     }
 }
 
