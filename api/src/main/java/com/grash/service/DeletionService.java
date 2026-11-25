@@ -104,9 +104,16 @@ public class DeletionService {
      * {@code table} and {@code column} are constants of the caller, never input.
      */
     public boolean isLinkedToRetiredUser(String table, String column, Long id) {
+        return isLinkedToRetiredUser(table, column, "id_user", id);
+    }
+
+    /**
+     * P-15: the same, for an association whose user column is {@code userColumn}, a constant of the caller.
+     */
+    public boolean isLinkedToRetiredUser(String table, String column, String userColumn, Long id) {
         return (Boolean) entityManager.createNativeQuery("SELECT EXISTS (SELECT 1 FROM " + table + " a JOIN own_user u "
-                + "ON u.id = a.id_user WHERE a." + column + " = ?1 AND u.enabled = false)").setParameter(1, id)
-                .getSingleResult();
+                + "ON u.id = a." + userColumn + " WHERE a." + column + " = ?1 AND u.enabled = false)")
+                .setParameter(1, id).getSingleResult();
     }
 
     private Map<String, Long> deletedRows() {

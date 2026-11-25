@@ -210,7 +210,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
     class Deletion {
 
         @Test
-        void withoutWorkOrders_200_scheduleAndTasksGone_jobsStopped_noAuditRecord() throws SchedulerException {
+        void withoutWorkOrders_200_scheduleAndTasksGone_jobsStopped_recorded() throws SchedulerException {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -228,7 +228,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
                     () -> assertEquals(0, count("SELECT count(*) FROM task WHERE preventive_maintenance_id = ?", pm)),
                     () -> assertFalse(jobExists(schedule)),
                     // P-15 (E-1): before, no audit record
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("DELETE PREVENTIVE_MAINTENANCE"), audit(data)));
         }
 
         @Test
@@ -248,7 +248,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
         }
 
         @Test
-        void a2_withoutSchedule_500_kept() {
+        void a2_withoutSchedule_200_deleted() {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -259,12 +259,12 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
 
             // P-15 (E-4, A-2): before, a NullPointerException on the schedule (500)
             assertAll(
-                    () -> assertEquals(500, response.status(), response.toString()),
-                    () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)));
+                    () -> assertEquals(200, response.status(), response.toString()),
+                    () -> assertEquals(0, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)));
         }
 
         @Test
-        void tdP1706_deletionFails_preventiveMaintenanceKept_withoutItsJobs() throws SchedulerException {
+        void tdP1706_deletionFails_preventiveMaintenanceKept_withItsJobs() throws SchedulerException {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             long schedule = scheduleOf(pm);
@@ -279,7 +279,7 @@ class PreventiveMaintenanceCharacterizationIntegrationTest extends AbstractInteg
             assertAll(
                     () -> assertNotEquals(200, failed.status(), failed.toString()),
                     () -> assertEquals(1, count("SELECT count(*) FROM preventive_maintenance WHERE id = ?", pm)),
-                    () -> assertFalse(jobExists(schedule)));
+                    () -> assertTrue(jobExists(schedule)));
         }
     }
 

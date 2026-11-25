@@ -44,6 +44,10 @@ import static com.grash.utils.Consts.usageBasedLicenseLimits;
 @RequiredArgsConstructor
 @Slf4j
 public class PreventiveMaintenanceService {
+    public static final String PREVENTIVE_MAINTENANCE_IN_USE = "PREVENTIVE_MAINTENANCE_IN_USE";
+    private static final String PREVENTIVE_MAINTENANCE_IN_USE_MESSAGE = "This preventive maintenance is used by "
+            + "other records. Pause it instead of deleting it";
+
     private final PreventiveMaintenanceRepository preventiveMaintenanceRepository;
     private final EntityManager em;
     private final CustomSequenceService customSequenceService;
@@ -155,13 +159,29 @@ public class PreventiveMaintenanceService {
     }
 
     /**
-     * P-17 (C-4): the images of its tasks go with it in cascade; their stored objects are deleted after the commit.
-     * A cited image answers 409 (C-1). No rule nor audit record yet (P-15).
+     * Deletes the preventive maintenance and records it, in one transaction (P-15, E-1). One that generated work
+     * orders, or is assigned to a disabled user, is not deleted: 409 PREVENTIVE_MAINTENANCE_IN_USE with every blocking
+     * type (PPB-02, D-P15-4); it is paused instead. Its schedule, tasks, custom field values and associations go with
+     * it; the images of its tasks too, and their stored objects after the commit (P-17, C-4). The caller stops its
+     * jobs only after the commit (TD-P17-06).
      */
     @Transactional
-    public void delete(Long id) {
+    public void delete(PreventiveMaintenance preventiveMaintenance, User actor) {
+        Long id = preventiveMaintenance.getId();
         List<String> images = fileService.objectsOfPreventiveMaintenance(id);
-        deletionService.deleteUnrecorded(() -> preventiveMaintenanceRepository.deleteById(id));
+        deletionService.delete(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, id,
+                        preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                        preventiveMaintenance.getCompany().getId()), actor, AuditSource.API,
+                DeletionRule.inUse(PREVENTIVE_MAINTENANCE_IN_USE, PREVENTIVE_MAINTENANCE_IN_USE_MESSAGE)
+                        .blockedBy(EntityType.WORK_ORDER,
+                                () -> deletionService.isCited("work_order", "parent_preventive_maintenance_id", id))
+                        .blockedBy(EntityType.WORK_ORDER_HISTORY,
+                                () -> deletionService.isCitedByAnEarlierRevision("parent_preventive_maintenance_id",
+                                        id))
+                        .blockedBy(EntityType.USER,
+                                () -> deletionService.isLinkedToRetiredUser("preventive_maintenance_assigned_to",
+                                        "preventive_maintenance_id", "assigned_to_id", id)),
+                () -> preventiveMaintenanceRepository.deleteById(id));
         fileService.deleteObjectsAfterCommit(images);
     }
 

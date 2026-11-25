@@ -189,8 +189,12 @@ public class PreventiveMaintenanceController {
             PreventiveMaintenance savedPreventiveMaintenance = optionalPreventiveMaintenance.get();
             if (user.getId().equals(savedPreventiveMaintenance.getCreatedBy())
                     || user.getRole().getDeleteOtherPermissions().contains(PermissionEntity.PREVENTIVE_MAINTENANCES)) {
-                scheduleService.stopScheduleJobs(optionalPreventiveMaintenance.get().getSchedule().getId());
-                preventiveMaintenanceService.delete(id);
+                // P-15 (E-4, A-2): a preventive maintenance without schedule (earlier data) is deleted too
+                Schedule schedule = savedPreventiveMaintenance.getSchedule();
+                Long scheduleId = schedule == null ? null : schedule.getId();
+                preventiveMaintenanceService.delete(savedPreventiveMaintenance, user);
+                // P-15 (E-1, TD-P17-06): the jobs stop only once the deletion is committed; a 409 keeps them
+                if (scheduleId != null) scheduleService.stopScheduleJobs(scheduleId);
                 return new ResponseEntity(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Access Denied", HttpStatus.FORBIDDEN);
