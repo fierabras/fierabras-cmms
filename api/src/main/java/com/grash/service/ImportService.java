@@ -4,6 +4,7 @@ import com.grash.dto.imports.*;
 import com.grash.exception.ConflictException;
 import com.grash.exception.CustomException;
 import com.grash.model.*;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.Status;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import jakarta.transaction.Transactional;
 
 import java.util.*;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +23,7 @@ public class ImportService {
     private final AssetService assetService;
     private final LocationService locationService;
     private final PartService partService;
+    private final PartLedgerService partLedgerService;
     private final MeterService meterService;
     private final WorkOrderService workOrderService;
     private final PreventiveMaintenanceService preventiveMaintenanceService;
@@ -265,8 +268,13 @@ public class ImportService {
                 .build();
     }
 
+    /**
+     * Creates or updates the parts. P-16b (PPB-30, C-1): the stock of each one is set through its ledger, with a
+     * movement with origin IMPORT by {@code actor} (who asked for the import) for the difference; without
+     * difference, or for a part without stock control, nothing is recorded.
+     */
     @Transactional
-    public ImportResponse importParts(List<PartImportDTO> toImport, Company company) {
+    public ImportResponse importParts(List<PartImportDTO> toImport, Company company, User actor) {
         // Check for duplicate non-null barcodes
         Set<String> seenBarcodes = new java.util.HashSet<>();
         for (PartImportDTO dto : toImport) {
@@ -312,7 +320,15 @@ public class ImportService {
         }
 
         if (!partsToSave.isEmpty()) {
-            partService.saveAll(partsToSave);
+            List<Part> savedParts = partService.saveAll(partsToSave);
+            // the parts are locked in the order of their identifiers
+            IntStream.range(0, savedParts.size()).boxed()
+                    .sorted(Comparator.comparing(i -> savedParts.get(i).getId()))
+                    .forEach(i -> {
+                        Part part = partLedgerService.lock(savedParts.get(i).getId());
+                        partLedgerService.record(part, toImport.get(i).getQuantity() - part.getQuantity(),
+                                PartTransactionOrigin.IMPORT, PartLedgerService.Movement.by(actor));
+                    });
         }
 
         return ImportResponse.builder()

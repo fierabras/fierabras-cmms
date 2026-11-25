@@ -50,9 +50,9 @@ public class PartAnalyticsController {
             Collection<PartTransaction> partTransactions =
                     partTransactionService.findConsumptionsByCompanyAndCreatedAtBetween(resolvedCompanyId,
                             dateRange.getStart(), dateRange.getEnd());
-            double totalConsumptionCost = partTransactions.stream().mapToDouble(PartTransaction::getCost).sum();
+            double totalConsumptionCost = partTransactions.stream().mapToDouble(PartTransaction::getConsumedCost).sum();
             int consumedCount = partTransactions.stream()
-                    .filter(partTransaction -> partTransaction.getPart().getUnit() == null).mapToInt(partTransaction -> (int) partTransaction.getQuantity()).sum();
+                    .filter(partTransaction -> partTransaction.getPart().getUnit() == null).mapToInt(partTransaction -> (int) partTransaction.getConsumedQuantity()).sum();
 
             return ResponseEntity.ok(PartStats.builder()
                     .consumedCount(consumedCount)
@@ -83,7 +83,7 @@ public class PartAnalyticsController {
                     .collect(Collectors.toCollection(() -> new TreeSet<>(Comparator.comparingLong(Part::getId)))));
             List<PartConsumptionsByPart> result = parts.stream().map(part -> {
                 double cost =
-                        partTransactions.stream().filter(partTransaction -> partTransaction.getPart().getId().equals(part.getId())).mapToDouble(PartTransaction::getCost).sum();
+                        partTransactions.stream().filter(partTransaction -> partTransaction.getPart().getId().equals(part.getId())).mapToDouble(PartTransaction::getConsumedCost).sum();
                 return PartConsumptionsByPart.builder()
                         .id(part.getId())
                         .name(part.getName())
@@ -147,7 +147,7 @@ public class PartAnalyticsController {
             for (PartCategory category : partCategories) {
                 double cost =
                         partTransactions.stream().filter(partTransaction -> partTransaction.getPart().getCategory() != null
-                                && category.getId().equals(partTransaction.getPart().getCategory().getId())).mapToDouble(PartTransaction::getCost).sum();
+                                && category.getId().equals(partTransaction.getPart().getCategory().getId())).mapToDouble(PartTransaction::getConsumedCost).sum();
                 result.add(PartConsumptionByCategory.builder()
                         .cost(cost)
                         .name(category.getName())
@@ -187,7 +187,7 @@ public class PartAnalyticsController {
             for (WorkOrderCategory category : workOrderCategories) {
                 double cost =
                         partTransactions.stream().filter(partTransaction -> partTransaction.getWorkOrder().getCategory() != null
-                                && category.getId().equals(partTransaction.getWorkOrder().getCategory().getId())).mapToDouble(PartTransaction::getCost).sum();
+                                && category.getId().equals(partTransaction.getWorkOrder().getCategory().getId())).mapToDouble(PartTransaction::getConsumedCost).sum();
                 result.add(PartConsumptionByWOCategory.builder()
                         .cost(cost)
                         .name(category.getName())
@@ -229,7 +229,7 @@ public class PartAnalyticsController {
                         partTransactionService.findConsumptionsByCompanyAndCreatedAtBetween(resolvedCompanyId
                                 , Helper.localDateToDate(currentDate),
                                 Helper.localDateToDate(nextDate));
-                double cost = partTransactions.stream().mapToDouble(PartTransaction::getCost).sum();
+                double cost = partTransactions.stream().mapToDouble(PartTransaction::getConsumedCost).sum();
                 result.add(PartConsumptionsByMonth.builder()
                         .cost(cost)
                         .date(Helper.localDateToDate(currentDate)).build());

@@ -117,7 +117,7 @@ public class PartController {
         if (optionalPart.isPresent()) {
             if (user.getRole().getEditOtherPermissions().contains(PermissionEntity.PARTS_AND_MULTIPARTS) ||
                     user.getId().equals(optionalPart.get().getCreatedBy())) {
-                partService.restockPart(id, partRestockDTO.getQuantity(), partRestockDTO.getDescription());
+                partService.restockPart(id, partRestockDTO.getQuantity(), partRestockDTO.getDescription(), user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Restocked successfully"), HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("Part not found", HttpStatus.NOT_FOUND);
@@ -147,7 +147,7 @@ public class PartController {
                         throw new CustomException("Part with same barcode exists", HttpStatus.NOT_ACCEPTABLE);
                     }
                 }
-                Part patchedPart = partService.update(id, part, user.getCompany());
+                Part patchedPart = partService.update(id, part, user.getCompany(), user);
                 Collection<Workflow> workflows =
                         workflowService.findByMainConditionAndCompany(WFMainCondition.PART_UPDATED,
                                 user.getCompany().getId());

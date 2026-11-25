@@ -271,4 +271,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_23_1795481141_purchase_order_category_and_vendor_references_no_action.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_24_1795567540_part_ledger.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

@@ -12,6 +12,10 @@ import org.mapstruct.Mappings;
 
 @Mapper(componentModel = "spring", uses = {CustomerMapper.class, VendorMapper.class, UserMapper.class, TeamMapper.class, FileMapper.class, CustomFieldValueMapper.class})
 public interface PartMapper {
+    /**
+     * P-16b (PPB-30): the stock is never mapped; only {@code PartLedgerService} changes it.
+     */
+    @Mapping(target = "quantity", ignore = true)
     Part updatePart(@MappingTarget Part entity, PartPatchDTO dto);
 
     @Mappings({})
@@ -23,5 +27,6 @@ public interface PartMapper {
     @Mapping(target = "image", source = "image", qualifiedByName = "toThumbnailDto")
     PartShowDTO toShowDto(Part model);
 
+    @Mapping(target = "quantity", ignore = true)
     Part fromPostDto(PartPostDTO dto);
 }

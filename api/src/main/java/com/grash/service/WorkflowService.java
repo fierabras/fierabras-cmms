@@ -137,14 +137,20 @@ public class WorkflowService {
         }
     }
 
-    public void runPurchaseOrder(Workflow workflow, PurchaseOrder purchaseOrder) {
+    /**
+     * Runs the action of the workflow on the purchase order, by {@code actor} (who made the request that triggered
+     * it). P-16b (D-13, PPB-30): APPROVE approves it as the direct route does, stock and movements included.
+     */
+    public void runPurchaseOrder(Workflow workflow, PurchaseOrder purchaseOrder, User actor) {
         if (workflow.getSecondaryConditions().stream().allMatch(workflowCondition -> workflowCondition.isMetForPurchaseOrder(purchaseOrder))) {
             WorkflowAction action = workflow.getAction();
             switch (action.getPurchaseOrderAction()) {
                 case APPROVE:
                     if (skipsClosedPurchaseOrder(workflow, purchaseOrder)) return;
-                    purchaseOrder.setStatus(ApprovalStatus.APPROVED);
-                    break;
+                    // the approval saves the purchase order itself; saving this copy would undo it
+                    if (purchaseOrderService.approveById(purchaseOrder.getId(), actor))
+                        purchaseOrder.setStatus(ApprovalStatus.APPROVED);
+                    return;
                 case REJECT:
                     if (skipsClosedPurchaseOrder(workflow, purchaseOrder)) return;
                     purchaseOrder.setStatus(ApprovalStatus.REJECTED);

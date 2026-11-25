@@ -40,6 +40,8 @@ public class DemoDataService {
     private final LaborRepository laborRepository;
     private final PartQuantityRepository partQuantityRepository;
     private final AdditionalCostRepository additionalCostRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final PartLedgerService partLedgerService;
     @Autowired
     @Lazy
     private ScheduleService scheduleService;
@@ -296,11 +298,14 @@ public class DemoDataService {
         part.setBarcode(code);
         part.setCategory(category);
         part.setCompany(company);
-        part.setQuantity(quantity);
         part.setCost(cost);
         part.setCreatedBy(user.getId());
         part.setDemo(true);
-        return partRepository.save(part);
+        // P-16b (PPB-30, D-P16b-1): the stock of a demo part is a demo entry of its ledger
+        Part savedPart = partLedgerService.lock(partRepository.save(part).getId());
+        partLedgerService.record(savedPart, quantity, PartTransactionOrigin.CREATION,
+                PartLedgerService.Movement.by(user).asDemo());
+        return savedPart;
     }
 
     private Vendor createVendor(String name, String companyName, String phone, String email, Company company,
@@ -418,6 +423,9 @@ public class DemoDataService {
         partQuantity.setDemo(true);
         partQuantity.setCreatedBy(user.getId());
         partQuantityRepository.save(partQuantity);
+        // P-16b (D-P16b-7): a demo consumption is a demo exit of the ledger, as any consumption
+        partLedgerService.record(partLedgerService.lock(part.getId()), -quantity, PartTransactionOrigin.CONSUMPTION,
+                PartLedgerService.Movement.onWorkOrder(user, workOrder).asDemo());
     }
 
     private void addCostToWorkOrder(WorkOrder workOrder, CostCategory category, String description, double cost,
@@ -433,13 +441,21 @@ public class DemoDataService {
         additionalCostRepository.save(additionalCost);
     }
 
+    /**
+     * Purges the demo data of the company, by {@code actor}. P-16b (D-3): the stock that demo work orders and
+     * purchase orders added to or took from a part that is not demo is compensated first; then the movements of the
+     * demo data and the demo purchase orders go with the rest.
+     */
     @Transactional
-    public void deleteDemoData(Long companyId) {
+    public void deleteDemoData(Long companyId, User actor) {
         // P-12b (D-P12b-1): the revisions cite the categories, which are protected references; a revision of a
         // work order that is not demo is kept, so a demo category it cites rejects the whole purge
         workOrderRepository.deleteRevisionsOfDemoWorkOrders(companyId);
+        partLedgerService.compensateDemoDocuments(companyId, actor);
+        partLedgerService.deleteDemoMovements(companyId);
         additionalCostRepository.deleteByWorkOrder_Company_IdAndIsDemoTrue(companyId);
         partQuantityRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
+        purchaseOrderRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
         laborRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
         requestRepository.deleteByCompany_IdAndIsDemoTrue(companyId);
         workOrderRepository.deleteByCompany_IdAndIsDemoTrue(companyId);

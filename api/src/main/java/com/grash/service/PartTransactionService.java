@@ -17,16 +17,8 @@ import java.util.Optional;
 public class PartTransactionService {
     private final PartTransactionRepository partTransactionRepository;
 
-    public PartTransaction create(PartTransaction PartTransaction) {
-        return partTransactionRepository.save(PartTransaction);
-    }
-
     public Collection<PartTransaction> getAll() {
         return partTransactionRepository.findAll();
-    }
-
-    public void delete(Long id) {
-        partTransactionRepository.deleteById(id);
     }
 
     public Optional<PartTransaction> findById(Long id) {
@@ -39,10 +31,6 @@ public class PartTransactionService {
 
     public Collection<PartTransaction> findByWorkOrderAndPart(Long workOrderId, Long partId) {
         return partTransactionRepository.findByWorkOrder_IdAndPart_Id(workOrderId, partId);
-    }
-
-    public void save(PartTransaction partTransaction) {
-        partTransactionRepository.save(partTransaction);
     }
 
     public Collection<PartTransaction> findConsumptionsByCompanyAndCreatedAtBetween(Long id, Date start, Date end) {

@@ -2,61 +2,89 @@ package com.grash.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.grash.model.abstracts.CompanyAudit;
+import com.grash.model.enums.PartTransactionOrigin;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.annotation.Nullable;
-import jakarta.persistence.Table;
-import jakarta.validation.constraints.Max;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.ManyToOne;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.annotations.Immutable;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.FetchType;
-import jakarta.validation.constraints.NotNull;
-
+/**
+ * P-16b (PPB-04, PPB-30): one movement of the ledger of a part. The quantity is signed: an entry is positive, an exit
+ * negative, so the stock of the part is the sum of its movements. Only {@code PartLedgerService} creates movements;
+ * no operation of the application changes or deletes one ({@code @Immutable}).
+ */
 @Entity
+@Immutable
 @Data
 @NoArgsConstructor
-@Schema(description = "Part consumption entity tracking part usage on work orders")
+@Schema(description = "Movement of the ledger of a part")
 public class PartTransaction extends CompanyAudit {
     @NotNull
-    @Schema(description = "Quantity consumed or restocked", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Signed quantity: positive for an entry, negative for an exit",
+            requiredMode = Schema.RequiredMode.REQUIRED)
     private double quantity;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @NotNull
-    @OnDelete(action = OnDeleteAction.CASCADE)
     private Part part;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @OnDelete(action = OnDeleteAction.CASCADE)
     @Nullable
     private WorkOrder workOrder;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @Nullable
+    private PurchaseOrder purchaseOrder;
+
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private PartTransactionOrigin origin;
+
     private String description;
 
-    public PartTransaction(Part part, @NotNull WorkOrder workOrder, double quantity) {
+    private boolean isDemo;
+
+    public PartTransaction(Part part, double quantity, PartTransactionOrigin origin, WorkOrder workOrder,
+                           PurchaseOrder purchaseOrder, String description) {
         this.part = part;
+        this.quantity = quantity;
+        this.origin = origin;
         this.workOrder = workOrder;
-        this.quantity = quantity;
-    }
-
-    public PartTransaction(Part part, @Max(0) double quantity, String description) {// restock
-        this.part = part;
+        this.purchaseOrder = purchaseOrder;
         this.description = description;
-        this.quantity = quantity;
     }
 
+    /**
+     * The signed cost of the movement, at the current cost of the part.
+     */
     public double getCost() {
         return part.getCost() * quantity;
     }
 
+    /**
+     * What the movement consumed: positive for a consumption, negative for a reversal.
+     */
+    @JsonIgnore
+    public double getConsumedQuantity() {
+        return -quantity;
+    }
+
+    @JsonIgnore
+    public double getConsumedCost() {
+        return part.getCost() * getConsumedQuantity();
+    }
+
     @JsonIgnore
     public boolean isConsumption() {
-        return quantity > 0;
+        return origin == PartTransactionOrigin.CONSUMPTION;
     }
 }
-
-

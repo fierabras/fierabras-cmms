@@ -19,6 +19,7 @@ import com.grash.model.PurchaseOrder;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
 import com.grash.model.enums.ApprovalStatus;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.Status;
 import com.grash.repository.PartCategoryRepository;
 import com.grash.repository.PartQuantityRepository;
@@ -165,7 +166,9 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
     }
 
     PartTransaction movement(Part part, WorkOrder workOrder, double quantity) {
-        PartTransaction movement = new PartTransaction(part, workOrder, quantity);
+        // P-16b: a consumption is an exit (negative) with its origin
+        PartTransaction movement = new PartTransaction(part, -quantity, workOrder == null
+                ? PartTransactionOrigin.RESTOCK : PartTransactionOrigin.CONSUMPTION, workOrder, null, null);
         movement.setCompany(part.getCompany());
         return partTransactionRepository.saveAndFlush(movement);
     }
@@ -1077,7 +1080,8 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
 
         /**
          * The purchase order, its lines, the stock of {@code part} and its movements are as {@code before}, and no
-         * audit record was written.
+         * audit record was written. Before P-16b the part had no movement at all; since P-16b the approval of an
+         * earlier answer leaves its own entry, and the rejected operation adds none.
          */
         private void assertUnchanged(PurchaseOrder purchaseOrder, String before, List<String> linesBefore, Part part,
                                      double stockBefore, CommonData data) {
@@ -1085,8 +1089,10 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
                     () -> assertEquals(before, row("purchase_order", purchaseOrder.getId())),
                     () -> assertEquals(linesBefore, lines(purchaseOrder)),
                     () -> assertEquals(stockBefore, stock(part)),
-                    () -> assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ?",
-                            part.getId())),
+                    () -> assertEquals(0, count("SELECT count(*) FROM part_transaction WHERE part_id = ? "
+                            + "AND origin <> 'PURCHASE_ORDER'", part.getId())),
+                    () -> assertTrue(count("SELECT count(*) FROM part_transaction WHERE part_id = ?",
+                            part.getId()) <= 1, "at most the entry of the approval"),
                     () -> assertEquals(0, auditRecords(data)));
         }
 

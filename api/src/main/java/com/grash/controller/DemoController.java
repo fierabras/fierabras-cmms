@@ -81,7 +81,7 @@ public class DemoController {
                 );
                 SecurityContextHolder.getContext().setAuthentication(authentication);
 
-                importDemoData(user.getCompany());
+                importDemoData(user);
             }
 
             return new SuccessResponse(response.isSuccess(), response.getMessage());
@@ -93,17 +93,18 @@ public class DemoController {
     @DeleteMapping("/demo-data")
     @PreAuthorize("permitAll()")
     public SuccessResponse deleteDemoData(@Parameter(hidden = true) @CurrentUser User user) {
-        demoDataService.deleteDemoData(user.getCompany().getId());
+        demoDataService.deleteDemoData(user.getCompany().getId(), user);
         return new SuccessResponse(true, "Demo data deleted successfully");
     }
 
-    private void importDemoData(Company company) {
+    private void importDemoData(User user) {
+        Company company = user.getCompany();
         try {
             importLocations(company);
             importAssets(company);
             List<Asset> assets = assetService.findByCompany(company.getId());
             importMeters(company, assets);
-            importParts(company);
+            importParts(company, user);
             importWorkOrders(company);
         } catch (IOException e) {
             // In a real application, you'd want to handle this exception more gracefully
@@ -134,9 +135,12 @@ public class DemoController {
         importService.importMeters(meters, company);
     }
 
-    private void importParts(Company company) throws IOException {
+    /**
+     * P-16b (C-1): the stock of the demo parts is recorded as an import by the user of the request.
+     */
+    private void importParts(Company company, User user) throws IOException {
         List<PartImportDTO> parts = parseCsv("demo-data/telecom/Parts.csv", this::toPartImportDTO);
-        importService.importParts(parts, company);
+        importService.importParts(parts, company, user);
     }
 
     private <T> List<T> parseCsv(String filePath, java.util.function.Function<CSVRecord, T> mapper) throws IOException {

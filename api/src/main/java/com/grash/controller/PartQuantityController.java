@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +27,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/part-quantities")
@@ -67,8 +69,14 @@ public class PartQuantityController {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * Replaces the parts of a work order: an added part consumes one, a part left out is removed and gives back the
+     * quantity of its line (P-16b, PPB-16: an entry with origin REVERSAL). One transaction: everything or nothing.
+     * The parts are handled in the order of their identifiers, so two replacements lock them in the same order.
+     */
     @PatchMapping("/work-order/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public Collection<PartQuantityShowDTO> patchWorkOrder(@Parameter(description = "List of part IDs to associate " +
                                                                   "with work order") @Valid @RequestBody List<Long> parts,
                                                           @PathVariable("id") Long id,
@@ -92,35 +100,41 @@ public class PartQuantityController {
                     savedWorkOrder.setFirstTimeToReact(new Date());
                     workOrderService.save(savedWorkOrder);
                 }
-                parts.forEach(partId -> {
-                    if (!partQuantityMappedPartIds.contains(partId)) {
-                        Optional<Part> optionalPart = partService.findById(partId);
-                        if (optionalPart.isPresent()) {
-                            partService.consumePart(optionalPart.get().getId(), 1, savedWorkOrder,
-                                    Helper.getLocale(user), false);
-                            PartQuantity partQuantity = new PartQuantity(optionalPart.get(), savedWorkOrder, null, 1);
-                            partQuantityService.create(partQuantity);
-                        } else throw new CustomException("Part not found", HttpStatus.NOT_FOUND);
-                    }
-                });
-                partQuantityMappedPartIds.forEach(partId -> {
-                    if (!parts.contains(partId)) {
-                        partQuantityService.delete(partQuantities.stream().filter(partQuantity ->
-                                partQuantity.getPart().getId().equals(partId)).findFirst().get(), user);
-                    }
-                });
+                Stream.concat(parts.stream(), partQuantityMappedPartIds.stream()).distinct().sorted()
+                        .forEach(partId -> {
+                            if (!partQuantityMappedPartIds.contains(partId)) {
+                                Optional<Part> optionalPart = partService.findById(partId);
+                                if (optionalPart.isPresent()) {
+                                    partService.consumePart(optionalPart.get().getId(), 1, savedWorkOrder, user,
+                                            Helper.getLocale(user));
+                                    PartQuantity partQuantity = new PartQuantity(optionalPart.get(), savedWorkOrder,
+                                            null, 1);
+                                    partQuantityService.create(partQuantity);
+                                } else throw new CustomException("Part not found", HttpStatus.NOT_FOUND);
+                            } else if (!parts.contains(partId)) {
+                                PartQuantity removed = partQuantities.stream().filter(partQuantity ->
+                                        partQuantity.getPart().getId().equals(partId)).findFirst().get();
+                                partService.consumePart(partId, -removed.getQuantity(), savedWorkOrder, user,
+                                        Helper.getLocale(user));
+                                partQuantityService.delete(removed, user);
+                            }
+                        });
                 return partQuantityService.findByWorkOrder(id).stream().map(partQuantityMapper::toShowDto).collect(Collectors.toList());
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (E-16): the lines change with the purchase order locked, as its approval locks it.
+     */
     @PatchMapping("/purchase-order/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public Collection<PartQuantityShowDTO> patchPurchaseOrder(@Parameter(description = "List of part quantities to " +
                                                                       "update for purchase order") @Valid @RequestBody List<PartQuantityCompletePatchDTO> partQuantitiesReq, @PathVariable("id") Long id,
                                                               HttpServletRequest req) {
         User user = userService.whoami(req);
-        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findById(id);
+        Optional<PurchaseOrder> optionalPurchaseOrder = purchaseOrderService.findByIdForUpdate(id);
 
         if (optionalPurchaseOrder.isPresent()) {
             PurchaseOrder savedPurchaseOrder = optionalPurchaseOrder.get();
@@ -172,6 +186,10 @@ public class PartQuantityController {
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (E-15, TD-P12-01): read with the rules of the sibling routes: who can see the work order
+     * ({@code GET /work-order/{id}}), or who can see purchase orders ({@code GET /purchase-order/{id}}).
+     */
     @GetMapping("/{id}")
     @PreAuthorize("permitAll()")
     public PartQuantityShowDTO getById(@PathVariable("id") Long id, HttpServletRequest req) {
@@ -179,31 +197,51 @@ public class PartQuantityController {
         Optional<PartQuantity> optionalPartQuantity = partQuantityService.findById(id);
         if (optionalPartQuantity.isPresent()) {
             PartQuantity savedPartQuantity = optionalPartQuantity.get();
+            if ((savedPartQuantity.getWorkOrder() != null && !savedPartQuantity.getWorkOrder().isAccessibleBy(user))
+                    || (savedPartQuantity.getPurchaseOrder() != null
+                    && !user.getRole().getViewPermissions().contains(PermissionEntity.PURCHASE_ORDERS)))
+                throw new CustomException("Access denied", HttpStatus.FORBIDDEN);
             return partQuantityMapper.toShowDto(savedPartQuantity);
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (D-P16b-6): a line created on a work order consumes its quantity, in the same transaction. E-15: the
+     * parent is loaded (404, or 403 for another organization), then the permission is checked (403), then its state
+     * (409).
+     */
     @PostMapping("")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     PartQuantityShowDTO create(@Parameter(description = "Part quantity to create") @Valid @RequestBody PartQuantity partQuantityReq,
                                HttpServletRequest req) {
         User user = userService.whoami(req);
-        //TODO check access
+        WorkOrder workOrder = partQuantityReq.getWorkOrder() == null ? null
+                : workOrderService.findById(partQuantityReq.getWorkOrder().getId())
+                .orElseThrow(() -> new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND));
+        // P-16b (E-16): the purchase order is locked, as its approval locks it
+        PurchaseOrder purchaseOrder = partQuantityReq.getPurchaseOrder() == null ? null
+                : purchaseOrderService.lock(partQuantityReq.getPurchaseOrder().getId());
+        checkCanChange(user, workOrder, purchaseOrder);
         // P-12 (E-4): a consumption is not added to a closed or archived work order
-        if (partQuantityReq.getWorkOrder() != null)
-            WorkOrderStateGuard.check(workOrderService.findById(partQuantityReq.getWorkOrder().getId())
-                            .orElseThrow(() -> new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND)),
-                    WorkOrderStateGuard.Change.CHILD);
+        if (workOrder != null) WorkOrderStateGuard.check(workOrder, WorkOrderStateGuard.Change.CHILD);
         // P-16 (E-7): a line is not added to an approved or rejected purchase order
-        if (partQuantityReq.getPurchaseOrder() != null)
-            PurchaseOrderStateGuard.check(purchaseOrderService.findById(partQuantityReq.getPurchaseOrder().getId())
-                    .orElseThrow(() -> new CustomException("PurchaseOrder not found", HttpStatus.NOT_FOUND)));
+        if (purchaseOrder != null) PurchaseOrderStateGuard.check(purchaseOrder);
         PartQuantity savedPartQuantity = partQuantityService.create(partQuantityReq);
+        if (workOrder != null)
+            partService.consumePart(savedPartQuantity.getPart().getId(), savedPartQuantity.getQuantity(), workOrder,
+                    user, Helper.getLocale(user));
         return partQuantityMapper.toShowDto(savedPartQuantity);
     }
 
+    /**
+     * P-16b (PPB-16): raising a consumption is an exit for the difference, reducing it an entry with origin
+     * REVERSAL; the same quantity writes nothing. One transaction with the change of the line. E-15: the permission of
+     * {@link #create} (403) before the state of the parent (409).
+     */
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public PartQuantityShowDTO patch(@Parameter(description = "Part quantity fields to update") @Valid @RequestBody PartQuantityPatchDTO partQuantity,
                                      @PathVariable("id") Long id,
                                      HttpServletRequest req) {
@@ -214,23 +252,31 @@ public class PartQuantityController {
             if (savedPartQuantity.getPart().getUnit() == null) {
                 partQuantity.setQuantity((int) partQuantity.getQuantity());
             }
+            // P-16b (E-16): the purchase order is locked, as its approval locks it
+            PurchaseOrder purchaseOrder = savedPartQuantity.getPurchaseOrder() == null ? null
+                    : purchaseOrderService.lock(savedPartQuantity.getPurchaseOrder().getId());
+            checkCanChange(user, savedPartQuantity.getWorkOrder(), purchaseOrder);
             // P-16 (E-7): the line of an approved or rejected purchase order does not change
-            if (savedPartQuantity.getPurchaseOrder() != null)
-                PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
+            if (purchaseOrder != null) PurchaseOrderStateGuard.check(purchaseOrder);
             if (savedPartQuantity.getWorkOrder() != null) {
                 // P-12 (E-4): the consumption of a closed or archived work order does not change
                 WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                 partService.consumePart(savedPartQuantity.getPart().getId(),
                         partQuantity.getQuantity() - savedPartQuantity.getQuantity(),
-                        savedPartQuantity.getWorkOrder(), Helper.getLocale(user), false);
+                        savedPartQuantity.getWorkOrder(), user, Helper.getLocale(user));
             }
             PartQuantity patchedPartQuantity = partQuantityService.update(id, partQuantity);
             return partQuantityMapper.toShowDto(patchedPartQuantity);
         } else throw new CustomException("PartQuantity not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-16b (PPB-16): removing a consumption gives back the quantity of its line with an entry with origin REVERSAL,
+     * in one transaction with the removal and its audit record.
+     */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
+    @Transactional
     public ResponseEntity<SuccessResponse> delete(@PathVariable("id") Long id, HttpServletRequest req) {
         User user = userService.whoami(req);
 
@@ -246,16 +292,30 @@ public class PartQuantityController {
                     WorkOrderStateGuard.check(savedPartQuantity.getWorkOrder(), WorkOrderStateGuard.Change.CHILD);
                     partService.consumePart(savedPartQuantity.getPart().getId(),
                             -savedPartQuantity.getQuantity(),
-                            savedPartQuantity.getWorkOrder(), Helper.getLocale(user), true);
+                            savedPartQuantity.getWorkOrder(), user, Helper.getLocale(user));
                 }
-                // P-16 (E-7): the line of an approved or rejected purchase order is not removed
+                // P-16 (E-7): the line of an approved or rejected purchase order is not removed; P-16b (E-16): locked
                 if (savedPartQuantity.getPurchaseOrder() != null)
-                    PurchaseOrderStateGuard.check(savedPartQuantity.getPurchaseOrder());
+                    PurchaseOrderStateGuard.check(
+                            purchaseOrderService.lock(savedPartQuantity.getPurchaseOrder().getId()));
                 partQuantityService.delete(savedPartQuantity, user);
                 return new ResponseEntity<>(new SuccessResponse(true, "Deleted successfully"),
                         HttpStatus.OK);
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("PartQuantity not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * P-16b (E-15, TD-P12-01, PPB-27): who may add or change a line, with the existing permissions of the sibling
+     * routes: who can edit the work order ({@code PATCH /work-order/{id}}), or who can edit other purchase orders or
+     * created this one ({@code PATCH /purchase-order/{id}}).
+     */
+    private static void checkCanChange(User user, WorkOrder workOrder, PurchaseOrder purchaseOrder) {
+        if (workOrder != null && !workOrder.canBeEditedBy(user))
+            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
+        if (purchaseOrder != null && !user.getRole().getEditOtherPermissions().contains(PermissionEntity.PURCHASE_ORDERS)
+                && !user.getId().equals(purchaseOrder.getCreatedBy()))
+            throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
     }
 
 }

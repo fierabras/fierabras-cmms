@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-16b (PPB-04, PPB-21, PPB-22, PPB-30): every change of the stock of a part is a movement of its ledger,
+         with its origin and, when there is one, its work order or purchase order. Entries are positive and exits
+         negative, so the stock of a part is the sum of its movements. The movements already stored change their
+         sign and get an origin (D-1); a part whose stock differs from the sum of its movements gets one opening
+         balance for the difference, without user (D-2). The ledger is a historical record: the work order and the
+         purchase order it cites are protected references with an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_columns" author="fierabras">
+        <addColumn tableName="part_transaction">
+            <column name="origin" type="VARCHAR(32)"/>
+            <column name="purchase_order_id" type="BIGINT"/>
+            <column name="is_demo" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="part_transaction" columnName="is_demo"/>
+            <dropColumn tableName="part_transaction" columnName="purchase_order_id"/>
+            <dropColumn tableName="part_transaction" columnName="origin"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_sign_and_origin" author="fierabras">
+        <sql>UPDATE part_transaction SET quantity = -quantity,
+            origin = CASE WHEN work_order_id IS NOT NULL THEN 'CONSUMPTION' ELSE 'RESTOCK' END</sql>
+        <rollback>
+            <sql>UPDATE part_transaction SET quantity = -quantity</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_opening_balance" author="fierabras">
+        <sql>INSERT INTO part_transaction (id, created_at, updated_at, created_by, company_id, part_id, quantity,
+            origin, description, is_demo)
+            SELECT nextval('part_transaction_seq'), now(), now(), NULL, p.company_id, p.id,
+            p.quantity - COALESCE(s.total, 0), 'ADJUSTMENT', 'Opening balance (migration)', p.is_demo
+            FROM part p
+            LEFT JOIN (SELECT part_id, SUM(quantity) AS total FROM part_transaction GROUP BY part_id) s
+            ON s.part_id = p.id
+            WHERE p.quantity &lt;&gt; COALESCE(s.total, 0)</sql>
+        <rollback>
+            <sql>DELETE FROM part_transaction WHERE origin = 'ADJUSTMENT' AND created_by IS NULL
+                AND description = 'Opening balance (migration)'</sql>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_origin_not_null" author="fierabras">
+        <addNotNullConstraint tableName="part_transaction" columnName="origin" columnDataType="VARCHAR(32)"/>
+        <rollback>
+            <dropNotNullConstraint tableName="part_transaction" columnName="origin" columnDataType="VARCHAR(32)"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_work_order_id_no_action" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="part_transaction" constraintName="fkj99sa2uououd6s977aqyc0yri"/>
+        <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="part_transaction"
+                                 constraintName="fkj99sa2uououd6s977aqyc0yri" referencedColumnNames="id"
+                                 referencedTableName="work_order" onDelete="NO ACTION"/>
+        <createIndex tableName="part_transaction" indexName="idx_part_transaction_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_transaction" indexName="idx_part_transaction_work_order_id"/>
+            <dropForeignKeyConstraint baseTableName="part_transaction" constraintName="fkj99sa2uououd6s977aqyc0yri"/>
+            <addForeignKeyConstraint baseColumnNames="work_order_id" baseTableName="part_transaction"
+                                     constraintName="fkj99sa2uououd6s977aqyc0yri" referencedColumnNames="id"
+                                     referencedTableName="work_order" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_24_1795567540_part_ledger_purchase_order_id" author="fierabras">
+        <addForeignKeyConstraint baseColumnNames="purchase_order_id" baseTableName="part_transaction"
+                                 constraintName="fk_part_transaction_purchase_order" referencedColumnNames="id"
+                                 referencedTableName="purchase_order" onDelete="NO ACTION"/>
+        <createIndex tableName="part_transaction" indexName="idx_part_transaction_purchase_order_id">
+            <column name="purchase_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_transaction" indexName="idx_part_transaction_purchase_order_id"/>
+            <dropForeignKeyConstraint baseTableName="part_transaction"
+                                      constraintName="fk_part_transaction_purchase_order"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

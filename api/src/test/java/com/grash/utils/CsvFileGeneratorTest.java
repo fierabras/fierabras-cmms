@@ -1,6 +1,7 @@
 package com.grash.utils;
 
 import com.grash.model.*;
+import com.grash.model.enums.PartTransactionOrigin;
 import com.grash.model.enums.RecurrenceType;
 import com.grash.service.AdditionalCostService;
 import com.grash.service.AssetDowntimeService;
@@ -153,6 +154,7 @@ class CsvFileGeneratorTest {
         PartTransaction pt = new PartTransaction();
         pt.setId(id);
         pt.setQuantity(2);
+        pt.setOrigin(PartTransactionOrigin.CONSUMPTION);
         pt.setDescription("PT Desc " + id);
         pt.setCreatedAt(new Date());
         Part part = new Part();
@@ -321,17 +323,21 @@ class CsvFileGeneratorTest {
             StringWriter writer = createWriter();
             PartTransaction pt = buildPartTransaction(1L);
 
-            csvFileGenerator.writePartTransactionsToCsv(List.of(pt), writer, LOCALE, CSV_SEPARATOR, true);
+            csvFileGenerator.writePartTransactionsToCsv(List.of(pt), Map.of(), writer, LOCALE, CSV_SEPARATOR, true);
 
             String output = writer.toString();
             assertTrue(output.contains("Part_ID"));
             assertTrue(output.contains(pt.getPart().getName()));
+            // P-16b (D-4): origin, user and purchase order at the end
+            assertTrue(output.contains("Created_At,Origin,User,Purchase_Order_ID,Purchase_Order"), output);
+            assertTrue(output.contains("part_transaction_origin_CONSUMPTION"), output);
         }
 
         @Test
         void emptyCollection_writesNothing() {
             StringWriter writer = createWriter();
-            csvFileGenerator.writePartTransactionsToCsv(Collections.emptyList(), writer, LOCALE, CSV_SEPARATOR, false);
+            csvFileGenerator.writePartTransactionsToCsv(Collections.emptyList(), Map.of(), writer, LOCALE, CSV_SEPARATOR,
+                    false);
             assertTrue(writer.toString().isEmpty());
         }
     }
