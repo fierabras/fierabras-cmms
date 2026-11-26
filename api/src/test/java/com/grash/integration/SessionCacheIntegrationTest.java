@@ -298,9 +298,10 @@ class SessionCacheIntegrationTest extends AbstractIntegrationTest {
         Set<Long> o1Users = Set.of(data.o1().owner().getId(), data.o1().admin().getId(),
                 data.o1().technician().getId());
         Set<Long> o2Users = Set.of(data.o2().admin().getId());
+        // one sign in, then rounds in a row: from the second round on, a shared instance would already be loaded
+        String o1Token = api.login(data.o1().technician());
+        String o2Token = api.login(data.o2().admin());
         for (int round = 0; round < 3; round++) {
-            String o1Token = api.login(data.o1().technician());
-            String o2Token = api.login(data.o2().admin());
             List<Callable<Response>> tasks = new ArrayList<>();
             for (int i = 0; i < 8; i++) {
                 String token = i % 2 == 0 ? o1Token : o2Token;
