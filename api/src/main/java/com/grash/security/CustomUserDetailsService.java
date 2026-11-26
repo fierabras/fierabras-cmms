@@ -25,7 +25,8 @@ public class CustomUserDetailsService implements UserDetailsService {
     public CustomUserDetail loadUserByUsername(String username) throws UsernameNotFoundException {
         User user;
         try {
-            user = userService.whoami(username, true);
+            // P-22 (C-11): from the database on every request, never from a cache shared between requests
+            user = userService.findByEmail(username).orElseThrow();
         } catch (NoSuchElementException e) {
             throw new UsernameNotFoundException("User not found");
         }

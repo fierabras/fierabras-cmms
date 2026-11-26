@@ -373,36 +373,35 @@ public class UserService {
         return whoami(req, true);
     }
 
+    /**
+     * The user of the request. With {@code cached}, the user that authenticated this request, loaded from the
+     * database by the authentication filter: P-22 (C-11), it is never an instance shared with other requests.
+     * Without {@code cached}, the user of the token loaded again in the current persistence context.
+     */
     public User whoami(HttpServletRequest req, boolean cached) {
         String token = jwtTokenProvider.resolveToken(req);
+        User authenticated = authenticatedUser();
         if (token == null || token.isEmpty()) {
             // API key authentication - get user from SecurityContext
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.getPrincipal() instanceof CustomUserDetail) {
-                return ((CustomUserDetail) auth.getPrincipal()).getUser();
+            if (authenticated != null) {
+                return authenticated;
             }
             throw new CustomException("Authentication required", HttpStatus.UNAUTHORIZED);
         }
         String username = jwtTokenProvider.getUsername(token);
-        return whoami(username, cached);
-    }
-
-    public User whoami(String username, boolean cached) {
-        return cached ? findByEmailWithRolesCached(username).get() :
-                findByEmail(username).get();
-    }
-
-    public Optional<User> findByEmailWithRolesCached(String email) {
-        if (email == null || email.trim().isEmpty()) {
-            return Optional.empty();
+        // P-22 (D-3): with a token, the user of the token, even when an API key of another user authenticated
+        if (cached && authenticated != null && username.equalsIgnoreCase(authenticated.getEmail())) {
+            return authenticated;
         }
-        Optional<User> cachedUser = cacheService.getUserFromCache(email);
-        if (cachedUser.isPresent()) return cachedUser;
+        return findByEmail(username).get();
+    }
 
-        Optional<User> userOptional = userRepository.findByEmailIgnoreCase(email.toLowerCase().trim());
-        userOptional.ifPresent(cacheService::putUserInCache);
-
-        return userOptional;
+    private static User authenticatedUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof CustomUserDetail) {
+            return ((CustomUserDetail) auth.getPrincipal()).getUser();
+        }
+        return null;
     }
 
     public String refresh(User user) {

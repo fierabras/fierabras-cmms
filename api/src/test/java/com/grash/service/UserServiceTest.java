@@ -929,54 +929,6 @@ class UserServiceTest {
     }
 
     @Nested
-    class FindByEmailWithRolesCached {
-
-        @Test
-        void nullEmail_returnsEmpty() {
-            assertEquals(Optional.empty(), userService.findByEmailWithRolesCached(null));
-        }
-
-        @Test
-        void emptyEmail_returnsEmpty() {
-            assertEquals(Optional.empty(), userService.findByEmailWithRolesCached("   "));
-        }
-
-        @Test
-        void cachedUser_returnsFromCache() {
-            when(cacheService.getUserFromCache("john@test.com")).thenReturn(Optional.of(user));
-
-            Optional<User> result = userService.findByEmailWithRolesCached("john@test.com");
-
-            assertTrue(result.isPresent());
-            assertEquals("john@test.com", result.get().getEmail());
-            verify(userRepository, never()).findByEmailIgnoreCase(anyString());
-        }
-
-        @Test
-        void uncachedUser_fetchesFromRepoAndCaches() {
-            when(cacheService.getUserFromCache("john@test.com")).thenReturn(Optional.empty());
-            when(userRepository.findByEmailIgnoreCase("john@test.com")).thenReturn(Optional.of(user));
-
-            Optional<User> result = userService.findByEmailWithRolesCached("john@test.com");
-
-            assertTrue(result.isPresent());
-            assertEquals("john@test.com", result.get().getEmail());
-            verify(cacheService).putUserInCache(user);
-        }
-
-        @Test
-        void userNotFound_returnsEmpty() {
-            when(cacheService.getUserFromCache("unknown@test.com")).thenReturn(Optional.empty());
-            when(userRepository.findByEmailIgnoreCase("unknown@test.com")).thenReturn(Optional.empty());
-
-            Optional<User> result = userService.findByEmailWithRolesCached("unknown@test.com");
-
-            assertFalse(result.isPresent());
-            verify(cacheService, never()).putUserInCache(any());
-        }
-    }
-
-    @Nested
     class EnableUser {
 
         @Test
@@ -1240,15 +1192,48 @@ class UserServiceTest {
     class Whoami {
 
         @Test
-        void withToken_returnsUserFromCache() {
+        void withToken_returnsTheUserAuthenticatedForTheRequest() {
             HttpServletRequest request = mock(HttpServletRequest.class);
             when(jwtTokenProvider.resolveToken(request)).thenReturn("valid-token");
             when(jwtTokenProvider.getUsername("valid-token")).thenReturn("john@test.com");
-            when(cacheService.getUserFromCache("john@test.com")).thenReturn(Optional.of(user));
+            try (MockedStatic<org.springframework.security.core.context.SecurityContextHolder> holder =
+                         authenticatedAs(user)) {
 
-            User result = userService.whoami(request, true);
+                User result = userService.whoami(request, true);
 
-            assertEquals("john@test.com", result.getEmail());
+                assertSame(user, result);
+                verify(userRepository, never()).findByEmailIgnoreCase(anyString());
+            }
+        }
+
+        @Test
+        void withTokenOfAnotherUserThanTheAuthenticatedOne_returnsTheUserOfTheToken() {
+            HttpServletRequest request = mock(HttpServletRequest.class);
+            when(jwtTokenProvider.resolveToken(request)).thenReturn("valid-token");
+            when(jwtTokenProvider.getUsername("valid-token")).thenReturn("other@test.com");
+            User other = new User();
+            other.setEmail("other@test.com");
+            when(userRepository.findByEmailIgnoreCase("other@test.com")).thenReturn(Optional.of(other));
+            try (MockedStatic<org.springframework.security.core.context.SecurityContextHolder> holder =
+                         authenticatedAs(user)) {
+
+                User result = userService.whoami(request, true);
+
+                assertSame(other, result);
+            }
+        }
+
+        private MockedStatic<org.springframework.security.core.context.SecurityContextHolder> authenticatedAs(
+                User authenticated) {
+            Authentication auth = mock(Authentication.class);
+            when(auth.getPrincipal()).thenReturn(CustomUserDetail.builder().user(authenticated).build());
+            SecurityContext securityContext = mock(SecurityContext.class);
+            when(securityContext.getAuthentication()).thenReturn(auth);
+            MockedStatic<org.springframework.security.core.context.SecurityContextHolder> holder =
+                    mockStatic(org.springframework.security.core.context.SecurityContextHolder.class);
+            holder.when(org.springframework.security.core.context.SecurityContextHolder::getContext)
+                    .thenReturn(securityContext);
+            return holder;
         }
 
         @Test
