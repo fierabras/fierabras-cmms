@@ -1036,12 +1036,12 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "asset.category_id -> asset_category fkhw44q3ymkd329b8b6mvqxatsh a true",
                     "asset.location_id -> location fkoo11h2f4j12wv0axk6d8u1wy0 a true",
                     "asset.parent_asset_id -> asset fk6qu6wqhpppa2w4y09l3tt4q56 a true",
-                    "asset_downtime.asset_id -> asset fkrbg55bho0cxaorbbt7jwskrpo c false",
+                    "asset_downtime.asset_id -> asset fkrbg55bho0cxaorbbt7jwskrpo c true",
                     "custom_field_value.asset_id -> asset fk_custom_field_value_asset c true",
                     "custom_field_value.location_id -> location fk_custom_field_value_location c true",
                     "custom_field_value.meter_id -> meter fk_custom_field_value_meter c true",
                     "custom_field_value.work_order_meter_trigger_id -> work_order_meter_trigger fk_custom_field_value_work_order_meter_trigger c true",
-                    "floor_plan.location_id -> location fkidx35wj5iwhfi5xrcs9jdsr2d c false",
+                    "floor_plan.location_id -> location fkidx35wj5iwhfi5xrcs9jdsr2d c true",
                     "location.parent_location_id -> location fk9s1sco601u8l6ptdxf432h4kb a true",
                     "meter.asset_id -> asset fkswqod52v3556tp6obl9c8lvxi a true",
                     "meter.location_id -> location fk8jgoj4oi6b9sjqeuh9v592a6q a true",
@@ -1052,8 +1052,8 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "reading.meter_id -> meter fkrk4bo4tq59pfymwvx2jnjvlae a true",
                     "request.asset_id -> asset fkml2rlcjiurmq5rjyw1gmsstf6 a true",
                     "request.location_id -> location fkj7y0rwrqngdydkkdcohwisqq6 a true",
-                    "request_portal_field.asset_id -> asset fk_request_portal_field_asset a false",
-                    "request_portal_field.location_id -> location fk_request_portal_field_location a false",
+                    "request_portal_field.asset_id -> asset fk_request_portal_field_asset a true",
+                    "request_portal_field.location_id -> location fk_request_portal_field_location a true",
                     "t_asset_customer_associations.id_asset -> asset fkil356y7ax7m8tqfryd4p8pe6o c true",
                     "t_asset_file_associations.id_asset -> asset fk20hrlr3c09srq7yt5ibdal2pv c true",
                     "t_asset_part_associations.id_asset -> asset fklok6yse9itekmdxni6i1f58ys c true",
@@ -1070,13 +1070,15 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
                     "task_base.meter_id -> meter fkgtij68ko3kykqk1od01ahoudg a true",
                     "work_order.asset_id -> asset fkp4hbmaa9hcp6myymsfyxg6fo2 a true",
                     "work_order.location_id -> location fkdbtdl51i4yup1hs6ek3ecqros a true",
+                    // P-19 (D-3): the revisions cite their asset through a protected key
+                    "work_order_aud.asset_id -> asset FK_work_order_AUD_asset_id a true",
                     "work_order_aud.location_id -> location FK_work_order_AUD_location_id a true",
                     "work_order_meter_trigger.asset_id -> asset fkdkxi8xmqmo48y8xtml1860nbc a true",
                     "work_order_meter_trigger.location_id -> location fkmdb3avajahyo8mc6wi38ls8xi a true",
-                    "work_order_meter_trigger.meter_id -> meter fk87doqr843tj4vmxarqujm3sgy c false",
-                    "work_order_meter_trigger_assigned_to.work_order_meter_trigger_id -> work_order_meter_trigger fk42orqs7y05ghgkis54tathjv c false",
-                    "work_order_meter_trigger_customers.work_order_meter_trigger_id -> work_order_meter_trigger fkkvfp8se58k6wyyt8ctgv4r3f0 c false",
-                    "work_order_meter_trigger_files.work_order_meter_trigger_id -> work_order_meter_trigger fkol2wwydmtktqbnc7lvv23r5jy c false",
+                    "work_order_meter_trigger.meter_id -> meter fk87doqr843tj4vmxarqujm3sgy c true",
+                    "work_order_meter_trigger_assigned_to.work_order_meter_trigger_id -> work_order_meter_trigger fk42orqs7y05ghgkis54tathjv c true",
+                    "work_order_meter_trigger_customers.work_order_meter_trigger_id -> work_order_meter_trigger fkkvfp8se58k6wyyt8ctgv4r3f0 c true",
+                    "work_order_meter_trigger_files.work_order_meter_trigger_id -> work_order_meter_trigger fkol2wwydmtktqbnc7lvv23r5jy c true",
                     "workflow_action.asset_id -> asset fkufu41twy3j9sfswo2tm7nkue a true",
                     "workflow_action.location_id -> location fk6nkenbmcv4vyxw23kwm4ftgaq a true",
                     "workflow_condition.asset_id -> asset fkhsrmx7f4fbfh4g1jdo5vray90 a true",
@@ -1111,12 +1113,14 @@ class AssetLocationMeterCharacterizationIntegrationTest extends AbstractIntegrat
         }
 
         @Test
-        void workOrderRevisionsCiteTheAssetWithoutAForeignKey() {
+        void workOrderRevisionsCiteTheAssetThroughAProtectedForeignKey() {
+            // before P-19: no foreign key on work_order_aud.asset_id (D-P14-5); P-19 (D-3): NO ACTION, validated
             assertEquals(1, count("SELECT count(*) FROM information_schema.columns WHERE table_schema = "
                     + "current_schema() AND table_name = 'work_order_aud' AND column_name = 'asset_id'"));
-            assertEquals(0, count("SELECT count(*) FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = "
+            assertEquals(1, count("SELECT count(*) FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = "
                     + "c.conrelid AND a.attnum = c.conkey[1] WHERE c.contype = 'f' "
-                    + "AND c.conrelid = 'work_order_aud'::regclass AND a.attname = 'asset_id'"));
+                    + "AND c.conrelid = 'work_order_aud'::regclass AND a.attname = 'asset_id' "
+                    + "AND c.confrelid = 'asset'::regclass AND c.confdeltype = 'a' AND c.convalidated"));
         }
     }
 }

@@ -1,0 +1,854 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-19 (E-2, PPB-22, C-38): the child column of every foreign key leads an index. These are the 92
+         foreign keys that had none, besides the three of 2026_11_25_1795660000_policy_rules.xml. One changeset per
+         index, named idx_<table>_<column>; the names longer than 63 characters are cut to 63 (D-P19-4).
+         Generated from the catalog of a migrated database. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_25_1795660001_additional_cost_work_order_id" author="fierabras">
+        <createIndex tableName="additional_cost" indexName="idx_additional_cost_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="additional_cost" indexName="idx_additional_cost_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_api_key_company_id" author="fierabras">
+        <createIndex tableName="api_key" indexName="idx_api_key_company_id">
+            <column name="company_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="api_key" indexName="idx_api_key_company_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_api_key_user_id" author="fierabras">
+        <createIndex tableName="api_key" indexName="idx_api_key_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="api_key" indexName="idx_api_key_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_asset_deprecation_id" author="fierabras">
+        <createIndex tableName="asset" indexName="idx_asset_deprecation_id">
+            <column name="deprecation_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset" indexName="idx_asset_deprecation_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_asset_category_company_settings_id" author="fierabras">
+        <createIndex tableName="asset_category" indexName="idx_asset_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset_category" indexName="idx_asset_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_asset_downtime_asset_id" author="fierabras">
+        <createIndex tableName="asset_downtime" indexName="idx_asset_downtime_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="asset_downtime" indexName="idx_asset_downtime_asset_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_checklist_company_settings_id" author="fierabras">
+        <createIndex tableName="checklist" indexName="idx_checklist_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="checklist" indexName="idx_checklist_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_checklist_task_bases_checklist_id" author="fierabras">
+        <createIndex tableName="checklist_task_bases" indexName="idx_checklist_task_bases_checklist_id">
+            <column name="checklist_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="checklist_task_bases" indexName="idx_checklist_task_bases_checklist_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_comment_company_id" author="fierabras">
+        <createIndex tableName="comment" indexName="idx_comment_company_id">
+            <column name="company_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="comment" indexName="idx_comment_company_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_comment_work_order_id" author="fierabras">
+        <createIndex tableName="comment" indexName="idx_comment_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="comment" indexName="idx_comment_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_comment_files_files_id" author="fierabras">
+        <createIndex tableName="comment_files" indexName="idx_comment_files_files_id">
+            <column name="files_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="comment_files" indexName="idx_comment_files_files_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_company_subscription_id" author="fierabras">
+        <createIndex tableName="company" indexName="idx_company_subscription_id">
+            <column name="subscription_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="company" indexName="idx_company_subscription_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_cost_category_company_settings_id" author="fierabras">
+        <createIndex tableName="cost_category" indexName="idx_cost_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="cost_category" indexName="idx_cost_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_file_task_id" author="fierabras">
+        <createIndex tableName="file" indexName="idx_file_task_id">
+            <column name="task_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="file" indexName="idx_file_task_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_floor_plan_location_id" author="fierabras">
+        <createIndex tableName="floor_plan" indexName="idx_floor_plan_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="floor_plan" indexName="idx_floor_plan_location_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_general_preferences_company_settings_id" author="fierabras">
+        <createIndex tableName="general_preferences" indexName="idx_general_preferences_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="general_preferences" indexName="idx_general_preferences_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_labor_work_order_id" author="fierabras">
+        <createIndex tableName="labor" indexName="idx_labor_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="labor" indexName="idx_labor_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_meter_category_company_settings_id" author="fierabras">
+        <createIndex tableName="meter_category" indexName="idx_meter_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="meter_category" indexName="idx_meter_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_notification_user_id" author="fierabras">
+        <createIndex tableName="notification" indexName="idx_notification_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="notification" indexName="idx_notification_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_own_user_role_id" author="fierabras">
+        <createIndex tableName="own_user" indexName="idx_own_user_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user" indexName="idx_own_user_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_own_user_preventive_maintenances_own_user_id" author="fierabras">
+        <createIndex tableName="own_user_preventive_maintenances" indexName="idx_own_user_preventive_maintenances_own_user_id">
+            <column name="own_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user_preventive_maintenances" indexName="idx_own_user_preventive_maintenances_own_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_own_user_preventive_maintenances_preventive_maintenances_id" author="fierabras">
+        <createIndex tableName="own_user_preventive_maintenances" indexName="idx_own_user_preventive_maintenances_preventive_maintenances_id">
+            <column name="preventive_maintenances_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user_preventive_maintenances" indexName="idx_own_user_preventive_maintenances_preventive_maintenances_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_own_user_work_orders_own_user_id" author="fierabras">
+        <createIndex tableName="own_user_work_orders" indexName="idx_own_user_work_orders_own_user_id">
+            <column name="own_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user_work_orders" indexName="idx_own_user_work_orders_own_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_own_user_work_orders_work_orders_id" author="fierabras">
+        <createIndex tableName="own_user_work_orders" indexName="idx_own_user_work_orders_work_orders_id">
+            <column name="work_orders_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="own_user_work_orders" indexName="idx_own_user_work_orders_work_orders_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_part_category_company_settings_id" author="fierabras">
+        <createIndex tableName="part_category" indexName="idx_part_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_category" indexName="idx_part_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_part_preventive_maintenances_part_id" author="fierabras">
+        <createIndex tableName="part_preventive_maintenances" indexName="idx_part_preventive_maintenances_part_id">
+            <column name="part_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_preventive_maintenances" indexName="idx_part_preventive_maintenances_part_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_part_preventive_maintenances_preventive_maintenances_id" author="fierabras">
+        <createIndex tableName="part_preventive_maintenances" indexName="idx_part_preventive_maintenances_preventive_maintenances_id">
+            <column name="preventive_maintenances_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_preventive_maintenances" indexName="idx_part_preventive_maintenances_preventive_maintenances_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_part_quantity_purchase_order_id" author="fierabras">
+        <createIndex tableName="part_quantity" indexName="idx_part_quantity_purchase_order_id">
+            <column name="purchase_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_quantity" indexName="idx_part_quantity_purchase_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_part_quantity_work_order_id" author="fierabras">
+        <createIndex tableName="part_quantity" indexName="idx_part_quantity_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="part_quantity" indexName="idx_part_quantity_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_assigned_to_assigned_to_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_assigned_to" indexName="idx_preventive_maintenance_assigned_to_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_assigned_to" indexName="idx_preventive_maintenance_assigned_to_assigned_to_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-P19-4: idx_preventive_maintenance_assigned_to_preventive_maintenance_id cut to 63 characters -->
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_assigned_to_preventive_maintenance_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_assigned_to" indexName="idx_preventive_maintenance_assigned_to_preventive_maintenance_i">
+            <column name="preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_assigned_to" indexName="idx_preventive_maintenance_assigned_to_preventive_maintenance_i"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_customers_customers_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_customers" indexName="idx_preventive_maintenance_customers_customers_id">
+            <column name="customers_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_customers" indexName="idx_preventive_maintenance_customers_customers_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_customers_preventive_maintenance_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_customers" indexName="idx_preventive_maintenance_customers_preventive_maintenance_id">
+            <column name="preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_customers" indexName="idx_preventive_maintenance_customers_preventive_maintenance_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_files_files_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_files" indexName="idx_preventive_maintenance_files_files_id">
+            <column name="files_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_files" indexName="idx_preventive_maintenance_files_files_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_preventive_maintenance_files_preventive_maintenance_id" author="fierabras">
+        <createIndex tableName="preventive_maintenance_files" indexName="idx_preventive_maintenance_files_preventive_maintenance_id">
+            <column name="preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="preventive_maintenance_files" indexName="idx_preventive_maintenance_files_preventive_maintenance_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_purchase_order_category_company_settings_id" author="fierabras">
+        <createIndex tableName="purchase_order_category" indexName="idx_purchase_order_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="purchase_order_category" indexName="idx_purchase_order_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_push_notification_token_user_id" author="fierabras">
+        <createIndex tableName="push_notification_token" indexName="idx_push_notification_token_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="push_notification_token" indexName="idx_push_notification_token_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_relation_parent_id" author="fierabras">
+        <createIndex tableName="relation" indexName="idx_relation_parent_id">
+            <column name="parent_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="relation" indexName="idx_relation_parent_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_assigned_to_assigned_to_id" author="fierabras">
+        <createIndex tableName="request_assigned_to" indexName="idx_request_assigned_to_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_assigned_to" indexName="idx_request_assigned_to_assigned_to_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_assigned_to_request_id" author="fierabras">
+        <createIndex tableName="request_assigned_to" indexName="idx_request_assigned_to_request_id">
+            <column name="request_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_assigned_to" indexName="idx_request_assigned_to_request_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_customers_customers_id" author="fierabras">
+        <createIndex tableName="request_customers" indexName="idx_request_customers_customers_id">
+            <column name="customers_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_customers" indexName="idx_request_customers_customers_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_customers_request_id" author="fierabras">
+        <createIndex tableName="request_customers" indexName="idx_request_customers_request_id">
+            <column name="request_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_customers" indexName="idx_request_customers_request_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_files_files_id" author="fierabras">
+        <createIndex tableName="request_files" indexName="idx_request_files_files_id">
+            <column name="files_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_files" indexName="idx_request_files_files_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_files_request_id" author="fierabras">
+        <createIndex tableName="request_files" indexName="idx_request_files_request_id">
+            <column name="request_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_files" indexName="idx_request_files_request_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_portal_field_asset_id" author="fierabras">
+        <createIndex tableName="request_portal_field" indexName="idx_request_portal_field_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_portal_field" indexName="idx_request_portal_field_asset_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_request_portal_field_location_id" author="fierabras">
+        <createIndex tableName="request_portal_field" indexName="idx_request_portal_field_location_id">
+            <column name="location_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_portal_field" indexName="idx_request_portal_field_location_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_company_settings_id" author="fierabras">
+        <createIndex tableName="role" indexName="idx_role_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role" indexName="idx_role_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_create_permissions_role_id" author="fierabras">
+        <createIndex tableName="role_create_permissions" indexName="idx_role_create_permissions_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role_create_permissions" indexName="idx_role_create_permissions_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_delete_other_permissions_role_id" author="fierabras">
+        <createIndex tableName="role_delete_other_permissions" indexName="idx_role_delete_other_permissions_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role_delete_other_permissions" indexName="idx_role_delete_other_permissions_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_edit_other_permissions_role_id" author="fierabras">
+        <createIndex tableName="role_edit_other_permissions" indexName="idx_role_edit_other_permissions_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role_edit_other_permissions" indexName="idx_role_edit_other_permissions_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_view_other_permissions_role_id" author="fierabras">
+        <createIndex tableName="role_view_other_permissions" indexName="idx_role_view_other_permissions_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role_view_other_permissions" indexName="idx_role_view_other_permissions_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_role_view_permissions_role_id" author="fierabras">
+        <createIndex tableName="role_view_permissions" indexName="idx_role_view_permissions_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="role_view_permissions" indexName="idx_role_view_permissions_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_schedule_preventive_maintenance_id" author="fierabras">
+        <createIndex tableName="schedule" indexName="idx_schedule_preventive_maintenance_id">
+            <column name="preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="schedule" indexName="idx_schedule_preventive_maintenance_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_schedule_days_of_week_schedule_id" author="fierabras">
+        <createIndex tableName="schedule_days_of_week" indexName="idx_schedule_days_of_week_schedule_id">
+            <column name="schedule_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="schedule_days_of_week" indexName="idx_schedule_days_of_week_schedule_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_shift_configuration_days_shift_configuration_id" author="fierabras">
+        <createIndex tableName="shift_configuration_days" indexName="idx_shift_configuration_days_shift_configuration_id">
+            <column name="shift_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="shift_configuration_days" indexName="idx_shift_configuration_days_shift_configuration_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_shift_configuration_exceptions_shift_configuration_id" author="fierabras">
+        <createIndex tableName="shift_configuration_exceptions" indexName="idx_shift_configuration_exceptions_shift_configuration_id">
+            <column name="shift_configuration_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="shift_configuration_exceptions" indexName="idx_shift_configuration_exceptions_shift_configuration_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_subscription_subscription_plan_id" author="fierabras">
+        <createIndex tableName="subscription" indexName="idx_subscription_subscription_plan_id">
+            <column name="subscription_plan_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="subscription" indexName="idx_subscription_subscription_plan_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_subscription_plan_features_subscription_plan_id" author="fierabras">
+        <createIndex tableName="subscription_plan_features" indexName="idx_subscription_plan_features_subscription_plan_id">
+            <column name="subscription_plan_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="subscription_plan_features" indexName="idx_subscription_plan_features_subscription_plan_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_super_account_relation_child_user_id" author="fierabras">
+        <createIndex tableName="super_account_relation" indexName="idx_super_account_relation_child_user_id">
+            <column name="child_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="super_account_relation" indexName="idx_super_account_relation_child_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_super_account_relation_super_user_id" author="fierabras">
+        <createIndex tableName="super_account_relation" indexName="idx_super_account_relation_super_user_id">
+            <column name="super_user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="super_account_relation" indexName="idx_super_account_relation_super_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_task_preventive_maintenance_id" author="fierabras">
+        <createIndex tableName="task" indexName="idx_task_preventive_maintenance_id">
+            <column name="preventive_maintenance_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task" indexName="idx_task_preventive_maintenance_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_task_work_order_id" author="fierabras">
+        <createIndex tableName="task" indexName="idx_task_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="task" indexName="idx_task_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_time_category_company_settings_id" author="fierabras">
+        <createIndex tableName="time_category" indexName="idx_time_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="time_category" indexName="idx_time_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_ui_configuration_company_settings_id" author="fierabras">
+        <createIndex tableName="ui_configuration" indexName="idx_ui_configuration_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="ui_configuration" indexName="idx_ui_configuration_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_user_invitation_role_id" author="fierabras">
+        <createIndex tableName="user_invitation" indexName="idx_user_invitation_role_id">
+            <column name="role_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="user_invitation" indexName="idx_user_invitation_role_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_verification_token_user_id" author="fierabras">
+        <createIndex tableName="verification_token" indexName="idx_verification_token_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="verification_token" indexName="idx_verification_token_user_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_company_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint" indexName="idx_webhook_endpoint_company_id">
+            <column name="company_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint" indexName="idx_webhook_endpoint_company_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_asset_statuses_webhook_endpoint_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_asset_statuses" indexName="idx_webhook_endpoint_asset_statuses_webhook_endpoint_id">
+            <column name="webhook_endpoint_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_asset_statuses" indexName="idx_webhook_endpoint_asset_statuses_webhook_endpoint_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_part_fields_webhook_endpoint_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_part_fields" indexName="idx_webhook_endpoint_part_fields_webhook_endpoint_id">
+            <column name="webhook_endpoint_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_part_fields" indexName="idx_webhook_endpoint_part_fields_webhook_endpoint_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_wo_fields_webhook_endpoint_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_wo_fields" indexName="idx_webhook_endpoint_wo_fields_webhook_endpoint_id">
+            <column name="webhook_endpoint_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_wo_fields" indexName="idx_webhook_endpoint_wo_fields_webhook_endpoint_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_work_order_categories_webhook_endpoint_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_work_order_categories" indexName="idx_webhook_endpoint_work_order_categories_webhook_endpoint_id">
+            <column name="webhook_endpoint_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_work_order_categories" indexName="idx_webhook_endpoint_work_order_categories_webhook_endpoint_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-P19-4: idx_webhook_endpoint_work_order_categories_work_order_categories_id cut to 63 characters -->
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_work_order_categories_work_order_categories_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_work_order_categories" indexName="idx_webhook_endpoint_work_order_categories_work_order_categorie">
+            <column name="work_order_categories_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_work_order_categories" indexName="idx_webhook_endpoint_work_order_categories_work_order_categorie"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_webhook_endpoint_work_order_statuses_webhook_endpoint_id" author="fierabras">
+        <createIndex tableName="webhook_endpoint_work_order_statuses" indexName="idx_webhook_endpoint_work_order_statuses_webhook_endpoint_id">
+            <column name="webhook_endpoint_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="webhook_endpoint_work_order_statuses" indexName="idx_webhook_endpoint_work_order_statuses_webhook_endpoint_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_signature_id" author="fierabras">
+        <createIndex tableName="work_order" indexName="idx_work_order_signature_id">
+            <column name="signature_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order" indexName="idx_work_order_signature_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_assigned_to_assigned_to_id" author="fierabras">
+        <createIndex tableName="work_order_assigned_to" indexName="idx_work_order_assigned_to_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_assigned_to" indexName="idx_work_order_assigned_to_assigned_to_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_assigned_to_work_order_id" author="fierabras">
+        <createIndex tableName="work_order_assigned_to" indexName="idx_work_order_assigned_to_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_assigned_to" indexName="idx_work_order_assigned_to_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_aud_signature_id" author="fierabras">
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_signature_id">
+            <column name="signature_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_signature_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_category_company_settings_id" author="fierabras">
+        <createIndex tableName="work_order_category" indexName="idx_work_order_category_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_category" indexName="idx_work_order_category_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_configuration_company_settings_id" author="fierabras">
+        <createIndex tableName="work_order_configuration" indexName="idx_work_order_configuration_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_configuration" indexName="idx_work_order_configuration_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_customers_customers_id" author="fierabras">
+        <createIndex tableName="work_order_customers" indexName="idx_work_order_customers_customers_id">
+            <column name="customers_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_customers" indexName="idx_work_order_customers_customers_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_customers_work_order_id" author="fierabras">
+        <createIndex tableName="work_order_customers" indexName="idx_work_order_customers_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_customers" indexName="idx_work_order_customers_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_files_files_id" author="fierabras">
+        <createIndex tableName="work_order_files" indexName="idx_work_order_files_files_id">
+            <column name="files_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_files" indexName="idx_work_order_files_files_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_files_work_order_id" author="fierabras">
+        <createIndex tableName="work_order_files" indexName="idx_work_order_files_work_order_id">
+            <column name="work_order_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_files" indexName="idx_work_order_files_work_order_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_meter_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_meter_id">
+            <column name="meter_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger" indexName="idx_work_order_meter_trigger_meter_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_assigned_to_assigned_to_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_assigned_to" indexName="idx_work_order_meter_trigger_assigned_to_assigned_to_id">
+            <column name="assigned_to_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_assigned_to" indexName="idx_work_order_meter_trigger_assigned_to_assigned_to_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-P19-4: idx_work_order_meter_trigger_assigned_to_work_order_meter_trigger_id cut to 63 characters -->
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_assigned_to_work_order_meter_trigger_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_assigned_to" indexName="idx_work_order_meter_trigger_assigned_to_work_order_meter_trigg">
+            <column name="work_order_meter_trigger_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_assigned_to" indexName="idx_work_order_meter_trigger_assigned_to_work_order_meter_trigg"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_customers_customers_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_customers" indexName="idx_work_order_meter_trigger_customers_customers_id">
+            <column name="customers_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_customers" indexName="idx_work_order_meter_trigger_customers_customers_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-P19-4: idx_work_order_meter_trigger_customers_work_order_meter_trigger_id cut to 63 characters -->
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_customers_work_order_meter_trigger_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_customers" indexName="idx_work_order_meter_trigger_customers_work_order_meter_trigger">
+            <column name="work_order_meter_trigger_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_customers" indexName="idx_work_order_meter_trigger_customers_work_order_meter_trigger"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_files_files_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_files" indexName="idx_work_order_meter_trigger_files_files_id">
+            <column name="files_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_files" indexName="idx_work_order_meter_trigger_files_files_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_meter_trigger_files_work_order_meter_trigger_id" author="fierabras">
+        <createIndex tableName="work_order_meter_trigger_files" indexName="idx_work_order_meter_trigger_files_work_order_meter_trigger_id">
+            <column name="work_order_meter_trigger_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_meter_trigger_files" indexName="idx_work_order_meter_trigger_files_work_order_meter_trigger_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_work_order_request_configuration_company_settings_id" author="fierabras">
+        <createIndex tableName="work_order_request_configuration" indexName="idx_work_order_request_configuration_company_settings_id">
+            <column name="company_settings_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_request_configuration" indexName="idx_work_order_request_configuration_company_settings_id"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660001_workflow_secondary_conditions_workflow_id" author="fierabras">
+        <createIndex tableName="workflow_secondary_conditions" indexName="idx_workflow_secondary_conditions_workflow_id">
+            <column name="workflow_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow_secondary_conditions" indexName="idx_workflow_secondary_conditions_workflow_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- TD-P20-04 (D-P19-3): uq_custom_sequence_company is unique on company_id alone, so this index repeats it -->
+    <changeSet id="2026_11_25_1795660001_drop_idx_custom_sequence_company_id" author="fierabras">
+        <dropIndex tableName="custom_sequence" indexName="idx_custom_sequence_company_id"/>
+        <rollback>
+            <createIndex tableName="custom_sequence" indexName="idx_custom_sequence_company_id">
+                <column name="company_id"/>
+            </createIndex>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

@@ -477,9 +477,9 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
             assertEquals(List.of(
                     "custom_field_value.request_id fk_custom_field_value_request c true",
                     "request.request_portal_id fk_request_request_portal a true",
-                    "request_assigned_to.request_id fkeg8mmectqp7vcxgxw7k64wt1h c false",
-                    "request_customers.request_id fklbeh6vh70b2pqoj6lri2ua4fk c false",
-                    "request_files.request_id fkd3vswlusjseoo7lpwb0697w2o c false",
+                    "request_assigned_to.request_id fkeg8mmectqp7vcxgxw7k64wt1h c true",
+                    "request_customers.request_id fklbeh6vh70b2pqoj6lri2ua4fk c true",
+                    "request_files.request_id fkd3vswlusjseoo7lpwb0697w2o c true",
                     "request_portal_field.request_portal_id fk_request_portal_field_request_portal c true",
                     "t_request_file_associations.id_request fki27xearjt3x6ralbb0of1jmmd c true",
                     "work_order.parent_request_id fko87wf45c2qbyn4jhgjv8s4s5d a true",
@@ -497,7 +497,8 @@ class RequestDeletionCharacterizationIntegrationTest extends AbstractIntegration
                       AND c.conrelid IN ('request'::regclass, 'request_portal'::regclass)
                     ORDER BY 1""", String.class);
 
-            assertEquals(List.of("request.company_id -> company"), keys);
+            // P-19 (E-1): the portals of the organization go with it (before: only request.company_id)
+            assertEquals(List.of("request.company_id -> company", "request_portal.company_id -> company"), keys);
         }
     }
 }

@@ -739,7 +739,7 @@ class AssetLocationMeterDeletionIntegrationTest extends AbstractIntegrationTest 
             assertAll(
                     () -> assertEquals("a true", schemaOf("reading", "meter_id")),
                     () -> assertEquals("a true", schemaOf("task_base", "meter_id")),
-                    () -> assertEquals("c false", schemaOf("work_order_meter_trigger", "meter_id")));
+                    () -> assertEquals("c true", schemaOf("work_order_meter_trigger", "meter_id")));
         }
     }
 

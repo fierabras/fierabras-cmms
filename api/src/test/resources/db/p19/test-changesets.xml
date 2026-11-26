@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-19 (CA-PPB-002, 058, 061): changesets of the tests only, applied by SchemaPolicyIntegrationTest to a
+         database created for it. Never part of the changelog of the product. -->
+
+    <!-- CA-PPB-002: a table and a foreign key without a row in the policy; the key has its index -->
+    <changeSet id="p19_test_unlisted_key" author="fierabras-test">
+        <createTable tableName="p19_unlisted">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true"/>
+            </column>
+            <column name="asset_id" type="bigint"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="p19_unlisted" baseColumnNames="asset_id"
+                                 constraintName="fk_p19_unlisted_asset" referencedTableName="asset"
+                                 referencedColumnNames="id" onDelete="NO ACTION"/>
+        <createIndex tableName="p19_unlisted" indexName="idx_p19_unlisted_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+    </changeSet>
+
+    <!-- CA-PPB-058: part.category_id, a reference, put in CASCADE -->
+    <changeSet id="p19_test_part_category_cascade" author="fierabras-test">
+        <dropForeignKeyConstraint baseTableName="part" constraintName="fk_part_category"/>
+        <addForeignKeyConstraint baseTableName="part" baseColumnNames="category_id" constraintName="fk_part_category"
+                                 referencedTableName="part_category" referencedColumnNames="id" onDelete="CASCADE"/>
+    </changeSet>
+
+    <!-- CA-PPB-061: a foreign key without an index -->
+    <changeSet id="p19_test_unindexed_key" author="fierabras-test">
+        <createTable tableName="p19_unindexed">
+            <column name="id" type="bigint">
+                <constraints primaryKey="true"/>
+            </column>
+            <column name="part_id" type="bigint"/>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="p19_unindexed" baseColumnNames="part_id"
+                                 constraintName="fk_p19_unindexed_part" referencedTableName="part"
+                                 referencedColumnNames="id" onDelete="NO ACTION"/>
+    </changeSet>
+</databaseChangeLog>
