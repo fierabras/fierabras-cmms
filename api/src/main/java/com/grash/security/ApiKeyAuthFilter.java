@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -48,7 +49,14 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
         if (apiKey != null) {
             try {
-                apiKeyRepository.findByCode(Helper.hashKey(apiKey)).ifPresent(key -> {
+                Optional<ApiKey> found = apiKeyRepository.findByCode(Helper.hashKey(apiKey));
+                // P-22 (C-18): the key of a disabled user does not authenticate, as its token does not (P-11)
+                if (found.isPresent() && !found.get().getUser().isEnabled()) {
+                    SecurityContextHolder.clearContext();
+                    response.sendError(HttpStatus.UNAUTHORIZED.value(), "User account is disabled");
+                    return;
+                }
+                found.ifPresent(key -> {
                     User user = key.getUser();
                     CustomUserDetail customUserDetail =
                             CustomUserDetail.builder().user(user).build();

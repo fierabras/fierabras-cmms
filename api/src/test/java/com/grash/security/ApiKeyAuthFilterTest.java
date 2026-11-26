@@ -66,6 +66,7 @@ class ApiKeyAuthFilterTest {
         User user = new User();
         user.setId(1L);
         user.setEmail("api@test.com");
+        user.setEnabled(true);
         user.setRole(role);
         user.setCompany(company);
         return user;
@@ -129,6 +130,24 @@ class ApiKeyAuthFilterTest {
         assertNotNull(org.springframework.security.core.context.SecurityContextHolder
                 .getContext().getAuthentication());
         org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void apiKeyOfDisabledUser_answers401_withoutAuthentication_andStopsTheChain() throws Exception {
+        String rawKey = "disabled-user-key";
+        User user = createUserWithAccess();
+        user.setEnabled(false);
+        ApiKey apiKey = createApiKey(user);
+        when(request.getHeader("x-api-key")).thenReturn(rawKey);
+        when(apiKeyRepository.findByCode(Helper.hashKey(rawKey))).thenReturn(Optional.of(apiKey));
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(response).sendError(401, "User account is disabled");
+        verify(filterChain, never()).doFilter(any(), any());
+        verify(apiKeyRepository, never()).updateLastUsed(any(), any());
+        assertNull(org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication());
     }
 
     @Test

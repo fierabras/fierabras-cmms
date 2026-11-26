@@ -7,8 +7,6 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Service;
 
-import java.util.Optional;
-
 @Service
 @RequiredArgsConstructor
 public class CacheService {
@@ -42,14 +40,6 @@ public class CacheService {
                     usersCache.put(getCacheKey(user.getEmail()), user);
             }
         }
-    }
-
-    public Optional<User> getUserFromCache(String email) {
-        Cache usersCache = cacheManager.getCache(USERS_CACHE);
-        if (usersCache == null) return Optional.empty();
-        User cachedUser = usersCache.get(getCacheKey(email), User.class);
-
-        return cachedUser == null ? Optional.empty() : Optional.of(cachedUser);
     }
 
     private String getCacheKey(String email) {
