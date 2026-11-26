@@ -116,14 +116,16 @@ public class TestOrganizations {
     /**
      * P-11: the work order revisions ({@code work_order_aud}) have no company and are not removed in cascade, while
      * their users and teams are protected references (NO ACTION). Deleting a company therefore needs its revisions
-     * deleted first: those of its work orders and those that cite its users or teams.
+     * deleted first: those of its work orders and those that cite its users or teams. P-19 (D-3): or its assets,
+     * now a protected reference too.
      */
     public static void deleteWorkOrderRevisions(JdbcTemplate jdbcTemplate, Long companyId) {
         jdbcTemplate.update("DELETE FROM work_order_aud WHERE id IN (SELECT id FROM work_order WHERE company_id = ?) "
                         + "OR primary_user_id IN (SELECT id FROM own_user WHERE company_id = ?) "
                         + "OR completed_by_id IN (SELECT id FROM own_user WHERE company_id = ?) "
-                        + "OR team_id IN (SELECT id FROM team WHERE company_id = ?)",
-                companyId, companyId, companyId, companyId);
+                        + "OR team_id IN (SELECT id FROM team WHERE company_id = ?) "
+                        + "OR asset_id IN (SELECT id FROM asset WHERE company_id = ?)",
+                companyId, companyId, companyId, companyId, companyId);
     }
 
     /**

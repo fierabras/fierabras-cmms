@@ -275,4 +275,8 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_25_1795650000_preventive_maintenance_references.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_25_1795660000_policy_rules.xml"
+             relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_25_1795660001_foreign_key_indexes.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

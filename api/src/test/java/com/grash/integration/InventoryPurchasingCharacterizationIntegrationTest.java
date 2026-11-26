@@ -1233,9 +1233,9 @@ class InventoryPurchasingCharacterizationIntegrationTest extends AbstractIntegra
                     "custom_field_value.part_id -> part fk_custom_field_value_part c true",
                     "custom_field_value.vendor_id -> vendor fk_custom_field_value_vendor c true",
                     "part.category_id -> part_category fk_part_category a true",
-                    "part_preventive_maintenances.part_id -> part fkcec0nx6ooubsuiwcwg23jod93 c false",
+                    "part_preventive_maintenances.part_id -> part fkcec0nx6ooubsuiwcwg23jod93 c true",
                     "part_quantity.part_id -> part fk21q7kq7mtnvshipi5oym9t2b3 a true",
-                    "part_quantity.purchase_order_id -> purchase_order fkb8l63n0csjq7q33wwbkvsj61u c false",
+                    "part_quantity.purchase_order_id -> purchase_order fkb8l63n0csjq7q33wwbkvsj61u c true",
                     "part_transaction.part_id -> part fkbx2tggt11xc2ofuwui2xsxkg0 a true",
                     // P-16b (E-12): the movement cites the purchase order that added the stock
                     "part_transaction.purchase_order_id -> purchase_order fk_part_transaction_purchase_order a true",

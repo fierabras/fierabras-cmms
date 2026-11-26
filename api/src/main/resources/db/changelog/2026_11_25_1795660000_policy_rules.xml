@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-19 (E-1, E-3, PPB-01, PPB-04, PPB-21, PPB-22): the last three foreign keys take their target rule: the
+         request portals and their fields belong to the organization (CASCADE); an automation points to its action,
+         a child that is never removed by itself (NO ACTION). The revisions of a work order cite their asset through a
+         new protected key (D-3). Each child column leads an index. Earlier changesets are left untouched. -->
+
+    <changeSet id="2026_11_25_1795660000_request_portal_company_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request_portal" constraintName="fk_request_portal_company"/>
+        <addForeignKeyConstraint baseColumnNames="company_id" baseTableName="request_portal"
+                                 constraintName="fk_request_portal_company" referencedColumnNames="id"
+                                 referencedTableName="company" onDelete="CASCADE"/>
+        <createIndex tableName="request_portal" indexName="idx_request_portal_company_id">
+            <column name="company_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_portal" indexName="idx_request_portal_company_id"/>
+            <dropForeignKeyConstraint baseTableName="request_portal" constraintName="fk_request_portal_company"/>
+            <addForeignKeyConstraint baseColumnNames="company_id" baseTableName="request_portal"
+                                     constraintName="fk_request_portal_company" referencedColumnNames="id"
+                                     referencedTableName="company" onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660000_request_portal_field_company_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="request_portal_field" constraintName="fk_request_portal_field_company"/>
+        <addForeignKeyConstraint baseColumnNames="company_id" baseTableName="request_portal_field"
+                                 constraintName="fk_request_portal_field_company" referencedColumnNames="id"
+                                 referencedTableName="company" onDelete="CASCADE"/>
+        <createIndex tableName="request_portal_field" indexName="idx_request_portal_field_company_id">
+            <column name="company_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="request_portal_field" indexName="idx_request_portal_field_company_id"/>
+            <dropForeignKeyConstraint baseTableName="request_portal_field"
+                                      constraintName="fk_request_portal_field_company"/>
+            <addForeignKeyConstraint baseColumnNames="company_id" baseTableName="request_portal_field"
+                                     constraintName="fk_request_portal_field_company" referencedColumnNames="id"
+                                     referencedTableName="company" onDelete="NO ACTION"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="2026_11_25_1795660000_workflow_action_id" author="fierabras">
+        <dropForeignKeyConstraint baseTableName="workflow" constraintName="fk5bqe81hkk7jfmavn55a8yvca7"/>
+        <addForeignKeyConstraint baseColumnNames="action_id" baseTableName="workflow"
+                                 constraintName="fk5bqe81hkk7jfmavn55a8yvca7" referencedColumnNames="id"
+                                 referencedTableName="workflow_action" onDelete="NO ACTION"/>
+        <createIndex tableName="workflow" indexName="idx_workflow_action_id">
+            <column name="action_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="workflow" indexName="idx_workflow_action_id"/>
+            <dropForeignKeyConstraint baseTableName="workflow" constraintName="fk5bqe81hkk7jfmavn55a8yvca7"/>
+            <addForeignKeyConstraint baseColumnNames="action_id" baseTableName="workflow"
+                                     constraintName="fk5bqe81hkk7jfmavn55a8yvca7" referencedColumnNames="id"
+                                     referencedTableName="workflow_action" onDelete="CASCADE"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-3, D-P19-2 (c): the key is added NOT VALID, so that a database whose revisions cite deleted assets is
+         still upgraded; new and changed revisions are checked, and an asset that a revision cites cannot be
+         deleted. No revision is changed or deleted. -->
+    <changeSet id="2026_11_25_1795660000_work_order_aud_asset_id" author="fierabras">
+        <sql>ALTER TABLE work_order_aud ADD CONSTRAINT "FK_work_order_AUD_asset_id" FOREIGN KEY (asset_id)
+            REFERENCES asset (id) ON DELETE NO ACTION NOT VALID</sql>
+        <createIndex tableName="work_order_aud" indexName="idx_work_order_aud_asset_id">
+            <column name="asset_id"/>
+        </createIndex>
+        <rollback>
+            <dropIndex tableName="work_order_aud" indexName="idx_work_order_aud_asset_id"/>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_asset_id"/>
+        </rollback>
+    </changeSet>
+
+    <!-- D-P19-2 (c): validated only when no revision cites a deleted asset. Otherwise the changeset is marked as run
+         and the key stays NOT VALID; the purge procedure gives the query that lists those revisions. -->
+    <changeSet id="2026_11_25_1795660000_work_order_aud_asset_id_validate" author="fierabras">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT count(*) FROM work_order_aud r WHERE r.asset_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM asset a WHERE a.id = r.asset_id)</sqlCheck>
+        </preConditions>
+        <sql>ALTER TABLE work_order_aud VALIDATE CONSTRAINT "FK_work_order_AUD_asset_id"</sql>
+        <rollback>
+            <dropForeignKeyConstraint baseTableName="work_order_aud" constraintName="FK_work_order_AUD_asset_id"/>
+            <sql>ALTER TABLE work_order_aud ADD CONSTRAINT "FK_work_order_AUD_asset_id" FOREIGN KEY (asset_id)
+                REFERENCES asset (id) ON DELETE NO ACTION NOT VALID</sql>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
