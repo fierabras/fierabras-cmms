@@ -11,6 +11,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
 
 @Service
 @RequiredArgsConstructor
@@ -45,7 +47,8 @@ public class AsyncImportService {
     public void importAssets(User user, List<AssetImportDTO> toImport, String uuid) {
         try {
             if (!user.getRole().getCreatePermissions().contains(PermissionEntity.ASSETS)
-                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)) {
+                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)
+                    || updatesWithoutEditOther(user, PermissionEntity.ASSETS, toImport, AssetImportDTO::getId)) {
                 messagingTemplate.convertAndSend("/imports/" + uuid, "error: Access Denied");
                 return;
             }
@@ -79,7 +82,8 @@ public class AsyncImportService {
     public void importLocations(User user, List<LocationImportDTO> toImport, String uuid) {
         try {
             if (!user.getRole().getCreatePermissions().contains(PermissionEntity.LOCATIONS)
-                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)) {
+                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)
+                    || updatesWithoutEditOther(user, PermissionEntity.LOCATIONS, toImport, LocationImportDTO::getId)) {
                 messagingTemplate.convertAndSend("/imports/" + uuid, "error: Access Denied");
                 return;
             }
@@ -98,7 +102,8 @@ public class AsyncImportService {
     public void importMeters(User user, List<MeterImportDTO> toImport, String uuid) {
         try {
             if (!user.getRole().getCreatePermissions().contains(PermissionEntity.METERS)
-                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)) {
+                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)
+                    || updatesWithoutEditOther(user, PermissionEntity.METERS, toImport, MeterImportDTO::getId)) {
                 messagingTemplate.convertAndSend("/imports/" + uuid, "error: Access Denied");
                 return;
             }
@@ -117,7 +122,8 @@ public class AsyncImportService {
     public void importParts(User user, List<PartImportDTO> toImport, String uuid) {
         try {
             if (!user.getRole().getCreatePermissions().contains(PermissionEntity.PARTS_AND_MULTIPARTS)
-                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)) {
+                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)
+                    || updatesWithoutEditOther(user, PermissionEntity.PARTS_AND_MULTIPARTS, toImport, PartImportDTO::getId)) {
                 messagingTemplate.convertAndSend("/imports/" + uuid, "error: Access Denied");
                 return;
             }
@@ -136,7 +142,9 @@ public class AsyncImportService {
     public void importPreventiveMaintenances(User user, List<PreventiveMaintenanceImportDTO> toImport, String uuid) {
         try {
             if (!user.getRole().getCreatePermissions().contains(PermissionEntity.PREVENTIVE_MAINTENANCES)
-                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)) {
+                    || !user.getCompany().getSubscription().getSubscriptionPlan().getFeatures().contains(PlanFeatures.IMPORT_CSV)
+                    || updatesWithoutEditOther(user, PermissionEntity.PREVENTIVE_MAINTENANCES, toImport,
+                    PreventiveMaintenanceImportDTO::getId)) {
                 messagingTemplate.convertAndSend("/imports/" + uuid, "error: Access Denied");
                 return;
             }
@@ -149,5 +157,15 @@ public class AsyncImportService {
             log.error("Import failed for preventive-maintenances, uuid: {}", uuid, e);
             messagingTemplate.convertAndSend("/imports/" + uuid, "error: " + e.getMessage());
         }
+    }
+
+    /**
+     * P-19b (H2-04): a row with an id updates an existing record, which takes edit-other on the entity. Like the other
+     * checks of the import, it rejects the whole file.
+     */
+    private static <T> boolean updatesWithoutEditOther(User user, PermissionEntity entity, List<T> toImport,
+                                                       Function<T, Long> id) {
+        return !user.getRole().getEditOtherPermissions().contains(entity)
+                && toImport.stream().map(id).anyMatch(Objects::nonNull);
     }
 }
