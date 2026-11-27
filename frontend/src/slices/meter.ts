@@ -80,7 +80,7 @@ const slice = createSlice({
       const meterIndex = state.meters.content.findIndex(
         (meter) => meter.id === id
       );
-      state.meters.content.splice(meterIndex, 1);
+      if (meterIndex !== -1) state.meters.content.splice(meterIndex, 1);
     },
     setLoadingGet(
       state: MeterState,

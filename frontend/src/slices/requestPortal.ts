@@ -81,7 +81,8 @@ const slice = createSlice({
       const requestPortalIndex = state.requestPortals.content.findIndex(
         (requestPortal) => requestPortal.id === id
       );
-      state.requestPortals.content.splice(requestPortalIndex, 1);
+      if (requestPortalIndex !== -1)
+        state.requestPortals.content.splice(requestPortalIndex, 1);
     },
     setLoadingGet(
       state: RequestPortalState,

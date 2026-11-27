@@ -64,7 +64,7 @@ const slice = createSlice({
     deleteTeam(state: TeamState, action: PayloadAction<{ id: number }>) {
       const { id } = action.payload;
       const teamIndex = state.teams.content.findIndex((team) => team.id === id);
-      state.teams.content.splice(teamIndex, 1);
+      if (teamIndex !== -1) state.teams.content.splice(teamIndex, 1);
     },
     setLoadingGet(
       state: TeamState,

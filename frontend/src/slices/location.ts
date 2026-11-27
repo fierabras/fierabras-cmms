@@ -82,7 +82,8 @@ const slice = createSlice({
       const locationIndex = state.locations.content.findIndex(
         (location) => location.id === id
       );
-      state.locations.content.splice(locationIndex, 1);
+      if (locationIndex !== -1)
+        state.locations.content.splice(locationIndex, 1);
 
       const locationHierarchyIndex = state.locationsHierarchy.findIndex(
         (location) => location.id === id
