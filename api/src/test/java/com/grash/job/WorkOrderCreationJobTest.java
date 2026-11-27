@@ -62,6 +62,17 @@ class WorkOrderCreationJobTest {
     }
 
     @Test
+    void generatingFails_recordedApart_notRethrown() {
+        Date scheduledFireTime = new Date(1_000_000L);
+        when(preventiveMaintenanceService.generateScheduledWorkOrder(1L, scheduledFireTime))
+                .thenThrow(new IllegalStateException("P-24"));
+
+        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(context(1L, scheduledFireTime)));
+
+        verify(preventiveMaintenanceService).recordGenerationFailure(1L);
+    }
+
+    @Test
     void contextWithoutScheduleId_propagatesError() {
         JobDataMap jobDataMap = new JobDataMap();
         JobExecutionContext context = mock(JobExecutionContext.class);
@@ -70,5 +81,6 @@ class WorkOrderCreationJobTest {
         assertThrows(ClassCastException.class, () -> workOrderCreationJob.executeInternal(context));
 
         verify(preventiveMaintenanceService, never()).generateScheduledWorkOrder(anyLong(), any());
+        verify(preventiveMaintenanceService, never()).recordGenerationFailure(anyLong());
     }
 }

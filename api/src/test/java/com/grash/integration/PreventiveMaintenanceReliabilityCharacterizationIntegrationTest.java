@@ -620,8 +620,20 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
     @Nested
     class NotGenerated {
 
+        private List<String> recordOf(CommonData data) {
+            return jdbc.queryForList("SELECT action || ' ' || entity_type || ' ' || entity_id || ' ' || entity_folio "
+                            + "|| ' ' || source || ' ' || coalesce(actor_id::text, 'no actor') || ' ' || company_id "
+                            + "FROM audit_log WHERE company_id = ? ORDER BY id", String.class,
+                    data.o1().company().getId());
+        }
+
+        private String folioOf(long preventiveMaintenance) {
+            return jdbc.queryForObject("SELECT custom_id FROM preventive_maintenance WHERE id = ?", String.class,
+                    preventiveMaintenance);
+        }
+
         @Test
-        void ca06_archivedAsset_noWorkOrder_noAuditRecord_theScheduleGoesOn() throws Exception {
+        void ca06_archivedAsset_noWorkOrder_recordedWithoutActor_theScheduleGoesOn() throws Exception {
             CommonData data = data();
             Asset asset = records.asset(data.o1().company());
             long pm = preventiveMaintenance(data.o1().admin(), ",\"asset\":" + ref(asset.getId()));
@@ -630,37 +642,39 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
 
             fire(schedule, new Date());
 
-            // before P-24: only log.info
+            // P-24 (E-4, D-2): before, only log.info
             assertAll(
                     () -> assertEquals(0, workOrdersOf(pm)),
                     () -> assertFalse(disabled(schedule)),
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("wo-job-" + schedule), jobNamesOf(schedule).stream()
+                            .filter(name -> name.startsWith("wo-")).toList()),
+                    () -> assertEquals(List.of("SKIP_ARCHIVED_ASSET PREVENTIVE_MAINTENANCE " + pm + " " + folioOf(pm)
+                            + " JOB no actor " + data.o1().company().getId()), recordOf(data)));
         }
 
         @Test
-        void ca07_theJobFailsCopyingTheTasks_nothingStays_noAuditRecord_theErrorLeavesTheJob() throws Exception {
+        void ca07_theJobFailsCopyingTheTasks_nothingStays_theRecordSurvivesTheRollback() throws Exception {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             tasks(pm, data.o1().admin(), "P-24 first", "P-24 second");
             long schedule = scheduleOf(pm);
 
-            Exception error;
             int hits;
             try (FaultInjector.Fault fault = faults.failOn("task", Operation.INSERT, 1)) {
-                error = assertThrows(Exception.class, () -> fire(schedule, new Date()));
+                fire(schedule, new Date());
                 hits = fault.hits();
             }
 
-            // before P-24 the job instance Quartz got was a CGLIB proxy (AopUtils.isCglibProxy), so its @Transactional
-            // applied; now the transaction is the one of PreventiveMaintenanceService: all is rolled back either way
-            Exception failure = error;
+            // P-24 (E-4, D-2): before, the error left the job and nothing was recorded; the work order was already
+            // rolled back whole (the transaction of the job)
             int reached = hits;
             assertAll(
                     () -> assertEquals(2, reached),
-                    () -> assertTrue(failure.getMessage() != null || failure.getCause() != null, failure.toString()),
                     () -> assertEquals(0, workOrdersOf(pm)),
                     () -> assertEquals(0, tasksOfWorkOrdersOf(pm)),
-                    () -> assertEquals(List.of(), audit(data)));
+                    () -> assertEquals(List.of("GENERATION_FAILED PREVENTIVE_MAINTENANCE " + pm + " " + folioOf(pm)
+                            + " JOB no actor " + data.o1().company().getId()), recordOf(data)),
+                    () -> assertFalse(disabled(schedule)));
         }
     }
 

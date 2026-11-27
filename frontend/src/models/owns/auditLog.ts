@@ -3,7 +3,10 @@ export const auditActions = [
   'RETIRE',
   'RESTORE',
   'REOPEN',
-  'PURGE'
+  'PURGE',
+  'SKIP_ARCHIVED_ASSET',
+  'GENERATION_FAILED',
+  'SCHEDULING_FAILED'
 ] as const;
 export type AuditAction = typeof auditActions[number];
 
