@@ -174,7 +174,7 @@ public class PreventiveMaintenanceService {
                     preventiveMaintenance.getId(), preventiveMaintenance.getAsset().getId());
             auditLogService.record(auditTarget(preventiveMaintenance), null, AuditAction.SKIP_ARCHIVED_ASSET,
                     AuditSource.JOB, Map.of(), 0);
-            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule.getId(), new Date());
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule.getId(), new Date(), AuditSource.JOB);
             return Optional.empty();
         }
         if (workOrderRepository.existsByParentPreventiveMaintenance_IdAndCreatedByIsNullAndCreatedAtGreaterThanEqual(
@@ -410,6 +410,11 @@ public class PreventiveMaintenanceService {
         return preventiveMaintenanceRepository.findByIdInAndCompany_Id(ids, companyId);
     }
 
+    /**
+     * P-24 (E-5, D-P24-4): one row of the import, in one transaction: if the scheduler fails, the row is rolled back
+     * and the import ends with its error.
+     */
+    @Transactional
     public void importPreventiveMaintenance(PreventiveMaintenance preventiveMaintenance,
                                             PreventiveMaintenanceImportDTO pmImportDTO, Company company) {
         checkUsageBasedLimit(company);

@@ -97,7 +97,7 @@ public class ScheduleService {
      * work orders without reaction, which stays where it was (creation and edition of the schedule).
      */
     public void resumeWorkOrder(Schedule schedule) {
-        stopScheduleJobs(schedule.getId());
+        stopJobsOrFail(schedule.getId());
         schedule(schedule, null);
     }
 
@@ -142,7 +142,7 @@ public class ScheduleService {
                                         .orElse(null);
                         if (lastCompletedWorkOrder == null) return;
                         scheduleNextWorkOrderJobAfterCompletion(schedule.getId(),
-                                lastCompletedWorkOrder.getCompletedOn());
+                                lastCompletedWorkOrder.getCompletedOn(), source == null ? AuditSource.API : source);
                         return; // Exit after scheduling completion-based job
                     }
                 } else { // SCHEDULED_DATE
@@ -247,8 +247,8 @@ public class ScheduleService {
                 }
 
             } catch (SchedulerException e) {
-                log.error("Error scheduling quartz job for schedule " + schedule.getId(), e);
-                // Depending on your error handling policy, you might want to throw a RuntimeException here
+                // P-24 (E-5, D-P24-4): the route fails whole, so no preventive maintenance stays active without jobs
+                throw notScheduled(schedule.getId(), e);
             }
         }
     }
@@ -256,8 +256,26 @@ public class ScheduleService {
     public void reScheduleWorkOrder(Schedule newSchedule, AuditSource source) {
         // Quartz "reschedule" is best handled by deleting and recreating
         // to ensure all parameters (trigger times, data map) are fresh.
-        stopScheduleJobs(newSchedule.getId());
+        stopJobsOrFail(newSchedule.getId());
         scheduleWorkOrder(newSchedule, source);
+    }
+
+    /**
+     * P-24 (E-5): the message of a route that failed because the scheduler failed; its transaction is rolled back.
+     */
+    public static final String NOT_SCHEDULED_MESSAGE = "The preventive maintenance could not be scheduled";
+
+    private void stopJobsOrFail(Long scheduleId) {
+        try {
+            deleteJobsOf(scheduleId);
+        } catch (SchedulerException e) {
+            throw notScheduled(scheduleId, e);
+        }
+    }
+
+    private static CustomException notScheduled(Long scheduleId, SchedulerException e) {
+        log.error("Error scheduling quartz job for schedule " + scheduleId, e);
+        return new CustomException(NOT_SCHEDULED_MESSAGE, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     public void stopScheduleJobs(Long scheduleId) {
@@ -369,6 +387,14 @@ public class ScheduleService {
     // =========================================================================================
 
     public void scheduleNextWorkOrderJobAfterCompletion(Long scheduleId, Date completedDate) {
+        scheduleNextWorkOrderJobAfterCompletion(scheduleId, completedDate, AuditSource.API);
+    }
+
+    /**
+     * Chains the next occurrence of a schedule based on the completed date. P-24 (E-5, D-P24-4): if the scheduler
+     * fails, the route goes on and the failure is recorded without actor, with the {@code source} of the route.
+     */
+    public void scheduleNextWorkOrderJobAfterCompletion(Long scheduleId, Date completedDate, AuditSource source) {
         Optional<Schedule> scheduleOpt = scheduleRepository.findById(scheduleId);
         if (!scheduleOpt.isPresent()) return;
 
@@ -437,6 +463,8 @@ public class ScheduleService {
 
         } catch (SchedulerException e) {
             log.error("Failed to chain next schedule for ID " + schedule.getId(), e);
+            auditLogService.record(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, pm.getId(), pm.getCustomId(),
+                    pm.getName(), pm.getCompany().getId()), null, AuditAction.SCHEDULING_FAILED, source, Map.of(), 0);
         }
     }
 

@@ -2,6 +2,8 @@ package com.grash.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.dto.imports.PreventiveMaintenanceImportDTO;
+import com.grash.exception.CustomException;
 import com.grash.integration.support.Concurrently;
 import com.grash.integration.support.FaultInjector;
 import com.grash.integration.support.FaultInjector.Operation;
@@ -13,6 +15,8 @@ import com.grash.integration.support.TestRecords;
 import com.grash.job.WorkOrderCreationJob;
 import com.grash.model.Asset;
 import com.grash.model.User;
+import com.grash.model.enums.Status;
+import com.grash.service.ImportService;
 import com.grash.service.ScheduleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -65,7 +69,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * for one occurrence, the jobs left after deleting, rescheduling, pausing and resuming a preventive maintenance based
  * on the completed date, an occurrence missed while the scheduler is stopped (by recurrence type and for the one-shot
  * jobs), the archived asset, a failure while the job creates the work order, a failure of the scheduler, the disabled
- * technician and the manual trigger.
+ * technician and the manual trigger. The tests of what P-24 changes are updated to its contract, as step 8 of the
+ * order allows, each with what it did before; the missed occurrence (D-P24-1, debt) still shows today's behavior.
  * <p>
  * The job is run the way Quartz runs it in production: a new instance from {@code createBean} (with its proxies) and
  * {@code execute}. The tests use Quartz in memory ({@code RAMJobStore}); the missed occurrence is reproduced on the
@@ -84,6 +89,7 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
     private final FaultInjector faults;
     private final Scheduler scheduler;
     private final ScheduleService scheduleService;
+    private final ImportService importService;
     private final ApplicationContext context;
     private final List<CommonData> created = new ArrayList<>();
     private final List<Long> schedules = new ArrayList<>();
@@ -94,6 +100,7 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
                                                                     ObjectMapper objectMapper, JdbcTemplate jdbc,
                                                                     Scheduler scheduler,
                                                                     ScheduleService scheduleService,
+                                                                    ImportService importService,
                                                                     ApplicationContext context) {
         this.organizations = organizations;
         this.records = records;
@@ -103,6 +110,7 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
         this.faults = new FaultInjector(jdbc);
         this.scheduler = scheduler;
         this.scheduleService = scheduleService;
+        this.importService = importService;
         this.context = context;
     }
 
@@ -686,13 +694,16 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
     class SchedulerFails {
 
         /**
-         * Runs {@code action} while every {@code scheduleJob} of {@link ScheduleService} fails.
+         * Runs {@code action} while every {@code scheduleJob} (or, with {@code stopping}, every {@code deleteJobs})
+         * of {@link ScheduleService} fails. The tests use Quartz in memory: what the failed transaction rolls back
+         * of Quartz itself is checked on the stack, with the JDBC store (step 9).
          */
-        private void whileSchedulingFails(ThrowingRunnable action) throws Exception {
+        private void whileSchedulingFails(boolean stopping, ThrowingRunnable action) throws Exception {
             Object target = AopTestUtils.getUltimateTargetObject(scheduleService);
             Scheduler failing = spy(scheduler);
-            doThrow(new SchedulerException("P-24 injected scheduler failure")).when(failing)
-                    .scheduleJob(any(JobDetail.class), any(Trigger.class));
+            SchedulerException failure = new SchedulerException("P-24 injected scheduler failure");
+            if (stopping) doThrow(failure).when(failing).deleteJobs(any());
+            else doThrow(failure).when(failing).scheduleJob(any(JobDetail.class), any(Trigger.class));
             ReflectionTestUtils.setField(target, "scheduler", failing);
             try {
                 action.run();
@@ -701,49 +712,160 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
             }
         }
 
+        private void whileSchedulingFails(ThrowingRunnable action) throws Exception {
+            whileSchedulingFails(false, action);
+        }
+
+        private long preventiveMaintenancesOf(CommonData data) {
+            return count("SELECT count(*) FROM preventive_maintenance WHERE company_id = ?",
+                    data.o1().company().getId());
+        }
+
+        private int frequencyOf(long schedule) {
+            return jdbc.queryForObject("SELECT frequency FROM schedule WHERE id = ?", Integer.class, schedule);
+        }
+
+        private Response editSchedule(long schedule, User user) {
+            return send(patch("/schedules/" + schedule), "{\"frequency\":2,\"recurrenceType\":\"DAILY\","
+                    + "\"recurrenceBasedOn\":\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\"}", user);
+        }
+
         @Test
-        void ca08_createEditResumeAndChain_succeed_activeWithoutJobs_noAuditRecord() throws Exception {
+        void ca08_create_500_nothingSaved() throws Exception {
             CommonData data = data();
-            User admin = data.o1().admin();
-            long existing = preventiveMaintenance(admin, "DAILY", "COMPLETED_DATE", FUTURE, "");
-            long existingSchedule = scheduleOf(existing);
-            for (JobKey key : jobsOf(existingSchedule)) scheduler.deleteJob(key);
-            long paused = preventiveMaintenance(admin, "");
-            long pausedSchedule = scheduleOf(paused);
-            assertEquals(200, send(patch("/preventive-maintenances/" + paused), "{\"disabled\":true}", admin)
-                    .status());
-            for (JobKey key : jobsOf(pausedSchedule)) scheduler.deleteJob(key);
+            long before = preventiveMaintenancesOf(data);
             List<Response> responses = new ArrayList<>();
-            List<Long> createdSchedules = new ArrayList<>();
 
             whileSchedulingFails(() -> {
                 String name = TestRecords.unique("P-24 PM");
-                Response create = send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\""
+                responses.add(send(post("/preventive-maintenances"), "{\"name\":\"" + name + "\",\"title\":\""
                         + name + "\",\"frequency\":1,\"recurrenceType\":\"DAILY\",\"recurrenceBasedOn\":"
-                        + "\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\"}", admin);
-                responses.add(create);
-                if (create.status() == 200) createdSchedules.add(scheduleOf(json(create).get("id").asLong()));
-                responses.add(send(patch("/schedules/" + existingSchedule), "{\"frequency\":2,\"recurrenceType\":"
-                        + "\"DAILY\",\"recurrenceBasedOn\":\"COMPLETED_DATE\",\"startsOn\":\"" + FUTURE + "\"}",
-                        admin));
-                responses.add(send(patch("/preventive-maintenances/" + paused), "{\"disabled\":false}", admin));
-                scheduleService.scheduleNextWorkOrderJobAfterCompletion(existingSchedule, new Date());
+                        + "\"SCHEDULED_DATE\",\"startsOn\":\"" + FUTURE + "\"}", data.o1().admin()));
             });
-            schedules.addAll(createdSchedules);
 
-            // before P-24: the SchedulerException is only logged; every route answers 200
+            // P-24 (E-5, D-P24-4): before, 200 and an active preventive maintenance without jobs, without a record
+            Response create = responses.get(0);
             assertAll(
-                    () -> assertEquals(List.of(200, 200, 200), responses.stream().map(Response::status).toList(),
+                    () -> assertEquals(500, create.status(), create.toString()),
+                    () -> assertTrue(create.body().contains(ScheduleService.NOT_SCHEDULED_MESSAGE), create.toString()),
+                    () -> assertEquals(before, preventiveMaintenancesOf(data)),
+                    () -> assertEquals(List.of(), audit(data)));
+        }
+
+        @Test
+        void ca08_editSchedule_500_theScheduleUnchanged() throws Exception {
+            CommonData data = data();
+            long schedule = scheduleOf(preventiveMaintenance(data.o1().admin(), ""));
+            List<Response> responses = new ArrayList<>();
+
+            whileSchedulingFails(() -> responses.add(editSchedule(schedule, data.o1().admin())));
+
+            // P-24 (E-5, D-P24-4): before, 200, the new frequency saved and no jobs
+            assertAll(
+                    () -> assertEquals(500, responses.get(0).status(), responses.get(0).toString()),
+                    () -> assertEquals(1, frequencyOf(schedule)),
+                    () -> assertFalse(disabled(schedule)));
+        }
+
+        @Test
+        void ca08_resume_500_staysPaused_onlyThePauseRecorded() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            assertEquals(200, send(patch("/preventive-maintenances/" + pm), "{\"disabled\":true}",
+                    data.o1().admin()).status());
+            List<Response> responses = new ArrayList<>();
+
+            whileSchedulingFails(() -> responses.add(send(patch("/preventive-maintenances/" + pm),
+                    "{\"disabled\":false}", data.o1().admin())));
+
+            // P-24 (E-5, D-P24-4): before, 200, active without jobs
+            assertAll(
+                    () -> assertEquals(500, responses.get(0).status(), responses.get(0).toString()),
+                    () -> assertTrue(disabled(schedule)),
+                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API"), audit(data)));
+        }
+
+        @Test
+        void ca08_stoppingTheOldJobsFails_editAndResume_500_nothingChanges() throws Exception {
+            CommonData data = data();
+            long edited = scheduleOf(preventiveMaintenance(data.o1().admin(), ""));
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long paused = scheduleOf(pm);
+            assertEquals(200, send(patch("/preventive-maintenances/" + pm), "{\"disabled\":true}",
+                    data.o1().admin()).status());
+            List<Response> responses = new ArrayList<>();
+
+            whileSchedulingFails(true, () -> {
+                responses.add(editSchedule(edited, data.o1().admin()));
+                responses.add(send(patch("/preventive-maintenances/" + pm), "{\"disabled\":false}",
+                        data.o1().admin()));
+            });
+
+            // P-24 (E-5): before, the failure to stop was only logged and the route went on
+            assertAll(
+                    () -> assertEquals(List.of(500, 500), responses.stream().map(Response::status).toList(),
                             responses.toString()),
-                    () -> assertEquals(1, createdSchedules.size()),
-                    () -> assertFalse(disabled(createdSchedules.get(0))),
-                    () -> assertEquals(List.of(), jobsOf(createdSchedules.get(0))),
-                    () -> assertFalse(disabled(existingSchedule)),
-                    () -> assertEquals(List.of(), jobsOf(existingSchedule)),
-                    () -> assertFalse(disabled(pausedSchedule)),
-                    () -> assertEquals(List.of(), jobsOf(pausedSchedule)),
-                    () -> assertEquals(List.of("RETIRE PREVENTIVE_MAINTENANCE API",
-                            "RESTORE PREVENTIVE_MAINTENANCE API"), audit(data)));
+                    () -> assertEquals(1, frequencyOf(edited)),
+                    () -> assertTrue(disabled(paused)),
+                    () -> assertEquals(List.of("wo-job-" + paused), jobNamesOf(paused).stream()
+                            .filter(name -> name.startsWith("wo-")).toList()));
+        }
+
+        @Test
+        void ca08_import_theRowFails_rolledBack_theImportEndsWithItsError() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            String name = jdbc.queryForObject("SELECT name FROM preventive_maintenance WHERE id = ?", String.class,
+                    pm);
+            List<Exception> errors = new ArrayList<>();
+
+            whileSchedulingFails(() -> errors.add(assertThrows(CustomException.class,
+                    () -> importService.importPreventiveMaintenances(List.of(PreventiveMaintenanceImportDTO.builder()
+                            .id(pm).name("P-24 imported").title("P-24 imported").frequency(1)
+                            .recurrenceType("DAILY").recurrenceBasedOn("SCHEDULED_DATE")
+                            // 2099-12-31 as an Excel date
+                            .startsOn(73050.0).build()), data.o1().company()))));
+
+            // P-24 (E-5, D-P24-4): before, the row was saved and counted, active without jobs
+            assertAll(
+                    () -> assertEquals(ScheduleService.NOT_SCHEDULED_MESSAGE, errors.get(0).getMessage()),
+                    () -> assertEquals(name, jdbc.queryForObject("SELECT name FROM preventive_maintenance "
+                            + "WHERE id = ?", String.class, pm)));
+        }
+
+        @Test
+        void ca08_closingAWorkOrderThatChains_200_theFailureRecorded() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE, "");
+            Response triggered = api.call(post("/preventive-maintenances/" + pm + "/trigger-work-order"),
+                    api.login(data.o1().admin()));
+            long workOrder = json(triggered).get("id").asLong();
+            List<Response> responses = new ArrayList<>();
+
+            whileSchedulingFails(() -> responses.add(send(patch("/work-orders/" + workOrder + "/change-status"),
+                    "{\"status\":\"COMPLETE\"}", data.o1().admin())));
+
+            // P-24 (E-5, D-P24-4): before, only "Failed to chain next schedule" in the log
+            assertAll(
+                    () -> assertEquals(200, responses.get(0).status(), responses.get(0).toString()),
+                    () -> assertEquals(Status.COMPLETE.ordinal(), jdbc.queryForObject("SELECT status FROM "
+                            + "work_order WHERE id = ?", Integer.class, workOrder)),
+                    () -> assertEquals(List.of("SCHEDULING_FAILED PREVENTIVE_MAINTENANCE API"), audit(data)));
+        }
+
+        @Test
+        void ca08_theJobChainsForAnArchivedAsset_theFailureRecorded() throws Exception {
+            CommonData data = data();
+            Asset asset = records.asset(data.o1().company());
+            long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE,
+                    ",\"asset\":" + ref(asset.getId()));
+            jdbc.update("UPDATE asset SET archived = true WHERE id = ?", asset.getId());
+
+            whileSchedulingFails(() -> fire(scheduleOf(pm), new Date()));
+
+            assertEquals(List.of("SKIP_ARCHIVED_ASSET PREVENTIVE_MAINTENANCE JOB",
+                    "SCHEDULING_FAILED PREVENTIVE_MAINTENANCE JOB"), audit(data));
         }
     }
 

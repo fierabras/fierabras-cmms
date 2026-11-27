@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -58,6 +59,10 @@ public class ScheduleController {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-24 (E-5, D-P24-4): the edition and the new jobs in one transaction: if the scheduler fails, nothing changes.
+     */
+    @Transactional
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ROLE_CLIENT')")
     public Schedule patch(@Parameter(description = "Schedule fields to update") @Valid @RequestBody SchedulePatchDTO schedule,
