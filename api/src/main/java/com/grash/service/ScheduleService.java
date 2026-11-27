@@ -17,6 +17,7 @@ import com.grash.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.quartz.*;
+import org.quartz.impl.matchers.GroupMatcher;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -71,6 +72,13 @@ public class ScheduleService {
         return scheduleRepository.findById(id);
     }
 
+    /**
+     * P-24 (E-1): the schedule, read after locking its row until the end of the caller's transaction.
+     */
+    public Optional<Schedule> findByIdForUpdate(Long id) {
+        return scheduleRepository.lockById(id).flatMap(scheduleRepository::findById);
+    }
+
     public Collection<Schedule> findByCompany(Long id) {
         return scheduleRepository.findByCompany_Id(id);
     }
@@ -89,7 +97,7 @@ public class ScheduleService {
      * work orders without reaction, which stays where it was (creation and edition of the schedule).
      */
     public void resumeWorkOrder(Schedule schedule) {
-        stopScheduleJobs(schedule.getId());
+        stopJobsOrFail(schedule.getId());
         schedule(schedule, null);
     }
 
@@ -134,7 +142,7 @@ public class ScheduleService {
                                         .orElse(null);
                         if (lastCompletedWorkOrder == null) return;
                         scheduleNextWorkOrderJobAfterCompletion(schedule.getId(),
-                                lastCompletedWorkOrder.getCompletedOn());
+                                lastCompletedWorkOrder.getCompletedOn(), source == null ? AuditSource.API : source);
                         return; // Exit after scheduling completion-based job
                     }
                 } else { // SCHEDULED_DATE
@@ -239,8 +247,8 @@ public class ScheduleService {
                 }
 
             } catch (SchedulerException e) {
-                log.error("Error scheduling quartz job for schedule " + schedule.getId(), e);
-                // Depending on your error handling policy, you might want to throw a RuntimeException here
+                // P-24 (E-5, D-P24-4): the route fails whole, so no preventive maintenance stays active without jobs
+                throw notScheduled(schedule.getId(), e);
             }
         }
     }
@@ -248,22 +256,47 @@ public class ScheduleService {
     public void reScheduleWorkOrder(Schedule newSchedule, AuditSource source) {
         // Quartz "reschedule" is best handled by deleting and recreating
         // to ensure all parameters (trigger times, data map) are fresh.
-        stopScheduleJobs(newSchedule.getId());
+        stopJobsOrFail(newSchedule.getId());
         scheduleWorkOrder(newSchedule, source);
+    }
+
+    /**
+     * P-24 (E-5): the message of a route that failed because the scheduler failed; its transaction is rolled back.
+     */
+    public static final String NOT_SCHEDULED_MESSAGE = "The preventive maintenance could not be scheduled";
+
+    private void stopJobsOrFail(Long scheduleId) {
+        try {
+            deleteJobsOf(scheduleId);
+        } catch (SchedulerException e) {
+            throw notScheduled(scheduleId, e);
+        }
+    }
+
+    private static CustomException notScheduled(Long scheduleId, SchedulerException e) {
+        log.error("Error scheduling quartz job for schedule " + scheduleId, e);
+        return new CustomException(NOT_SCHEDULED_MESSAGE, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     public void stopScheduleJobs(Long scheduleId) {
         try {
-            // Delete Work Order Job
-            scheduler.deleteJob(new JobKey("wo-job-" + scheduleId, "wo-group"));
-
-            // Delete Notification Job (it might not exist, but Quartz handles that gracefully usually, or returns
-            // false)
-            scheduler.deleteJob(new JobKey("notif-job-" + scheduleId, "notif-group"));
-
+            deleteJobsOf(scheduleId);
         } catch (SchedulerException e) {
             log.error("Error stopping quartz jobs for schedule " + scheduleId, e);
         }
+    }
+
+    /**
+     * P-24 (E-2, TD-P15-01): every job of the schedule: its work order job, its notification job and each chained
+     * occurrence ({@code wo-job-chained-<id>-<time>}).
+     */
+    private void deleteJobsOf(Long scheduleId) throws SchedulerException {
+        List<JobKey> keys = new ArrayList<>(List.of(new JobKey("wo-job-" + scheduleId, "wo-group"),
+                new JobKey("notif-job-" + scheduleId, "notif-group")));
+        String chained = "wo-job-chained-" + scheduleId + "-";
+        scheduler.getJobKeys(GroupMatcher.jobGroupEquals("wo-group")).stream()
+                .filter(key -> key.getName().startsWith(chained)).forEach(keys::add);
+        scheduler.deleteJobs(keys);
     }
 
     private void scheduleNotificationJob(
@@ -354,6 +387,14 @@ public class ScheduleService {
     // =========================================================================================
 
     public void scheduleNextWorkOrderJobAfterCompletion(Long scheduleId, Date completedDate) {
+        scheduleNextWorkOrderJobAfterCompletion(scheduleId, completedDate, AuditSource.API);
+    }
+
+    /**
+     * Chains the next occurrence of a schedule based on the completed date. P-24 (E-5, D-P24-4): if the scheduler
+     * fails, the route goes on and the failure is recorded without actor, with the {@code source} of the route.
+     */
+    public void scheduleNextWorkOrderJobAfterCompletion(Long scheduleId, Date completedDate, AuditSource source) {
         Optional<Schedule> scheduleOpt = scheduleRepository.findById(scheduleId);
         if (!scheduleOpt.isPresent()) return;
 
@@ -390,6 +431,8 @@ public class ScheduleService {
 
         // 2. Schedule a "One-Shot" Job for that date
         try {
+            // P-24 (E-2, D-P24-5): the new occurrence replaces the pending one, and its notification too
+            deleteJobsOf(schedule.getId());
             JobKey jobKey = new JobKey("wo-job-chained-" + schedule.getId() + "-" + nextRunDate.getTime(), "wo-group");
 
             JobDetail woJob = JobBuilder.newJob(WorkOrderCreationJob.class)
@@ -420,6 +463,8 @@ public class ScheduleService {
 
         } catch (SchedulerException e) {
             log.error("Failed to chain next schedule for ID " + schedule.getId(), e);
+            auditLogService.record(new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, pm.getId(), pm.getCustomId(),
+                    pm.getName(), pm.getCompany().getId()), null, AuditAction.SCHEDULING_FAILED, source, Map.of(), 0);
         }
     }
 

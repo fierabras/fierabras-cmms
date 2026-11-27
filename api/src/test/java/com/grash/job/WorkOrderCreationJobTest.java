@@ -1,97 +1,75 @@
 package com.grash.job;
 
-import com.grash.model.PreventiveMaintenance;
-import com.grash.model.Schedule;
-import com.grash.repository.ScheduleRepository;
 import com.grash.service.PreventiveMaintenanceService;
-import com.grash.service.ScheduleService;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.quartz.JobDataMap;
 import org.quartz.JobExecutionContext;
 
-import java.util.Optional;
+import java.util.Date;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
+/**
+ * P-24 (E-1): the job only reads the schedule and the occurrence and delegates; the guards are in
+ * {@link PreventiveMaintenanceService#generateScheduledWorkOrder} (integration tests). Before P-24 the job held
+ * the guards itself and called {@code createWorkOrderFromPreventiveMaintenance}.
+ */
 @ExtendWith(MockitoExtension.class)
 class WorkOrderCreationJobTest {
 
-    @Mock
-    private ScheduleRepository scheduleRepository;
-    @Mock
-    private ScheduleService scheduleService;
     @Mock
     private PreventiveMaintenanceService preventiveMaintenanceService;
 
     @InjectMocks
     private WorkOrderCreationJob workOrderCreationJob;
 
-    private Schedule schedule;
-
-    @BeforeEach
-    void setUp() {
-        PreventiveMaintenance preventiveMaintenance = new PreventiveMaintenance();
-        preventiveMaintenance.setId(1L);
-        schedule = new Schedule(preventiveMaintenance);
-        schedule.setId(1L);
-        schedule.setDisabled(false);
-    }
-
-    private JobExecutionContext contextWithScheduleId(long scheduleId) {
+    private JobExecutionContext context(long scheduleId, Date scheduledFireTime) {
         JobDataMap jobDataMap = new JobDataMap();
         jobDataMap.put("scheduleId", scheduleId);
         JobExecutionContext context = mock(JobExecutionContext.class);
         when(context.getMergedJobDataMap()).thenReturn(jobDataMap);
+        when(context.getScheduledFireTime()).thenReturn(scheduledFireTime);
         return context;
     }
 
     @Test
-    void scheduleNotFound_returnsWithoutCreatingWorkOrder() {
-        when(scheduleRepository.findById(1L)).thenReturn(Optional.empty());
+    void theOccurrenceIsTheScheduledFireTime() {
+        Date scheduledFireTime = new Date(1_000_000L);
 
-        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(contextWithScheduleId(1L)));
+        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(context(1L, scheduledFireTime)));
 
-        verify(scheduleService, never()).checkIfWeeklyShouldRun(any());
-        verify(preventiveMaintenanceService, never()).createWorkOrderFromPreventiveMaintenance(any());
+        verify(preventiveMaintenanceService).generateScheduledWorkOrder(1L, scheduledFireTime);
     }
 
     @Test
-    void disabledSchedule_returnsWithoutCreatingWorkOrder() {
-        schedule.setDisabled(true);
-        when(scheduleRepository.findById(1L)).thenReturn(Optional.of(schedule));
+    void withoutScheduledFireTime_theOccurrenceIsNow() {
+        long before = System.currentTimeMillis();
 
-        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(contextWithScheduleId(1L)));
+        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(context(1L, null)));
 
-        verify(scheduleService, never()).checkIfWeeklyShouldRun(any());
-        verify(preventiveMaintenanceService, never()).createWorkOrderFromPreventiveMaintenance(any());
+        ArgumentCaptor<Date> occurrence = ArgumentCaptor.forClass(Date.class);
+        verify(preventiveMaintenanceService).generateScheduledWorkOrder(eq(1L), occurrence.capture());
+        assertTrue(occurrence.getValue().getTime() >= before);
     }
 
     @Test
-    void weeklyShouldNotRun_returnsWithoutCreatingWorkOrder() {
-        when(scheduleRepository.findById(1L)).thenReturn(Optional.of(schedule));
-        when(scheduleService.checkIfWeeklyShouldRun(schedule)).thenReturn(false);
+    void generatingFails_recordedApart_notRethrown() {
+        Date scheduledFireTime = new Date(1_000_000L);
+        when(preventiveMaintenanceService.generateScheduledWorkOrder(1L, scheduledFireTime))
+                .thenThrow(new IllegalStateException("P-24"));
 
-        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(contextWithScheduleId(1L)));
+        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(context(1L, scheduledFireTime)));
 
-        verify(preventiveMaintenanceService, never()).createWorkOrderFromPreventiveMaintenance(any());
-    }
-
-    @Test
-    void validSchedule_createsWorkOrderFromPreventiveMaintenance() {
-        when(scheduleRepository.findById(1L)).thenReturn(Optional.of(schedule));
-        when(scheduleService.checkIfWeeklyShouldRun(schedule)).thenReturn(true);
-
-        assertDoesNotThrow(() -> workOrderCreationJob.executeInternal(contextWithScheduleId(1L)));
-
-        verify(preventiveMaintenanceService).createWorkOrderFromPreventiveMaintenance(schedule.getPreventiveMaintenance());
+        verify(preventiveMaintenanceService).recordGenerationFailure(1L);
     }
 
     @Test
@@ -102,7 +80,7 @@ class WorkOrderCreationJobTest {
 
         assertThrows(ClassCastException.class, () -> workOrderCreationJob.executeInternal(context));
 
-        verify(scheduleRepository, never()).findById(anyLong());
-        verify(preventiveMaintenanceService, never()).createWorkOrderFromPreventiveMaintenance(any());
+        verify(preventiveMaintenanceService, never()).generateScheduledWorkOrder(anyLong(), any());
+        verify(preventiveMaintenanceService, never()).recordGenerationFailure(anyLong());
     }
 }

@@ -16,6 +16,7 @@ import com.grash.model.*;
 import com.grash.model.enums.*;
 
 import com.grash.repository.PreventiveMaintenanceRepository;
+import com.grash.repository.WorkOrderRepository;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.EntityManager;
@@ -66,6 +68,7 @@ public class PreventiveMaintenanceService {
     private final FileService fileService;
     private final DeletionService deletionService;
     private final AuditLogService auditLogService;
+    private final WorkOrderRepository workOrderRepository;
 
 
     @Transactional
@@ -143,6 +146,62 @@ public class PreventiveMaintenanceService {
                 disabled ? AuditAction.RETIRE : AuditAction.RESTORE, AuditSource.API, Map.of(), 0);
         if (!disabled) scheduleService.resumeWorkOrder(schedule);
         return preventiveMaintenance;
+    }
+
+    /**
+     * P-24 (E-1): what the work order job does for one occurrence of a schedule, in one transaction. The occurrence
+     * is the scheduled fire time. The row of the schedule is locked, so a second run of the same occurrence waits
+     * and then finds the work order the job already generated (no creator, created at or after the occurrence) and
+     * creates none; a manual one does not count. Nothing is generated for a missing or paused schedule, after its
+     * end date, or out of its weeks. An archived asset generates no work order, is recorded without actor (CA-P24-06)
+     * and the schedule goes on (P-14b, D-1).
+     *
+     * @return the generated work order, or empty
+     */
+    @Transactional
+    public Optional<WorkOrder> generateScheduledWorkOrder(Long scheduleId, Date occurrence) {
+        Schedule schedule = scheduleService.findByIdForUpdate(scheduleId).orElse(null);
+        if (schedule == null || schedule.isDisabled()) return Optional.empty();
+        // P-24 (H-3): a schedule based on the completed date chains occurrences without an end of their own
+        if (schedule.getEndsOn() != null && occurrence.after(schedule.getEndsOn())) return Optional.empty();
+        if (!scheduleService.checkIfWeeklyShouldRun(schedule)) return Optional.empty();
+
+        PreventiveMaintenance preventiveMaintenance = schedule.getPreventiveMaintenance();
+        // P-14b (D-1): no work order cites an archived asset; the schedule goes on (a schedule based on the completed
+        // date chains its next occurrence from now, as a completion would)
+        if (!AssetStateGuard.admits(preventiveMaintenance.getAsset())) {
+            log.info("P-14b: preventive maintenance {} generated no work order: asset {} is archived",
+                    preventiveMaintenance.getId(), preventiveMaintenance.getAsset().getId());
+            auditLogService.record(auditTarget(preventiveMaintenance), null, AuditAction.SKIP_ARCHIVED_ASSET,
+                    AuditSource.JOB, Map.of(), 0);
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule.getId(), new Date(), AuditSource.JOB);
+            return Optional.empty();
+        }
+        if (workOrderRepository.existsByParentPreventiveMaintenance_IdAndCreatedByIsNullAndCreatedAtGreaterThanEqual(
+                preventiveMaintenance.getId(), occurrence)) {
+            log.info("P-24: the occurrence {} of schedule {} already generated its work order", occurrence,
+                    scheduleId);
+            return Optional.empty();
+        }
+        return Optional.of(createWorkOrderFromPreventiveMaintenance(preventiveMaintenance));
+    }
+
+    /**
+     * P-24 (E-4, CA-P24-07): records, in a transaction of its own, that an occurrence of the schedule generated no
+     * work order because creating it failed; that transaction was rolled back whole and is not retried (D-P24-6).
+     * The record does not keep the text of the exception. Nothing if the schedule no longer exists.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordGenerationFailure(Long scheduleId) {
+        scheduleService.findById(scheduleId).map(Schedule::getPreventiveMaintenance).ifPresent(preventiveMaintenance ->
+                auditLogService.record(auditTarget(preventiveMaintenance), null, AuditAction.GENERATION_FAILED,
+                        AuditSource.JOB, Map.of(), 0));
+    }
+
+    private static AuditTarget auditTarget(PreventiveMaintenance preventiveMaintenance) {
+        return new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, preventiveMaintenance.getId(),
+                preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                preventiveMaintenance.getCompany().getId());
     }
 
     @Transactional
@@ -351,6 +410,11 @@ public class PreventiveMaintenanceService {
         return preventiveMaintenanceRepository.findByIdInAndCompany_Id(ids, companyId);
     }
 
+    /**
+     * P-24 (E-5, D-P24-4): one row of the import, in one transaction: if the scheduler fails, the row is rolled back
+     * and the import ends with its error.
+     */
+    @Transactional
     public void importPreventiveMaintenance(PreventiveMaintenance preventiveMaintenance,
                                             PreventiveMaintenanceImportDTO pmImportDTO, Company company) {
         checkUsageBasedLimit(company);
