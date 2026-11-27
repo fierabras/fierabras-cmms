@@ -789,27 +789,37 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
         @Test
         void ca08_stoppingTheOldJobsFails_editAndResume_500_nothingChanges() throws Exception {
             CommonData data = data();
-            long edited = scheduleOf(preventiveMaintenance(data.o1().admin(), ""));
-            long pm = preventiveMaintenance(data.o1().admin(), "");
+            // without notification jobs, so that only the chained job could block the new ones
+            jdbc.update("UPDATE general_preferences SET days_before_prev_maint_notification = 0 "
+                    + "WHERE company_settings_id = ?", data.o1().company().getCompanySettings().getId());
+            long edited = scheduleOf(preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE,
+                    ""));
+            long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE, "");
             long paused = scheduleOf(pm);
+            Date completed = Date.from(Instant.now().plus(10, ChronoUnit.DAYS));
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(edited, completed);
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(paused, completed);
             assertEquals(200, send(patch("/preventive-maintenances/" + pm), "{\"disabled\":true}",
                     data.o1().admin()).status());
             List<Response> responses = new ArrayList<>();
 
             whileSchedulingFails(true, () -> {
-                responses.add(editSchedule(edited, data.o1().admin()));
+                responses.add(send(patch("/schedules/" + edited), "{\"frequency\":2,\"recurrenceType\":"
+                        + "\"DAILY\",\"recurrenceBasedOn\":\"COMPLETED_DATE\",\"startsOn\":\"" + FUTURE + "\"}",
+                        data.o1().admin()));
                 responses.add(send(patch("/preventive-maintenances/" + pm), "{\"disabled\":false}",
                         data.o1().admin()));
             });
 
-            // P-24 (E-5): before, the failure to stop was only logged and the route went on
+            // P-24 (E-5): before, the failure to stop was only logged and the route went on: the chained job stayed
+            // beside the new one
             assertAll(
                     () -> assertEquals(List.of(500, 500), responses.stream().map(Response::status).toList(),
                             responses.toString()),
                     () -> assertEquals(1, frequencyOf(edited)),
                     () -> assertTrue(disabled(paused)),
-                    () -> assertEquals(List.of("wo-job-" + paused), jobNamesOf(paused).stream()
-                            .filter(name -> name.startsWith("wo-")).toList()));
+                    () -> assertEquals(List.of("wo-job-chained-" + edited + "-<time>"), jobNamesOf(edited)),
+                    () -> assertEquals(List.of("wo-job-chained-" + paused + "-<time>"), jobNamesOf(paused)));
         }
 
         @Test
