@@ -50,6 +50,13 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, Long>, Jpa
 
     Page<WorkOrder> findByParentPreventiveMaintenance_Id(Long id, Pageable pageable);
 
+    /**
+     * P-24 (E-1): whether the job already generated a work order of the preventive maintenance at or after
+     * {@code since}. The work order of the job has no creator; a manual one has the user who triggered it.
+     */
+    boolean existsByParentPreventiveMaintenance_IdAndCreatedByIsNullAndCreatedAtGreaterThanEqual(Long id,
+                                                                                              Date since);
+
     List<WorkOrder> findByParentPreventiveMaintenance_Id(Long id, Sort sort);
 
     @Query("SELECT w.id FROM WorkOrder w WHERE w.parentRequest.createdBy = :userId")

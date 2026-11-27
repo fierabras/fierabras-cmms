@@ -72,6 +72,13 @@ public class ScheduleService {
         return scheduleRepository.findById(id);
     }
 
+    /**
+     * P-24 (E-1): the schedule, read after locking its row until the end of the caller's transaction.
+     */
+    public Optional<Schedule> findByIdForUpdate(Long id) {
+        return scheduleRepository.lockById(id).flatMap(scheduleRepository::findById);
+    }
+
     public Collection<Schedule> findByCompany(Long id) {
         return scheduleRepository.findByCompany_Id(id);
     }

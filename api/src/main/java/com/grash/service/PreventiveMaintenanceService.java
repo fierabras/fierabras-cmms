@@ -16,6 +16,7 @@ import com.grash.model.*;
 import com.grash.model.enums.*;
 
 import com.grash.repository.PreventiveMaintenanceRepository;
+import com.grash.repository.WorkOrderRepository;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +67,7 @@ public class PreventiveMaintenanceService {
     private final FileService fileService;
     private final DeletionService deletionService;
     private final AuditLogService auditLogService;
+    private final WorkOrderRepository workOrderRepository;
 
 
     @Transactional
@@ -143,6 +145,41 @@ public class PreventiveMaintenanceService {
                 disabled ? AuditAction.RETIRE : AuditAction.RESTORE, AuditSource.API, Map.of(), 0);
         if (!disabled) scheduleService.resumeWorkOrder(schedule);
         return preventiveMaintenance;
+    }
+
+    /**
+     * P-24 (E-1): what the work order job does for one occurrence of a schedule, in one transaction. The occurrence
+     * is the scheduled fire time. The row of the schedule is locked, so a second run of the same occurrence waits
+     * and then finds the work order the job already generated (no creator, created at or after the occurrence) and
+     * creates none; a manual one does not count. Nothing is generated for a missing or paused schedule, after its
+     * end date, or out of its weeks. An archived asset generates no work order and the schedule goes on (P-14b, D-1).
+     *
+     * @return the generated work order, or empty
+     */
+    @Transactional
+    public Optional<WorkOrder> generateScheduledWorkOrder(Long scheduleId, Date occurrence) {
+        Schedule schedule = scheduleService.findByIdForUpdate(scheduleId).orElse(null);
+        if (schedule == null || schedule.isDisabled()) return Optional.empty();
+        // P-24 (H-3): a schedule based on the completed date chains occurrences without an end of their own
+        if (schedule.getEndsOn() != null && occurrence.after(schedule.getEndsOn())) return Optional.empty();
+        if (!scheduleService.checkIfWeeklyShouldRun(schedule)) return Optional.empty();
+
+        PreventiveMaintenance preventiveMaintenance = schedule.getPreventiveMaintenance();
+        // P-14b (D-1): no work order cites an archived asset; the schedule goes on (a schedule based on the completed
+        // date chains its next occurrence from now, as a completion would)
+        if (!AssetStateGuard.admits(preventiveMaintenance.getAsset())) {
+            log.info("P-14b: preventive maintenance {} generated no work order: asset {} is archived",
+                    preventiveMaintenance.getId(), preventiveMaintenance.getAsset().getId());
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule.getId(), new Date());
+            return Optional.empty();
+        }
+        if (workOrderRepository.existsByParentPreventiveMaintenance_IdAndCreatedByIsNullAndCreatedAtGreaterThanEqual(
+                preventiveMaintenance.getId(), occurrence)) {
+            log.info("P-24: the occurrence {} of schedule {} already generated its work order", occurrence,
+                    scheduleId);
+            return Optional.empty();
+        }
+        return Optional.of(createWorkOrderFromPreventiveMaintenance(preventiveMaintenance));
     }
 
     @Transactional

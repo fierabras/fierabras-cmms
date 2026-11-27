@@ -8,12 +8,20 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.Optional;
 
 public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     @Query("SELECT s from Schedule s where s.preventiveMaintenance.company.id = :x ")
     Collection<Schedule> findByCompany_Id(@Param("x") Long id);
 
     void deleteByPreventiveMaintenanceCompany_IdAndIsDemoTrue(Long companyId);
+
+    /**
+     * P-24 (E-1): locks the row of the schedule until the end of the transaction, so that two runs of one
+     * occurrence take turns. Empty if the schedule does not exist.
+     */
+    @Query(value = "SELECT id FROM schedule WHERE id = :id FOR UPDATE", nativeQuery = true)
+    Optional<Long> lockById(@Param("id") Long id);
 
     @Query(value = "SELECT s.* FROM schedule s " +
             "LEFT JOIN (" +

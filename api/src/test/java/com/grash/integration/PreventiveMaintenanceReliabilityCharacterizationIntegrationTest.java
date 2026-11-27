@@ -32,7 +32,6 @@ import org.quartz.TriggerBuilder;
 import org.quartz.TriggerKey;
 import org.quartz.impl.matchers.GroupMatcher;
 import org.quartz.spi.OperableTrigger;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
@@ -268,7 +267,7 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
     class Occurrences {
 
         @Test
-        void ca01_theJobOfOneOccurrenceRunTwice_twoWorkOrders_eachWithItsTasks() throws Exception {
+        void ca01_theJobOfOneOccurrenceRunTwice_oneWorkOrder_withItsTasks() throws Exception {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
             tasks(pm, data.o1().admin(), "P-24 first", "P-24 second");
@@ -278,16 +277,17 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
             fire(schedule, occurrence);
             fire(schedule, occurrence);
 
-            // before P-24: the job does not check whether the occurrence already generated its work order
+            // P-24 (E-1): before, two work orders with their tasks (4)
             assertAll(
-                    () -> assertEquals(2, workOrdersOf(pm)),
-                    () -> assertEquals(4, tasksOfWorkOrdersOf(pm)));
+                    () -> assertEquals(1, workOrdersOf(pm)),
+                    () -> assertEquals(2, tasksOfWorkOrdersOf(pm)));
         }
 
         @Test
-        void ca02_twoSimultaneousRunsOfOneOccurrence_twoWorkOrders() throws Exception {
+        void ca02_twoSimultaneousRunsOfOneOccurrence_oneWorkOrder_noError() throws Exception {
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "");
+            tasks(pm, data.o1().admin(), "P-24 first", "P-24 second");
             long schedule = scheduleOf(pm);
             Date occurrence = new Date();
 
@@ -296,9 +296,24 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
                 return true;
             });
 
+            // P-24 (E-1): before, two work orders
             assertAll(
                     () -> assertTrue(outcomes.stream().allMatch(Concurrently.Outcome::succeeded), outcomes.toString()),
-                    () -> assertEquals(2, workOrdersOf(pm)));
+                    () -> assertEquals(1, workOrdersOf(pm)),
+                    () -> assertEquals(2, tasksOfWorkOrdersOf(pm)),
+                    () -> assertEquals(List.of(), audit(data)));
+        }
+
+        @Test
+        void e1_theNextOccurrence_generatesItsOwnWorkOrder() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            long schedule = scheduleOf(pm);
+            fire(schedule, new Date());
+
+            fire(schedule, new Date(System.currentTimeMillis() + 1));
+
+            assertEquals(2, workOrdersOf(pm));
         }
 
         @Test
@@ -320,6 +335,22 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
         }
 
         @Test
+        void ca09_aManualTriggerDuringTheOccurrence_doesNotConsumeIt() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "");
+            Date occurrence = new Date(System.currentTimeMillis() - 30_000);
+
+            // the job runs late: a manual work order is created after the scheduled fire time, before the job
+            Response manual = api.call(post("/preventive-maintenances/" + pm + "/trigger-work-order"),
+                    api.login(data.o1().admin()));
+            fire(scheduleOf(pm), occurrence);
+
+            assertAll(
+                    () -> assertEquals(200, manual.status(), manual.toString()),
+                    () -> assertEquals(2, workOrdersOf(pm)));
+        }
+
+        @Test
         void ca09_theAssignedTechnicianDisabled_theOccurrenceGeneratesTheWorkOrderWithTheSameTechnician()
                 throws Exception {
             CommonData data = data();
@@ -330,7 +361,7 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
 
             fire(scheduleOf(pm), new Date());
 
-            // EX-11 already holds: the job route does not reject a disabled user
+            // EX-11 already held: the job route does not reject a disabled user
             assertAll(
                     () -> assertEquals(1, workOrdersOf(pm)),
                     () -> assertEquals(technician.getId(), jdbc.queryForObject("SELECT primary_user_id FROM "
@@ -338,6 +369,39 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
                     () -> assertEquals(1, count("SELECT count(*) FROM work_order_assigned_to a JOIN work_order w "
                             + "ON w.id = a.work_order_id WHERE w.parent_preventive_maintenance_id = ? "
                             + "AND a.assigned_to_id = ?", pm, technician.getId())));
+        }
+
+        @Test
+        void h3_completionBasedWithItsEndPassed_noWorkOrder() throws Exception {
+            CommonData data = data();
+            long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE, "");
+            long schedule = scheduleOf(pm);
+            jdbc.update("UPDATE schedule SET ends_on = ? WHERE id = ?",
+                    Date.from(Instant.now().minus(1, ChronoUnit.DAYS)), schedule);
+
+            fire(schedule, new Date());
+
+            // P-24 (H-3): before, a chained occurrence after the end date generated its work order
+            assertEquals(0, workOrdersOf(pm));
+        }
+
+        @Test
+        void guards_missingPausedAndOffWeekSchedules_noWorkOrder() throws Exception {
+            CommonData data = data();
+            long paused = preventiveMaintenance(data.o1().admin(), "");
+            jdbc.update("UPDATE schedule SET disabled = true WHERE id = ?", scheduleOf(paused));
+            // every two weeks, started a week ago: this is a week off
+            long offWeek = preventiveMaintenance(data.o1().admin(), "WEEKLY", "SCHEDULED_DATE",
+                    iso(Date.from(Instant.now().minus(7, ChronoUnit.DAYS))), ",\"daysOfWeek\":[0,1,2,3,4,5,6]");
+            jdbc.update("UPDATE schedule SET frequency = 2 WHERE id = ?", scheduleOf(offWeek));
+
+            fire(scheduleOf(paused), new Date());
+            fire(scheduleOf(offWeek), new Date());
+            fire(-1, new Date());
+
+            assertAll(
+                    () -> assertEquals(0, workOrdersOf(paused)),
+                    () -> assertEquals(0, workOrdersOf(offWeek)));
         }
     }
 
@@ -587,12 +651,11 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
                 hits = fault.hits();
             }
 
-            // the job instance Quartz gets is a CGLIB proxy, so its @Transactional applies: all is rolled back
-            WorkOrderCreationJob job = context.getAutowireCapableBeanFactory().createBean(WorkOrderCreationJob.class);
+            // before P-24 the job instance Quartz got was a CGLIB proxy (AopUtils.isCglibProxy), so its @Transactional
+            // applied; now the transaction is the one of PreventiveMaintenanceService: all is rolled back either way
             Exception failure = error;
             int reached = hits;
             assertAll(
-                    () -> assertTrue(AopUtils.isCglibProxy(job)),
                     () -> assertEquals(2, reached),
                     () -> assertTrue(failure.getMessage() != null || failure.getCause() != null, failure.toString()),
                     () -> assertEquals(0, workOrdersOf(pm)),
