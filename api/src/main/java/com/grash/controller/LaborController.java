@@ -3,6 +3,7 @@ package com.grash.controller;
 import com.grash.dto.LaborPatchDTO;
 import com.grash.dto.SuccessResponse;
 import com.grash.exception.CustomException;
+import com.grash.exception.UniqueViolation;
 import com.grash.model.Labor;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
@@ -18,6 +19,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -75,8 +77,7 @@ public class LaborController {
             // P-12 (E-3, E-8, PPB-33, PPB-34): the timer of a closed or archived work order does not move, and does
             // not reopen it
             WorkOrderStateGuard.check(optionalWorkOrder.get(), WorkOrderStateGuard.Change.CHILD);
-            Optional<Labor> optionalLabor =
-                    laborService.findByWorkOrder(id).stream().filter(labor -> labor.isLogged() && labor.getAssignedTo().getId().equals(user.getId())).findFirst();
+            Optional<Labor> optionalLabor = timerOf(id, user);
             if (start) {
                 WorkOrder workOrder = optionalWorkOrder.get();
                 if (workOrder.getFirstTimeToReact() == null) workOrder.setFirstTimeToReact(new Date());
@@ -97,7 +98,14 @@ public class LaborController {
                 } else {
                     Labor labor = new Labor(user, user.getRate(), new Date(), optionalWorkOrder.get(), true,
                             TimeStatus.RUNNING);
-                    return laborService.create(labor);
+                    try {
+                        return laborService.create(labor);
+                    } catch (DataIntegrityViolationException e) {
+                        // P-21 (C-10): a simultaneous start created the timer first; this one answers with it
+                        if (UniqueViolation.in(e).filter(violation -> Labor.TIMER_INDEX.equals(violation.constraint()))
+                                .isEmpty()) throw e;
+                        return timerOf(id, user).orElseThrow(() -> e);
+                    }
                 }
             } else {
                 if (optionalLabor.isPresent()) {
@@ -110,6 +118,14 @@ public class LaborController {
                 } else throw new CustomException("No timer to stop", HttpStatus.NOT_FOUND);
             }
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * The timer of {@code user} on the work order: its labor entry with {@code logged}, one at most (P-21).
+     */
+    private Optional<Labor> timerOf(Long workOrderId, User user) {
+        return laborService.findByWorkOrder(workOrderId).stream()
+                .filter(labor -> labor.isLogged() && labor.getAssignedTo().getId().equals(user.getId())).findFirst();
     }
 
     @PostMapping("")

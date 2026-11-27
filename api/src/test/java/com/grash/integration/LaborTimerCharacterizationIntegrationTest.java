@@ -102,7 +102,7 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     }
 
     @Test
-    void twoSimultaneousStarts_todayTwoTimers_andTheWorkOrderCountsTimeAndCostTwice() {
+    void twoSimultaneousStarts_oneTimer_andTheWorkOrderCountsTimeAndCostOnce() {
         Context c = context();
 
         List<Outcome<Response>> outcomes;
@@ -117,12 +117,12 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                 () -> assertTrue(outcomes.stream().allMatch(Outcome::succeeded), outcomes.toString()),
                 () -> assertEquals(List.of(200, 200), outcomes.stream().map(o -> o.value().status()).toList()),
                 () -> assertEquals(200, closed.status(), closed.toString()),
-                // today: two timers of the same technician on the same work order
-                () -> assertEquals(2, timers(c)),
-                () -> assertEquals(0, running(c), "closing the work order stops both"),
-                // today: the work order counts the hour, and its cost, twice
-                () -> assertDuration(2 * HOUR, laborTime(c)),
-                () -> assertEquals(2 * RATE, laborCost(c)));
+                // P-21 (C-10): before, two timers of the same technician on the same work order
+                () -> assertEquals(1, timers(c)),
+                () -> assertEquals(0, running(c), "closing the work order stops it"),
+                // P-21 (C-10): before, the work order counted the hour, and its cost, twice
+                () -> assertDuration(HOUR, laborTime(c)),
+                () -> assertEquals(RATE, laborCost(c)));
     }
 
     // =====================================================================================================
@@ -189,7 +189,7 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     // =====================================================================================================
 
     @Test
-    void postLabors_withLoggedTrue_todayCreatesASecondTimerOfTheTechnician() {
+    void postLabors_withLoggedTrue_aSecondTimerOfTheTechnician_isRejected() {
         Context c = context();
         assertEquals(200, start(c).status());
 
@@ -198,14 +198,14 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                 "assignedTo", Map.of("id", c.technician().getId()),
                 "logged", true, "status", "RUNNING", "startedAt", System.currentTimeMillis()));
 
+        // P-21 (D-P21-2): before, 200 and a second timer of the technician
         assertAll(
-                () -> assertEquals(200, created.status(), created.toString()),
-                () -> assertTrue(json(created).get("logged").asBoolean()),
-                () -> assertEquals(2, timers(c)));
+                () -> assertEquals(409, created.status(), created.toString()),
+                () -> assertEquals(1, timers(c)));
     }
 
     @Test
-    void patchLabors_reassigningATimer_toATechnicianWithATimer_todayLeavesHimTwo() {
+    void patchLabors_reassigningATimer_toATechnicianWithATimer_isRejected() {
         Context c = context();
         Long adminTimer = id(api.call(post("/labors/work-order/" + c.workOrder().getId()), api.login(c.admin())));
         assertEquals(200, start(c).status());
@@ -214,9 +214,10 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
                 "assignedTo", Map.of("id", c.technician().getId()),
                 "startedAt", System.currentTimeMillis()));
 
+        // P-21 (D-P21-2): before, 200 and two timers of the technician
         assertAll(
-                () -> assertEquals(200, reassigned.status(), reassigned.toString()),
-                () -> assertEquals(2, timers(c)));
+                () -> assertEquals(409, reassigned.status(), reassigned.toString()),
+                () -> assertEquals(1, timers(c)));
     }
 
     // =====================================================================================================
@@ -227,19 +228,20 @@ class LaborTimerCharacterizationIntegrationTest extends AbstractIntegrationTest 
     void aUniqueIndexOnTheTimer_cannotBeCreatedOverRepeatedTimers() {
         Context c = context();
         assertEquals(200, start(c).status());
-        assertEquals(200, workOrders.call(post("/labors"), api.login(c.admin()), Map.of(
-                "workOrder", Map.of("id", c.workOrder().getId()),
-                "assignedTo", Map.of("id", c.technician().getId()),
-                "logged", true, "startedAt", System.currentTimeMillis())).status());
 
-        try {
-            DataAccessException failure = assertThrows(DataAccessException.class, () -> jdbc.execute(
-                    "CREATE UNIQUE INDEX p21_probe ON labor (work_order_id, assigned_to_id) WHERE logged"));
-            assertTrue(String.valueOf(failure.getMostSpecificCause().getMessage())
-                    .contains("could not create unique index"), failure.getMostSpecificCause().getMessage());
-        } finally {
-            jdbc.execute("DROP INDEX IF EXISTS p21_probe");
-        }
+        // P-21 (C-10): before, the repeated timer was created with POST /labors and the index failed over it
+        // ("could not create unique index"); now the index exists, and the migration removes the repeated timers
+        // first (LaborTimerIntegrationTest, CA-P21-04)
+        assertAll(
+                () -> assertEquals(List.of("CREATE UNIQUE INDEX uq_labor_timer ON public.labor USING btree "
+                        + "(work_order_id, assigned_to_id) WHERE logged"), jdbc.queryForList(
+                        "SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_labor_timer'", String.class)),
+                () -> assertThrows(DataAccessException.class, () -> jdbc.update("INSERT INTO labor (id, "
+                        + "created_at, updated_at, duration, hourly_rate, include_to_total_time, logged, started_at, "
+                        + "status, company_id, assigned_to_id, work_order_id, is_demo) SELECT nextval('labor_seq'), "
+                        + "now(), now(), 0, 0, true, true, now(), 1, company_id, assigned_to_id, work_order_id, false "
+                        + "FROM labor WHERE work_order_id = ? AND logged", c.workOrder().getId())),
+                () -> assertEquals(1, timers(c)));
     }
 
     // =====================================================================================================

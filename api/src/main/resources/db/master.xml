@@ -279,4 +279,6 @@
              relativeToChangelogFile="true"/>
     <include file="changelog/2026_11_25_1795660001_foreign_key_indexes.xml"
              relativeToChangelogFile="true"/>
+    <include file="changelog/2026_11_26_1795743983_labor_timer_unique.xml"
+             relativeToChangelogFile="true"/>
 </databaseChangeLog>

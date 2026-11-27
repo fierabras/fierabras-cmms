@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.3.xsd">
+
+    <!-- P-21 (C-10): one labor timer per technician and work order, guaranteed by the database, so that two
+         simultaneous "start" requests cannot create two (LaborController answers the second with the first timer).
+         Repeated timers are corrected first (sql/..._merge_repeated_timers.sql): one stays the timer, the others
+         become additional time entries with their time and cost. That data correction cannot be undone, so the
+         rollback only removes the index. Labor without an assigned user does not collide (NULLS DISTINCT). -->
+    <changeSet id="2026_11_26_1795743983_labor_timer_unique" author="fierabras">
+        <sqlFile path="sql/2026_11_26_1795743983_merge_repeated_timers.sql" relativeToChangelogFile="true"
+                 splitStatements="false"/>
+        <sql>CREATE UNIQUE INDEX uq_labor_timer ON labor (work_order_id, assigned_to_id) WHERE logged</sql>
+        <rollback>
+            <sql>DROP INDEX uq_labor_timer</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
