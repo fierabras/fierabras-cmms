@@ -75,7 +75,7 @@ const slice = createSlice({
       const assetIndex = state.assets.content.findIndex(
         (asset) => asset.id === id
       );
-      state.assets.content.splice(assetIndex, 1);
+      if (assetIndex !== -1) state.assets.content.splice(assetIndex, 1);
     },
     setLoadingGet(
       state: AssetState,

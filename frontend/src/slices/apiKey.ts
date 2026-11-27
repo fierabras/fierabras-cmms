@@ -54,7 +54,7 @@ const slice = createSlice({
       const apiKeyIndex = state.apiKeys.content.findIndex(
         (apiKey) => apiKey.id === id
       );
-      state.apiKeys.content.splice(apiKeyIndex, 1);
+      if (apiKeyIndex !== -1) state.apiKeys.content.splice(apiKeyIndex, 1);
     },
     setLoadingGet(
       state: ApiKeyState,

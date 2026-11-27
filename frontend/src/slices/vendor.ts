@@ -73,7 +73,7 @@ const slice = createSlice({
       const vendorIndex = state.vendors.content.findIndex(
         (vendor) => vendor.id === id
       );
-      state.vendors.content.splice(vendorIndex, 1);
+      if (vendorIndex !== -1) state.vendors.content.splice(vendorIndex, 1);
     },
     setLoadingGet(
       state: VendorState,

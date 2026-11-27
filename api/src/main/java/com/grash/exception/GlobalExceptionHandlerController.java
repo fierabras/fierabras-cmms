@@ -2,6 +2,7 @@ package com.grash.exception;
 
 import com.grash.dto.ConflictResponse;
 import com.grash.dto.SuccessResponse;
+import com.grash.model.Labor;
 import org.springframework.boot.web.error.ErrorAttributeOptions;
 import org.springframework.boot.web.servlet.error.DefaultErrorAttributes;
 import org.springframework.boot.web.servlet.error.ErrorAttributes;
@@ -83,7 +84,8 @@ public class GlobalExceptionHandlerController {
      * Any other failure answers 500, except a foreign key that rejects a deletion (PPB-26): that is a 409
      * {@code RECORD_IN_USE} without SQL or constraint names. Deletions with a rule answer their own code before
      * reaching here ({@code DeletionService}). An asset folio already taken (P-20) is a 409
-     * {@code ASSET_FOLIO_TAKEN}: the controller checks it first; this covers two simultaneous requests.
+     * {@code ASSET_FOLIO_TAKEN}: the controller checks it first; this covers two simultaneous requests. A labor entry
+     * that would give a technician a second timer on a work order (P-21) is a 409 {@code LABOR_TIMER_TAKEN}.
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<SuccessResponse> handleException(HttpServletResponse res, Exception ex) {
@@ -94,6 +96,10 @@ public class GlobalExceptionHandlerController {
         if (UniqueViolation.in(ex).filter(violation -> ASSET_FOLIO_CONSTRAINT.equals(violation.constraint()))
                 .isPresent()) {
             return conflict(ConflictException.assetFolioTaken());
+        }
+        if (UniqueViolation.in(ex).filter(violation -> Labor.TIMER_INDEX.equals(violation.constraint()))
+                .isPresent()) {
+            return conflict(ConflictException.laborTimerTaken());
         }
         return new ResponseEntity<>(new SuccessResponse(false, ex.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
     }

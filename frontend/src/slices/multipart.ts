@@ -56,7 +56,7 @@ const slice = createSlice({
       const multiPartIndex = state.multiParts.findIndex(
         (multiPart) => multiPart.id === id
       );
-      state.multiParts.splice(multiPartIndex, 1);
+      if (multiPartIndex !== -1) state.multiParts.splice(multiPartIndex, 1);
     },
     setLoadingGet(
       state: MultiPartState,

@@ -54,7 +54,7 @@ const slice = createSlice({
       const checklistIndex = state.checklists.findIndex(
         (checklist) => checklist.id === id
       );
-      state.checklists.splice(checklistIndex, 1);
+      if (checklistIndex !== -1) state.checklists.splice(checklistIndex, 1);
     },
     setLoadingGet(
       state: ChecklistState,

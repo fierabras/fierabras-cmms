@@ -16,6 +16,7 @@ const conflictKeys: Record<string, string> = {
   WORK_ORDER_NOT_DELETABLE: 'work_order_not_deletable',
   WORK_ORDER_CLOSED: 'work_order_closed',
   WORK_ORDER_RETIRED: 'work_order_retired',
+  LABOR_TIMER_TAKEN: 'labor_timer_taken',
   REQUEST_CLOSED: 'request_closed',
   REQUEST_PORTAL_IN_USE: 'request_portal_in_use',
   REQUEST_UNDER_REVIEW: 'request_under_review',

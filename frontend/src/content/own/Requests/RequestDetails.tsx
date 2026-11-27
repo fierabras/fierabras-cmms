@@ -235,6 +235,7 @@ export default function RequestDetails({
                     <CheckTwoToneIcon />
                   )
                 }
+                disabled={approving}
                 onClick={() => {
                   if (request.asset) setShowAssetStatuses(true);
                   else onApprove();
@@ -284,6 +285,7 @@ export default function RequestDetails({
                 )
               }
               variant={'contained'}
+              disabled={approving}
               onClick={onApprove}
             >
               {t('approve')}

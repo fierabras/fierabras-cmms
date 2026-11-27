@@ -82,7 +82,8 @@ const slice = createSlice({
       const customerIndex = state.customers.content.findIndex(
         (customer) => customer.id === id
       );
-      state.customers.content.splice(customerIndex, 1);
+      if (customerIndex !== -1)
+        state.customers.content.splice(customerIndex, 1);
     },
     setLoadingGet(
       state: CustomerState,

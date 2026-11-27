@@ -29,6 +29,12 @@ public class ConflictException extends CustomException {
     private static final String ASSET_FOLIO_TAKEN_MESSAGE = "Another asset already uses this folio";
 
     /**
+     * P-21: a labor entry would give a technician a second timer on the same work order.
+     */
+    public static final String LABOR_TIMER_TAKEN = "LABOR_TIMER_TAKEN";
+    private static final String LABOR_TIMER_TAKEN_MESSAGE = "This technician already has a timer on this work order";
+
+    /**
      * Names of the blocking types, sorted; {@code null} when there are none.
      */
     private final List<String> blockingTypes;
@@ -56,6 +62,10 @@ public class ConflictException extends CustomException {
 
     public static ConflictException assetFolioTaken() {
         return new ConflictException(ASSET_FOLIO_TAKEN, ASSET_FOLIO_TAKEN_MESSAGE);
+    }
+
+    public static ConflictException laborTimerTaken() {
+        return new ConflictException(LABOR_TIMER_TAKEN, LABOR_TIMER_TAKEN_MESSAGE);
     }
 
     public List<String> getBlockingTypes() {

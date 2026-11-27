@@ -23,6 +23,11 @@ import java.util.stream.Collectors;
 @NoArgsConstructor
 @Schema(description = "Labor entity tracking work hours and costs on work orders")
 public class Labor extends Time {
+    /**
+     * P-21 (C-10): the unique index that keeps one timer ({@code logged}) per technician and work order.
+     */
+    public static final String TIMER_INDEX = "uq_labor_timer";
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     @Schema(description = "Unique identifier", accessMode = Schema.AccessMode.READ_ONLY)

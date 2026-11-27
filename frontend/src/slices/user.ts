@@ -109,7 +109,7 @@ export const slice = createSlice({
     deleteUser(state: UserState, action: PayloadAction<{ id: number }>) {
       const { id } = action.payload;
       const userIndex = state.users.content.findIndex((user) => user.id === id);
-      state.users.content.splice(userIndex, 1);
+      if (userIndex !== -1) state.users.content.splice(userIndex, 1);
     },
     setLoadingGet(
       state: UserState,

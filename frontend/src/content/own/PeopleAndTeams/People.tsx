@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  CircularProgress,
   debounce,
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ import UserDetailsDrawer from './UserDetailsDrawer';
 import User from '../../../models/owns/user';
 import { useParams } from 'react-router-dom';
 import { isNumeric } from 'src/utils/validators';
+import { getErrorMessage } from '../../../utils/api';
 import { useDispatch, useSelector } from '../../../store';
 import { CustomSnackBarContext } from '../../../contexts/CustomSnackBarContext';
 import {
@@ -127,6 +129,7 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
   );
   const [openUpdateModal, setOpenUpdateModal] = useState<boolean>(false);
   const [openDisableModal, setOpenDisableModal] = useState<boolean>(false);
+  const [resendingInvites, setResendingInvites] = useState<boolean>(false);
   const [openEnableModal, setOpenEnableModal] = useState<boolean>(false);
 
   const onQueryChange = (event) => {
@@ -191,11 +194,19 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
     setDetailDrawerOpen(false);
   };
 
+  // P-21 (E-4): one resend at a time, enabled again when all are answered
   const onResendInvites = () => {
-    lastWeekInvitations.forEach((invitation) => {
-      dispatch(inviteUsers(invitation.roleId, [invitation.email], false, true));
-    });
-    showSnackBar(t('users_invite_success'), 'success');
+    setResendingInvites(true);
+    Promise.all(
+      lastWeekInvitations.map((invitation) =>
+        dispatch(
+          inviteUsers(invitation.roleId, [invitation.email], false, true)
+        )
+      )
+    )
+      .then(() => showSnackBar(t('users_invite_success'), 'success'))
+      .catch((err) => showSnackBar(getErrorMessage(err), 'error'))
+      .finally(() => setResendingInvites(false));
   };
 
   const defautfields: Array<IField> = [
@@ -537,6 +548,10 @@ const People = ({ openModal, handleCloseModal, initialEmail }: PropsType) => {
                   })}
             </Typography>
             <Button
+              startIcon={
+                resendingInvites ? <CircularProgress size="1rem" /> : null
+              }
+              disabled={resendingInvites}
               onClick={onResendInvites}
               variant="contained"
               color="secondary"
