@@ -2189,6 +2189,8 @@ const esJSON = {
     'Esta orden de trabajo está completada: su mano de obra, costos, tareas, repuestos, vínculos, archivos, asignados y campos personalizados no pueden cambiar. Reábrala primero.',
   work_order_retired:
     'Esta orden de trabajo está archivada y no puede cambiar. Restáurela primero.',
+  labor_timer_taken:
+    'Este técnico ya tiene un temporizador en esta orden de trabajo. Registre el tiempo como tiempo adicional.',
   request_closed:
     'Esta solicitud ya fue aprobada o rechazada; ya no se puede modificar ni eliminar.',
   request_portal_in_use:

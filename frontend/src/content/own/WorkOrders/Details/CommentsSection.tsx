@@ -48,6 +48,7 @@ export default function CommentsSection(props: CommentsSectionProps) {
   const [plainTextContent, setPlainTextContent] = useState<string>('');
   const [files, setFiles] = useState<any[]>([]);
   const [showFileUpload, setShowFileUpload] = useState<boolean>(false);
+  const [submitting, setSubmitting] = useState<boolean>(false);
   const theme = useTheme();
   const comments = commentsByWorkOrder[workOrderId] ?? [];
 
@@ -58,7 +59,8 @@ export default function CommentsSection(props: CommentsSectionProps) {
 
   const handleSubmit = async () => {
     if (!plainTextContent.trim()) return;
-
+    // P-21 (E-4): disabled while the files upload too, not only on create
+    setSubmitting(true);
     try {
       let fileIds: { id: number }[] = [];
 
@@ -83,6 +85,8 @@ export default function CommentsSection(props: CommentsSectionProps) {
       setShowFileUpload(false);
     } catch (error) {
       console.error('Failed to create comment:', error);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -162,14 +166,19 @@ export default function CommentsSection(props: CommentsSectionProps) {
           <Button
             variant="contained"
             startIcon={
-              loadingCreate ? (
+              loadingCreate || submitting ? (
                 <CircularProgress size="1rem" />
               ) : (
                 <SendTwoToneIcon />
               )
             }
             onClick={handleSubmit}
-            disabled={!plainTextContent.trim() || loadingCreate || disabled}
+            disabled={
+              !plainTextContent.trim() ||
+              loadingCreate ||
+              submitting ||
+              disabled
+            }
           >
             {t('post_comment')}
           </Button>

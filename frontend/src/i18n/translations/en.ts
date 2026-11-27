@@ -2056,6 +2056,8 @@ const locale = {
     'This work order is complete: its labor, costs, tasks, parts, links, files, assignees and custom fields cannot change. Reopen it first.',
   work_order_retired:
     'This work order is archived and cannot change. Restore it first.',
+  labor_timer_taken:
+    'This technician already has a timer on this work order. Add the time as additional time instead.',
   request_closed:
     'This request was already approved or rejected and can no longer be changed or deleted.',
   request_portal_in_use:

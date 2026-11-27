@@ -238,6 +238,7 @@ export default function PurchaseOrderDetails(props: PurchaseOrderDetailsProps) {
                     <ClearTwoToneIcon />
                   )
                 }
+                disabled={approving || cancelling}
                 onClick={onCancel}
                 variant="outlined"
               >
@@ -251,6 +252,7 @@ export default function PurchaseOrderDetails(props: PurchaseOrderDetailsProps) {
                     <CheckTwoToneIcon />
                   )
                 }
+                disabled={approving || cancelling}
                 onClick={onApprove}
                 variant="contained"
               >
