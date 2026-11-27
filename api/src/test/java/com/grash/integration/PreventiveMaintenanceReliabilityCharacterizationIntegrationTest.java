@@ -348,32 +348,38 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
     @Nested
     class JobsLeft {
 
-        private long completionBased(CommonData data) throws SchedulerException {
+        private long completionBased(CommonData data, Date completed) throws SchedulerException {
             long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE, "");
             long schedule = scheduleOf(pm);
             // what closing a work order of the preventive maintenance does (WorkOrderService)
-            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule,
-                    Date.from(Instant.now().plus(10, ChronoUnit.DAYS)));
-            assertEquals(List.of("notif-job-" + schedule, "wo-job-" + schedule, "wo-job-chained-" + schedule
-                    + "-<time>"), jobNamesOf(schedule));
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule, completed);
+            // P-24 (D-P24-5): before, the first one-shot job stayed beside the chained one, and the notification of
+            // the chained occurrence was refused because notif-job-<id> already existed
+            assertEquals(List.of("notif-job-" + schedule, "wo-job-chained-" + schedule + "-<time>"),
+                    jobNamesOf(schedule));
             return pm;
         }
 
+        private long completionBased(CommonData data) throws SchedulerException {
+            return completionBased(data, Date.from(Instant.now().plus(10, ChronoUnit.DAYS)));
+        }
+
         @Test
-        void ca03_deleted_theChainedJobSurvives() throws SchedulerException {
+        void ca03_deleted_noJobLeft() throws SchedulerException {
             CommonData data = data();
             long pm = completionBased(data);
             long schedule = scheduleOf(pm);
 
             Response response = api.call(delete("/preventive-maintenances/" + pm), api.login(data.o1().admin()));
 
+            // P-24 (E-2, TD-P15-01): before, the chained job survived
             assertAll(
                     () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(List.of("wo-job-chained-" + schedule + "-<time>"), jobNamesOf(schedule)));
+                    () -> assertEquals(List.of(), jobNamesOf(schedule)));
         }
 
         @Test
-        void ca03_rescheduled_theChainedJobSurvives_besideTheNewOne() throws SchedulerException {
+        void ca03_rescheduled_onlyTheNewJobs_theNextOccurrenceGeneratesOneWorkOrder() throws Exception {
             CommonData data = data();
             long pm = completionBased(data);
             long schedule = scheduleOf(pm);
@@ -381,15 +387,18 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
             Response response = send(patch("/schedules/" + schedule), "{\"frequency\":2,\"recurrenceType\":"
                     + "\"DAILY\",\"recurrenceBasedOn\":\"COMPLETED_DATE\",\"startsOn\":\"" + FUTURE + "\"}",
                     data.o1().admin());
+            List<String> jobs = jobNamesOf(schedule);
+            fire(schedule, new Date());
 
+            // P-24 (E-2, TD-P15-01): before, the chained job survived beside the new one
             assertAll(
                     () -> assertEquals(200, response.status(), response.toString()),
-                    () -> assertEquals(List.of("notif-job-" + schedule, "wo-job-" + schedule,
-                            "wo-job-chained-" + schedule + "-<time>"), jobNamesOf(schedule)));
+                    () -> assertEquals(List.of("notif-job-" + schedule, "wo-job-" + schedule), jobs),
+                    () -> assertEquals(1, workOrdersOf(pm)));
         }
 
         @Test
-        void ca03_pausedAndResumed_theChainedJobSurvives_besideTheNewOne() throws SchedulerException {
+        void ca03_pausedAndResumed_onlyTheNewJobs_theNextOccurrenceGeneratesOneWorkOrder() throws Exception {
             CommonData data = data();
             long pm = completionBased(data);
             long schedule = scheduleOf(pm);
@@ -397,29 +406,38 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
             Response pause = send(patch("/preventive-maintenances/" + pm), "{\"disabled\":true}", data.o1().admin());
             Response resume = send(patch("/preventive-maintenances/" + pm), "{\"disabled\":false}",
                     data.o1().admin());
+            List<String> jobs = jobNamesOf(schedule);
+            fire(schedule, new Date());
 
+            // P-24 (E-2, TD-P15-01): before, the chained job survived beside the new one
             assertAll(
                     () -> assertEquals(200, pause.status(), pause.toString()),
                     () -> assertEquals(200, resume.status(), resume.toString()),
-                    () -> assertEquals(List.of("notif-job-" + schedule, "wo-job-" + schedule,
-                            "wo-job-chained-" + schedule + "-<time>"), jobNamesOf(schedule)));
+                    () -> assertEquals(List.of("notif-job-" + schedule, "wo-job-" + schedule), jobs),
+                    () -> assertEquals(1, workOrdersOf(pm)));
         }
 
         @Test
-        void chainedTwice_twoChainedJobs_theSecondNotificationIsRefused() throws SchedulerException {
+        void d5_chainedTwice_theNewOccurrenceReplacesThePendingOne_withItsNotification() throws SchedulerException {
             CommonData data = data();
             long pm = completionBased(data);
             long schedule = scheduleOf(pm);
+            Date second = Date.from(Instant.now().plus(12, ChronoUnit.DAYS));
 
-            // closing again after a reopening chains another occurrence; the notification job already exists
-            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule,
-                    Date.from(Instant.now().plus(12, ChronoUnit.DAYS)));
+            // closing again after a reopening chains another occurrence
+            scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule, second);
 
-            // the ObjectAlreadyExistsException of notif-job-<id> is only logged ("Failed to chain next schedule")
+            // P-24 (D-P24-5): before, two chained jobs (two work orders) and the notification of the second refused
+            List<JobKey> chained = chainedJobsOf(schedule);
+            Date notification = scheduler.getTriggersOfJob(new JobKey("notif-job-" + schedule, "notif-group"))
+                    .get(0).getStartTime();
             assertAll(
-                    () -> assertEquals(2, chainedJobsOf(schedule).size()),
-                    () -> assertEquals(1, jobsOf(schedule).stream()
-                            .filter(key -> key.getGroup().equals("notif-group")).count()));
+                    () -> assertEquals(List.of("notif-job-" + schedule, "wo-job-chained-" + schedule + "-<time>"),
+                            jobNamesOf(schedule)),
+                    () -> assertEquals(Date.from(second.toInstant().plus(1, ChronoUnit.DAYS)),
+                            scheduler.getTriggersOfJob(chained.get(0)).get(0).getStartTime()),
+                    () -> assertTrue(Math.abs(notification.getTime() - second.getTime()) <= 3_600_000,
+                            "notification at " + notification));
         }
     }
 
@@ -491,9 +509,9 @@ class PreventiveMaintenanceReliabilityCharacterizationIntegrationTest extends Ab
             CommonData data = data();
             long pm = preventiveMaintenance(data.o1().admin(), "DAILY", "COMPLETED_DATE", FUTURE, "");
             long schedule = scheduleOf(pm);
+            Trigger first = triggerOf(schedule);
             scheduleService.scheduleNextWorkOrderJobAfterCompletion(schedule,
                     Date.from(Instant.now().plus(10, ChronoUnit.DAYS)));
-            Trigger first = triggerOf(schedule);
             Trigger chained = scheduler.getTriggersOfJob(chainedJobsOf(schedule).get(0)).get(0);
             Date missed = Date.from(Instant.now().minus(2, ChronoUnit.HOURS));
 

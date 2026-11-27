@@ -17,6 +17,7 @@ import com.grash.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.quartz.*;
+import org.quartz.impl.matchers.GroupMatcher;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -254,16 +255,23 @@ public class ScheduleService {
 
     public void stopScheduleJobs(Long scheduleId) {
         try {
-            // Delete Work Order Job
-            scheduler.deleteJob(new JobKey("wo-job-" + scheduleId, "wo-group"));
-
-            // Delete Notification Job (it might not exist, but Quartz handles that gracefully usually, or returns
-            // false)
-            scheduler.deleteJob(new JobKey("notif-job-" + scheduleId, "notif-group"));
-
+            deleteJobsOf(scheduleId);
         } catch (SchedulerException e) {
             log.error("Error stopping quartz jobs for schedule " + scheduleId, e);
         }
+    }
+
+    /**
+     * P-24 (E-2, TD-P15-01): every job of the schedule: its work order job, its notification job and each chained
+     * occurrence ({@code wo-job-chained-<id>-<time>}).
+     */
+    private void deleteJobsOf(Long scheduleId) throws SchedulerException {
+        List<JobKey> keys = new ArrayList<>(List.of(new JobKey("wo-job-" + scheduleId, "wo-group"),
+                new JobKey("notif-job-" + scheduleId, "notif-group")));
+        String chained = "wo-job-chained-" + scheduleId + "-";
+        scheduler.getJobKeys(GroupMatcher.jobGroupEquals("wo-group")).stream()
+                .filter(key -> key.getName().startsWith(chained)).forEach(keys::add);
+        scheduler.deleteJobs(keys);
     }
 
     private void scheduleNotificationJob(
@@ -390,6 +398,8 @@ public class ScheduleService {
 
         // 2. Schedule a "One-Shot" Job for that date
         try {
+            // P-24 (E-2, D-P24-5): the new occurrence replaces the pending one, and its notification too
+            deleteJobsOf(schedule.getId());
             JobKey jobKey = new JobKey("wo-job-chained-" + schedule.getId() + "-" + nextRunDate.getTime(), "wo-group");
 
             JobDetail woJob = JobBuilder.newJob(WorkOrderCreationJob.class)
