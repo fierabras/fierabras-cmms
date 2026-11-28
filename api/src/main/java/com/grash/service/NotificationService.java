@@ -8,6 +8,7 @@ import com.grash.mapper.NotificationMapper;
 import com.grash.model.Notification;
 import com.grash.model.User;
 import com.grash.model.PushNotificationToken;
+import com.grash.model.enums.EntityType;
 import com.grash.repository.NotificationRepository;
 import io.github.jav.exposerversdk.*;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +17,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessageSendingOperations;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,16 +33,55 @@ public class NotificationService {
     private final NotificationMapper notificationMapper;
     private final PushNotificationTokenService pushNotificationTokenService;
     private final SimpMessageSendingOperations messagingTemplate;
+    private final ExternalSendService externalSendService;
 
-    @Async
+    /**
+     * P-23 (E-2, E-3): creates the notification through {@link ExternalSendService}, off the thread of the caller;
+     * if it does not fit or fails, it is recorded against the record it is about and never reaches the caller.
+     */
     public void create(Notification notification) {
-        Notification savedNotification = notificationRepository.save(notification);
-        messagingTemplate.convertAndSend("/notifications/" + notification.getUser().getId(), savedNotification);
+        externalSendService.submit(ExternalSendService.Channel.NOTIFICATION, origin(notification), () -> {
+            Notification savedNotification = notificationRepository.save(notification);
+            messagingTemplate.convertAndSend("/notifications/" + notification.getUser().getId(), savedNotification);
+        });
     }
 
-    @Async
+    /**
+     * P-23: as {@link #create}. The failure of the push notification is not recorded (D-6 of G-1).
+     */
     public void createMultiple(List<Notification> notifications, boolean mobile, String title) {
         if (notifications.isEmpty()) return;
+        externalSendService.submit(ExternalSendService.Channel.NOTIFICATION, origin(notifications.get(0)),
+                () -> saveAndSend(notifications, mobile, title));
+    }
+
+    /**
+     * P-23: the record a notification is about; the organization of its user for a notification without one.
+     */
+    static AuditTarget origin(Notification notification) {
+        Long companyId = notification.getUser().getCompany() == null ? null
+                : notification.getUser().getCompany().getId();
+        if (notification.getNotificationType() == null) {
+            return new AuditTarget(EntityType.COMPANY, companyId, null, null, companyId);
+        }
+        EntityType type = switch (notification.getNotificationType()) {
+            case ASSET -> EntityType.ASSET;
+            case WORK_ORDER -> EntityType.WORK_ORDER;
+            case PART -> EntityType.PART;
+            case METER -> EntityType.METER;
+            case LOCATION -> EntityType.LOCATION;
+            case TEAM -> EntityType.TEAM;
+            case REQUEST -> EntityType.REQUEST;
+            case PURCHASE_ORDER -> EntityType.PURCHASE_ORDER;
+            case INFO -> null;
+        };
+        if (type == null || notification.getResourceId() == null) {
+            return new AuditTarget(EntityType.COMPANY, companyId, null, null, companyId);
+        }
+        return new AuditTarget(type, notification.getResourceId(), null, null, companyId);
+    }
+
+    private void saveAndSend(List<Notification> notifications, boolean mobile, String title) {
         List<Notification> savedNotifications = notificationRepository.saveAll(notifications);
         savedNotifications.forEach(notification ->
                 messagingTemplate.convertAndSend("/notifications/" + notification.getUser().getId(), notification));

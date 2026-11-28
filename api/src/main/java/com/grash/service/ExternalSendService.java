@@ -1,9 +1,12 @@
 package com.grash.service;
 
+import com.grash.configuration.ExternalSendConfig;
 import com.grash.model.enums.AuditAction;
 import com.grash.model.enums.AuditSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -15,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * P-23: the door of mail, notifications and webhooks. A send that fails or does not fit never fails the operation
@@ -50,21 +54,44 @@ public class ExternalSendService {
     private record Key(Long companyId, AuditAction action) {
     }
 
+    private final TaskExecutor executor;
     private final AuditLogService auditLogService;
     private final TransactionTemplate newTransaction;
     private final Clock clock;
     private final Map<Key, Instant> lastRecorded = new ConcurrentHashMap<>();
 
     @Autowired
-    public ExternalSendService(AuditLogService auditLogService, PlatformTransactionManager transactionManager) {
-        this(auditLogService, transactionManager, Clock.systemUTC());
+    public ExternalSendService(@Qualifier(ExternalSendConfig.EXECUTOR) TaskExecutor executor,
+                               AuditLogService auditLogService, PlatformTransactionManager transactionManager) {
+        this(executor, auditLogService, transactionManager, Clock.systemUTC());
     }
 
-    ExternalSendService(AuditLogService auditLogService, PlatformTransactionManager transactionManager, Clock clock) {
+    ExternalSendService(TaskExecutor executor, AuditLogService auditLogService,
+                        PlatformTransactionManager transactionManager, Clock clock) {
+        this.executor = executor;
         this.auditLogService = auditLogService;
         this.newTransaction = new TransactionTemplate(transactionManager);
         this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clock;
+    }
+
+    /**
+     * Runs {@code send} on the executor of the sends. If it does not fit, it is dropped; if it throws, it failed.
+     * Both are recorded against {@code origin}, and neither reaches the caller (CA-P23-03, CA-P23-04).
+     */
+    public void submit(Channel channel, AuditTarget origin, Runnable send) {
+        AuditSource source = currentSource();
+        try {
+            executor.execute(() -> {
+                try {
+                    send.run();
+                } catch (RuntimeException e) {
+                    failed(channel, origin, source, e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            discarded(channel, origin, source);
+        }
     }
 
     /**

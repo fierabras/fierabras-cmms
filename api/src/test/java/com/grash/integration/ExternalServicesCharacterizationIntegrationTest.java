@@ -292,7 +292,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    void fullExecutor_closingAWorkOrder_500AndRolledBack() {
+    void fullExecutor_closingAWorkOrder_200AndClosed() {
         CommonData data = data();
         WorkOrder workOrder = workOrders.workOrder(data.o1().company(), data.o1().technician());
         int accepted = fillExecutor();
@@ -300,30 +300,31 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         Response response = send(patch("/work-orders/" + workOrder.getId() + "/change-status"),
                 Map.of("status", "COMPLETE"), data.o1().admin());
 
-        // before P-23: the webhook and the notifications are submitted before the commit; the rejection rolls the
-        // closing back
-        assertTrue(accepted > 0, "the executor (3 threads, a queue of 11) took mails before it was full");
-        assertEquals(500, response.status(), response.toString());
-        assertEquals(Status.OPEN.ordinal(), jdbc.queryForObject("SELECT status FROM work_order WHERE id = ?",
-                Integer.class, workOrder.getId()), "the closing was rolled back");
+        assertTrue(accepted > 0, "the executor took mails before it was full");
+        // before P-23: 500 and the closing rolled back, because the webhook and the notifications were submitted
+        // before the commit and the rejection reached the request
+        assertEquals(200, response.status(), response.toString());
+        assertEquals(Status.COMPLETE.ordinal(), jdbc.queryForObject("SELECT status FROM work_order WHERE id = ?",
+                Integer.class, workOrder.getId()));
     }
 
     @Test
-    void fullExecutor_creatingAWorkOrder_500ButCommitted() {
+    void fullExecutor_creatingAWorkOrder_200() {
         CommonData data = data();
         String title = TestRecords.unique("P-23 WO");
         fillExecutor();
 
         Response response = createWorkOrder(data, title);
 
-        // before P-23: the notification is submitted after the commit; the rejection answers 500 anyway
-        assertEquals(500, response.status(), response.toString());
+        // before P-23: 500 with the work order committed: the rejection of the notification after the commit
+        // reached the request (TD-P13-05)
+        assertEquals(200, response.status(), response.toString());
         assertEquals(1, count("SELECT count(*) FROM work_order WHERE title = ? AND company_id = ?", title,
                 data.o1().company().getId()));
     }
 
     @Test
-    void busyMailThreads_delayTheOtherAsynchronousTasks() {
+    void busyMailThreads_doNotDelayTheNotifications() {
         CommonData data = data();
         for (int i = 0; i < 3; i++) sendMail();
         assertTrue(smtp.awaitAccepted(3, WAIT), "three mails hold the three threads");
@@ -335,13 +336,10 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
                 + data.o1().technician().getId();
 
         assertEquals(200, response.status(), response.toString());
-        pause(Duration.ofSeconds(2));
-        // before P-23: the notification waits behind the mails, as exports and imports do (one executor)
-        assertEquals(0, count(notifications, id), "the notification ran while the mails held the threads");
-        smtp.refuse();
+        // before P-23: the notification waited behind the mails, on the one executor
         long deadline = System.nanoTime() + WAIT.toNanos();
         while (count(notifications, id) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
-        assertEquals(1, count(notifications, id), "the notification ran once the mails were released");
+        assertEquals(1, count(notifications, id), "the notification ran while the mails held their threads");
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -349,7 +347,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    void failingWebhook_onlyInTheLog_noAuditRecord() {
+    void failingWebhook_recordedInTheAuditLog() {
         CommonData data = data();
         records.endpoint(data.o1().company(), WebhookEvent.NEW_WORK_ORDER);
         webhookDouble.failOn(CallRecorder.ANY, new IllegalStateException("P-23 destination down"));
@@ -358,9 +356,10 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
 
         assertEquals(200, response.status(), response.toString());
         assertTrue(webhookDouble.awaitCalls("NEW_WORK_ORDER", 1, WAIT).get(0).failed());
-        pause(Duration.ofMillis(500));
-        // before P-23: the failure is only written to the log
-        assertEquals(0, auditRecords(data));
+        long deadline = System.nanoTime() + WAIT.toNanos();
+        while (auditRecords(data) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
+        // before P-23: the failure was only written to the log (0 records)
+        assertEquals(1, auditRecords(data));
     }
 
     @Test

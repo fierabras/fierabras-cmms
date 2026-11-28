@@ -7,6 +7,9 @@ import com.grash.service.ExternalSendService.Channel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -20,6 +23,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -74,7 +79,42 @@ class ExternalSendServiceTest {
         transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         clock = new TestClock();
-        service = new ExternalSendService(auditLogService, transactionManager, clock);
+        service = new ExternalSendService(new SyncTaskExecutor(), auditLogService, transactionManager, clock);
+    }
+
+    @Test
+    void sendThatThrows_recordedAsFailed_neverReachesTheCaller() {
+        assertDoesNotThrow(() -> service.submit(Channel.WEBHOOK, WORK_ORDER, () -> {
+            throw new IllegalStateException("destination down");
+        }));
+
+        verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.WEBHOOK_FAILED),
+                eq(AuditSource.JOB), eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void sendThatDoesNotFit_recordedAsDropped_neverReachesTheCaller() {
+        TaskExecutor full = task -> {
+            throw new TaskRejectedException("full");
+        };
+        service = new ExternalSendService(full, auditLogService, transactionManager, clock);
+        boolean[] ran = {false};
+
+        assertDoesNotThrow(() -> service.submit(Channel.NOTIFICATION, WORK_ORDER, () -> ran[0] = true));
+
+        assertFalse(ran[0]);
+        verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.NOTIFICATION_DISCARDED),
+                eq(AuditSource.JOB), eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void sendThatWorks_recordsNothing() {
+        boolean[] ran = {false};
+
+        service.submit(Channel.MAIL, WORK_ORDER, () -> ran[0] = true);
+
+        assertTrue(ran[0]);
+        verify(auditLogService, never()).record(any(), any(), any(), any(), any(), eq(0));
     }
 
     private void verifyRecorded(AuditTarget origin, AuditAction action, int times) {

@@ -7,6 +7,7 @@ import com.grash.model.Company;
 import com.grash.model.WebhookEndpoint;
 import com.grash.model.WorkOrderCategory;
 import com.grash.model.enums.AssetStatus;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PlanFeatures;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.webhook.PartField;
@@ -21,7 +22,6 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -41,9 +41,59 @@ public class WebhookDispatchService {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper;
     private final LicenseService licenseService;
+    private final ExternalSendService externalSendService;
 
-    @Async
+    /**
+     * P-23 (E-2, E-3): dispatches the event through {@link ExternalSendService}, off the thread of the caller. A
+     * dispatch that does not fit or whose delivery fails is recorded against the record of the event; it never
+     * reaches the caller. Nothing is submitted when the organization has no enabled endpoint for the event.
+     */
     public void dispatchWebhook(
+            Company company,
+            WebhookEvent eventType,
+            Map<String, Object> result,
+            String serializedField,
+            Object serializedPayload,
+            Collection<WOField> changedFields,
+            AssetStatus assetStatus,
+            Status workOrderStatus,
+            Collection<WorkOrderCategory> workOrderCategories,
+            Collection<PartField> partFields
+    ) {
+        if (webhookEndpointRepository.findByCompanyIdAndEnabled(company.getId(), true).stream()
+                .noneMatch(endpoint -> endpoint.getEvent() == eventType)) return;
+        externalSendService.submit(ExternalSendService.Channel.WEBHOOK, origin(company, eventType, result),
+                () -> deliver(company, eventType, result, serializedField, serializedPayload, changedFields,
+                        assetStatus, workOrderStatus, workOrderCategories, partFields));
+    }
+
+    /**
+     * P-23: the record a webhook is about, from its event and the identifier its payload carries; the organization
+     * when the payload has none. Without folio or name: the audit log shows its identifier.
+     */
+    static AuditTarget origin(Company company, WebhookEvent eventType, Map<String, Object> payload) {
+        EntityType type;
+        String key;
+        switch (eventType) {
+            case NEW_ASSET, ASSET_STATUS_CHANGE -> { type = EntityType.ASSET; key = "assetId"; }
+            case METER_TRIGGER_STATUS_CHANGE -> { type = EntityType.METER; key = "meterId"; }
+            case NEW_LOCATION -> { type = EntityType.LOCATION; key = "locationId"; }
+            case NEW_PART, PART_CHANGE, PART_DELETE, PART_QUANTITY_CHANGED -> { type = EntityType.PART; key = "partId"; }
+            case NEW_PURCHASE_ORDER, PURCHASE_ORDER_CHANGE, PURCHASE_ORDER_STATUS_CHANGE -> {
+                type = EntityType.PURCHASE_ORDER;
+                key = "purchaseOrderId";
+            }
+            case NEW_VENDOR -> { type = EntityType.VENDOR; key = "vendorId"; }
+            case NEW_REQUEST, WORK_REQUEST_STATUS_CHANGE -> { type = EntityType.REQUEST; key = "requestId"; }
+            default -> { type = EntityType.WORK_ORDER; key = "workOrderId"; }
+        }
+        if (payload.get(key) instanceof Number id) {
+            return new AuditTarget(type, id.longValue(), null, null, company.getId());
+        }
+        return new AuditTarget(EntityType.COMPANY, company.getId(), null, null, company.getId());
+    }
+
+    private void deliver(
             Company company,
             WebhookEvent eventType,
             Map<String, Object> result,
@@ -104,6 +154,7 @@ public class WebhookDispatchService {
                 .toList();
         result.put("occurredAt", new Date());
         result.put("companyId", managedCompany.getId());
+        boolean failed = false;
         for (WebhookEndpoint endpoint : endpoints) {
             try {
                 result.put(serializedField, endpoint.isSerialize() ? serializedPayload : null);
@@ -113,8 +164,11 @@ public class WebhookDispatchService {
 
             } catch (Exception e) {
                 log.error("Failed to send webhook to: {}", endpoint.getUrl(), e);
+                failed = true;
             }
         }
+        // P-23 (E-3): the other endpoints still got the event; ExternalSendService records the failure once
+        if (failed) throw new IllegalStateException("A webhook endpoint did not receive the event");
     }
 
     private void sendWebhook(WebhookEndpoint endpoint, WebhookEvent eventType, Object payload) {
