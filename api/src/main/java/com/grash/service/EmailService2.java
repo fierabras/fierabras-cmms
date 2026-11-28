@@ -1,5 +1,6 @@
 package com.grash.service;
 
+import com.grash.configuration.ExternalSendConfig;
 import com.grash.dto.EmailAttachmentDTO;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
@@ -9,6 +10,7 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.util.ByteArrayDataSource;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.mail.MailProperties;
 import org.springframework.core.env.Environment;
@@ -28,10 +30,12 @@ import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @Transactional
 @RequiredArgsConstructor
+@Slf4j
 public class EmailService2 implements MailService {
 
     private final JavaMailSender emailSender;
@@ -106,13 +110,17 @@ public class EmailService2 implements MailService {
     }
 
 
+    /**
+     * P-23: runs on the executor of the sends; the result fails when the mail does. Its failure is also written to
+     * the log here, without addresses, for the callers that do not look at the result.
+     */
     @Override
-    @Async
-    public void sendMessageUsingThymeleafTemplate(
+    @Async(ExternalSendConfig.EXECUTOR)
+    public CompletableFuture<Void> sendMessageUsingThymeleafTemplate(
             String[] to, String subject, Map<String, Object> templateModel, String template, Locale locale,
             List<EmailAttachmentDTO> attachmentDTOS) {
         if (shouldSkipSendingMail())
-            return;
+            return CompletableFuture.completedFuture(null);
         Context thymeleafContext = new Context();
         thymeleafContext.setLocale(locale);
         thymeleafContext.setVariables(templateModel);
@@ -124,8 +132,13 @@ public class EmailService2 implements MailService {
         try {
             sendHtmlMessage(to, subject, htmlBody, attachmentDTOS);
         } catch (MessagingException | IOException e) {
+            log.error("P-23: the mail {} could not be sent: {}", template, e.getClass().getSimpleName());
             throw new CustomException("Can't send the mail", HttpStatus.INTERNAL_SERVER_ERROR);
+        } catch (RuntimeException e) {
+            log.error("P-23: the mail {} could not be sent: {}", template, e.getClass().getSimpleName());
+            throw e;
         }
+        return CompletableFuture.completedFuture(null);
     }
 
 

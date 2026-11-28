@@ -44,6 +44,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -69,6 +71,34 @@ class UserServiceTest {
     private MessageSource messageSource;
     @Mock
     private MailServiceFactory mailServiceFactory;
+
+    /**
+     * P-23: runs each send at once, so the tests still see the calls to the mail service. As the real one, it
+     * never lets the failure of a send reach the caller.
+     */
+    @Mock
+    private ExternalSendService externalSendService;
+
+    @BeforeEach
+    void runSendsAtOnce() {
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Supplier<?>>getArgument(1).get();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).mail(any(), any());
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Runnable>getArgument(2).run();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).submit(any(), any(), any());
+    }
+
     @Mock
     private RoleService roleService;
     @Mock
@@ -685,7 +715,7 @@ class UserServiceTest {
             when(roleService.findDefaultRoleWithCode(RoleCode.ADMIN)).thenReturn(Optional.of(role));
             when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
             when(verificationTokenRepository.save(any(VerificationToken.class))).thenReturn(null);
-            doNothing().when(mailService).sendMessageUsingThymeleafTemplate(
+            doReturn(CompletableFuture.completedFuture(null)).when(mailService).sendMessageUsingThymeleafTemplate(
                     any(String[].class), anyString(), anyMap(), anyString(), any(), any());
             when(messageSource.getMessage(anyString(), any(), any())).thenReturn("Confirm Email");
 
@@ -841,7 +871,7 @@ class UserServiceTest {
             when(roleService.findDefaultRoleWithCode(RoleCode.ADMIN)).thenReturn(Optional.of(role));
             when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
             when(verificationTokenRepository.save(any(VerificationToken.class))).thenReturn(null);
-            doNothing().when(mailService).sendMessageUsingThymeleafTemplate(
+            doReturn(CompletableFuture.completedFuture(null)).when(mailService).sendMessageUsingThymeleafTemplate(
                     any(String[].class), anyString(), anyMap(), anyString(), any(), any());
             when(messageSource.getMessage(anyString(), any(), any())).thenReturn("Confirm Email");
             when(jwtTokenProvider.createToken(eq("new@test.com"), anyList()))
@@ -1322,7 +1352,7 @@ class UserServiceTest {
         @Test
         void sendsResetEmail() {
             when(userRepository.findByEmailIgnoreCase("john@test.com")).thenReturn(Optional.of(user));
-            doNothing().when(mailService).sendMessageUsingThymeleafTemplate(
+            doReturn(CompletableFuture.completedFuture(null)).when(mailService).sendMessageUsingThymeleafTemplate(
                     any(String[].class), anyString(), anyMap(), anyString(), any(), any());
 
             SuccessResponse response = userService.resetPasswordRequest("john@test.com");

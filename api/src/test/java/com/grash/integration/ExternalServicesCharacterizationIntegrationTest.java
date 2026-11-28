@@ -20,6 +20,7 @@ import com.grash.repository.FileRepository;
 import com.grash.repository.PartRepository;
 import com.grash.repository.WorkOrderRepository;
 import com.grash.service.EmailService2;
+import com.grash.service.ExternalSendService;
 import com.grash.service.IntercomService;
 import com.grash.service.WebhookDispatchService;
 import com.grash.integration.support.CallRecorder;
@@ -56,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -90,6 +92,11 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
      */
     private final Object intercom;
     private Object intercomToken;
+    /**
+     * ExternalSendService: mail is enabled for it too, as for the real mail service.
+     */
+    private final Object externalSend;
+    private Object externalSendMailEnabled;
     private final List<CommonData> created = new ArrayList<>();
 
     private SilentServer smtp;
@@ -105,7 +112,8 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
                                                     PartRepository partRepository, FileRepository fileRepository,
                                                     EmailService2 emailService, JavaMailSenderImpl mailSender,
                                                     WebhookDispatchService webhookDispatchService,
-                                                    IntercomService intercomService) {
+                                                    IntercomService intercomService,
+                                                    ExternalSendService externalSendService) {
         this.organizations = organizations;
         this.records = records;
         this.api = new TestApi(mockMvc, objectMapper);
@@ -119,6 +127,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         this.webhookClient = (RestTemplate) ReflectionTestUtils.getField(dispatcher, "restTemplate");
         this.faults = new FaultInjector(jdbc);
         this.intercom = AopTestUtils.getUltimateTargetObject(intercomService);
+        this.externalSend = AopTestUtils.getUltimateTargetObject(externalSendService);
     }
 
     /**
@@ -136,6 +145,8 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         ReflectionTestUtils.setField(mailTarget(), "enableEmails", true);
         intercomToken = ReflectionTestUtils.getField(intercom, "intercomToken");
         ReflectionTestUtils.setField(intercom, "intercomToken", "");
+        externalSendMailEnabled = ReflectionTestUtils.getField(externalSend, "mailEnabled");
+        ReflectionTestUtils.setField(externalSend, "mailEnabled", true);
     }
 
     @AfterEach
@@ -146,6 +157,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         mailSender.setPort(mailPort);
         ReflectionTestUtils.setField(mailTarget(), "enableEmails", mailEnabled);
         ReflectionTestUtils.setField(intercom, "intercomToken", intercomToken);
+        ReflectionTestUtils.setField(externalSend, "mailEnabled", externalSendMailEnabled);
         faults.removeAll();
         created.forEach(organizations::delete);
         created.clear();
@@ -229,6 +241,14 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
                 data.o1().company().getId());
     }
 
+    /**
+     * The records of the organization, as "ACTION ENTITY_TYPE entity_id", sorted.
+     */
+    private List<String> auditActions(CommonData data) {
+        return jdbc.queryForList("SELECT action || ' ' || entity_type || ' ' || entity_id FROM audit_log "
+                + "WHERE company_id = ? ORDER BY 1", String.class, data.o1().company().getId());
+    }
+
     private long count(String sql, Object... arguments) {
         return jdbc.queryForObject(sql, Long.class, arguments);
     }
@@ -246,7 +266,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    void silentMailServer_creatingAWorkOrder_waitsWithoutLimit_then500ButCommitted() throws Exception {
+    void ca01_silentMailServer_creatingAWorkOrder_answersAtOnceAndCommitted() throws Exception {
         CommonData data = data();
         useRealMail();
         String title = TestRecords.unique("P-23 WO");
@@ -254,19 +274,14 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         try {
             Future<Response> request = user.submit(() -> createWorkOrder(data, title));
 
-            assertTrue(smtp.awaitAccepted(1, WAIT), "the mail of the new work order reached the server");
-            // before P-23: WorkOrderService.notify calls the default five-argument method of MailService, which
-            // calls the asynchronous one on itself: the mail is sent in the thread of the request, without limit
-            assertThrows(TimeoutException.class, () -> request.get(HANGS.toMillis(), TimeUnit.MILLISECONDS),
-                    "the request answered while the mail server was silent");
-            smtp.refuse();
-            Response response = request.get(WAIT.toMillis(), TimeUnit.MILLISECONDS);
-
-            // before P-23: the failed mail escapes the after-commit callback: 500 with the work order committed
-            assertEquals(500, response.status(), response.toString());
+            // before P-23: WorkOrderService.notify called the default five-argument method of MailService, which
+            // called the asynchronous one on itself: the mail went out in the thread of the request, without
+            // limit, and the request waited for the mail server (then 500 with the work order committed)
+            Response response = request.get(HANGS.toMillis(), TimeUnit.MILLISECONDS);
+            assertEquals(200, response.status(), response.toString());
             assertEquals(1, count("SELECT count(*) FROM work_order WHERE title = ? AND company_id = ?", title,
                     data.o1().company().getId()));
-            assertEquals(0, auditRecords(data));
+            assertTrue(smtp.awaitAccepted(1, WAIT), "the mail of the new work order reached the server");
         } finally {
             smtp.refuse();
             user.shutdownNow();
@@ -324,22 +339,50 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     }
 
     @Test
-    void busyMailThreads_doNotDelayTheNotifications() {
+    void ca03_fullExecutor_creatingAWorkOrderThatMails_200_theDropsRecorded() {
         CommonData data = data();
-        for (int i = 0; i < 3; i++) sendMail();
-        assertTrue(smtp.awaitAccepted(3, WAIT), "three mails hold the three threads");
+        useRealMail();
         String title = TestRecords.unique("P-23 WO");
+        fillExecutor();
 
         Response response = createWorkOrder(data, title);
-        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ?", Long.class, title);
-        String notifications = "SELECT count(*) FROM notification WHERE resource_id = ? AND user_id = "
-                + data.o1().technician().getId();
 
         assertEquals(200, response.status(), response.toString());
-        // before P-23: the notification waited behind the mails, on the one executor
-        long deadline = System.nanoTime() + WAIT.toNanos();
-        while (count(notifications, id) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
-        assertEquals(1, count(notifications, id), "the notification ran while the mails held their threads");
+        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ?", Long.class, title);
+        assertEquals(List.of("MAIL_DISCARDED WORK_ORDER " + id, "NOTIFICATION_DISCARDED WORK_ORDER " + id),
+                auditActions(data));
+    }
+
+    @Test
+    void ca06_mailDisabled_fullExecutor_noMailDrop() {
+        CommonData data = data();
+        useRealMail();
+        String title = TestRecords.unique("P-23 WO");
+        fillExecutor();
+        ReflectionTestUtils.setField(mailTarget(), "enableEmails", false);
+        ReflectionTestUtils.setField(externalSend, "mailEnabled", false);
+
+        Response response = createWorkOrder(data, title);
+
+        assertEquals(200, response.status(), response.toString());
+        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ?", Long.class, title);
+        assertEquals(List.of("NOTIFICATION_DISCARDED WORK_ORDER " + id), auditActions(data),
+                "a mail that would not have been sent is not a false alarm");
+    }
+
+    @Test
+    void busyMailThreads_doNotDelayTheExports() {
+        CommonData data = data();
+        for (int i = 0; i < 3; i++) sendMail();
+        assertTrue(smtp.awaitAccepted(3, WAIT), "three mails hold the three threads of the sends");
+
+        Response response = api.call(get("/export/assets").param("uuid", TestRecords.unique("p23")),
+                api.login(data.o1().admin()));
+
+        assertEquals(200, response.status(), response.toString());
+        // before P-23: the export waited behind the mails, on the one executor
+        storageDouble.awaitCalls("upload", 1, WAIT);
+        assertEquals(0, smtp.closedByClient(), "the mails still held their threads when the export ended");
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -363,7 +406,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     }
 
     @Test
-    void failingMailServer_creatingAWorkOrder_500ButCommitted_noAuditRecord() {
+    void ca04_failingMailServer_creatingAWorkOrder_200_theFailureRecorded() {
         CommonData data = data();
         useRealMail();
         smtp.refuse();
@@ -371,13 +414,15 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
 
         Response response = createWorkOrder(data, title);
 
-        assertEquals(1, smtp.accepted(), "the mail reached the server, which closed the connection");
-        // before P-23: the mail is sent in the request thread and its failure answers 500, with the work order
-        // committed; the failure is only written to the log
-        assertEquals(500, response.status(), response.toString());
-        assertEquals(1, count("SELECT count(*) FROM work_order WHERE title = ? AND company_id = ?", title,
-                data.o1().company().getId()));
-        assertEquals(0, auditRecords(data));
+        // before P-23: the mail went out in the request thread and its failure answered 500, with the work order
+        // committed; the failure was only written to the log
+        assertEquals(200, response.status(), response.toString());
+        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ? AND company_id = ?", Long.class,
+                title, data.o1().company().getId());
+        assertTrue(smtp.awaitAccepted(1, WAIT), "the mail reached the server, which closed the connection");
+        long deadline = System.nanoTime() + WAIT.toNanos();
+        while (auditRecords(data) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
+        assertEquals(List.of("MAIL_FAILED WORK_ORDER " + id), auditActions(data));
     }
 
     @Test

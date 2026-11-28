@@ -88,6 +88,7 @@ public class WorkOrderService {
     private final WorkOrderMapper workOrderMapper;
     private final EntityManager em;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final WorkOrderCategoryService workOrderCategoryService;
     private WorkflowService workflowService;
     private final MessageSource messageSource;
@@ -382,7 +383,9 @@ public class WorkOrderService {
         Collection<User> usersToMail =
                 users.stream().filter(user -> user.isEnabled() && user.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
         if (!usersToMail.isEmpty()) {
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(users.stream().findFirst().get()));
+            // P-23 (H-1): the six-argument method, off the thread of the request
+            externalSendService.mail(auditTarget(workOrder), () -> mailServiceFactory.getMailService()
+                    .sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(users.stream().findFirst().get()), null));
         }
     }
 
@@ -401,7 +404,9 @@ public class WorkOrderService {
         Collection<User> usersToMail =
                 usersToNotify.stream().filter(user -> user.isEnabled() && user.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
         if (!usersToMail.isEmpty()) {
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(usersToMail.stream().findFirst().get()));
+            // P-23 (H-1): the six-argument method, off the thread of the request
+            externalSendService.mail(auditTarget(newWorkOrder), () -> mailServiceFactory.getMailService()
+                    .sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(usersToMail.stream().findFirst().get()), null));
         }
     }
 
@@ -1011,9 +1016,11 @@ public class WorkOrderService {
                         put("workOrderLink", frontendUrl + "/app/work-orders/" + id);
                         put("message", message);
                     }};
-                    mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(new String[]{requesterEmail},
-                            messageSource.getMessage("request_update", null, locale), mailVariables, "requester" +
-                                    "-update.html", Helper.getLocale(user), null);
+                    String[] recipients = {requesterEmail};
+                    externalSendService.mail(auditTarget(patchedWorkOrder), () -> mailServiceFactory.getMailService()
+                            .sendMessageUsingThymeleafTemplate(recipients,
+                                    messageSource.getMessage("request_update", null, locale), mailVariables,
+                                    "requester-update.html", Helper.getLocale(user), null));
                 }
             }
             return patchedWorkOrder;
@@ -1320,14 +1327,15 @@ public class WorkOrderService {
                         .build()
         );
 
-        mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
-                allRecipients.toArray(new String[0]),
-                subject,
-                mailVariables,
-                "work-order-report-email.html",
-                locale,
-                attachments
-        );
+        externalSendService.mail(auditTarget(savedWorkOrder), () -> mailServiceFactory.getMailService()
+                .sendMessageUsingThymeleafTemplate(
+                        allRecipients.toArray(new String[0]),
+                        subject,
+                        mailVariables,
+                        "work-order-report-email.html",
+                        locale,
+                        attachments
+                ));
     }
 
     public Collection<CalendarEvent<WorkOrderBaseMiniDTO>> getEvents(@Valid DateRange dateRange, Long companyId,

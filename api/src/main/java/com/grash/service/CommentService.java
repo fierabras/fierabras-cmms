@@ -43,6 +43,7 @@ public class CommentService {
     private final NotificationService notificationService;
     private final MessageSource messageSource;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final DeletionService deletionService;
 
     @Value("${frontend.url}")
@@ -185,13 +186,17 @@ public class CommentService {
                 .collect(Collectors.toList());
 
         if (!usersToMail.isEmpty()) {
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
-                    usersToMail.stream().map(User::getEmail).toArray(String[]::new),
-                    messageSource.getMessage(emailTitleKey, null, locale),
-                    mailVariables,
-                    emailTemplate,
-                    Helper.getLocale(usersToMail.stream().findFirst().get())
-            );
+            // P-23 (H-1): the six-argument method, off the thread of the request
+            AuditTarget origin = AuditTarget.childOf(EntityType.COMMENT, comment.getId(), null, workOrder);
+            externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
+                    .sendMessageUsingThymeleafTemplate(
+                            usersToMail.stream().map(User::getEmail).toArray(String[]::new),
+                            messageSource.getMessage(emailTitleKey, null, locale),
+                            mailVariables,
+                            emailTemplate,
+                            Helper.getLocale(usersToMail.stream().findFirst().get()),
+                            null
+                    ));
         }
     }
 

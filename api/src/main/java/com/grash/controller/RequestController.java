@@ -10,6 +10,7 @@ import com.grash.mapper.RequestMapper;
 import com.grash.mapper.WorkOrderMapper;
 import com.grash.factory.MailServiceFactory;
 import com.grash.model.*;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.model.enums.RoleCode;
@@ -56,6 +57,7 @@ public class RequestController {
     private final MessageSource messageSource;
     private final WorkflowService workflowService;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final AssetService assetService;
     private final RequestPortalService requestPortalService;
     private final WebhookDispatchService webhookDispatchService;
@@ -121,6 +123,14 @@ public class RequestController {
         } else throw new CustomException("Not found", HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * P-23: the request in the audit log, as it is now.
+     */
+    private static AuditTarget auditTarget(Request request) {
+        return new AuditTarget(EntityType.REQUEST, request.getId(), request.getCustomId(), request.getTitle(),
+                request.getCompany().getId());
+    }
+
     private void onRequestCreation(Request createdRequest, Company company, String requesterName) {
         String title = messageSource.getMessage("new_request", null, Helper.getLocale(company));
         String message = messageSource.getMessage("notification_new_request", null, Helper.getLocale(company));
@@ -135,9 +145,11 @@ public class RequestController {
             put("requestTitle", createdRequest.getTitle());
             put("requester", requesterName);
         }};
-        mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToNotify.stream().map(User::getEmail)
-                .toArray(String[]::new), messageSource.getMessage("new_request", null,
-                Helper.getLocale(company)), mailVariables, "new-request.html", Helper.getLocale(company), null);
+        externalSendService.mail(auditTarget(createdRequest), () -> mailServiceFactory.getMailService()
+                .sendMessageUsingThymeleafTemplate(usersToNotify.stream().map(User::getEmail)
+                        .toArray(String[]::new), messageSource.getMessage("new_request", null,
+                        Helper.getLocale(company)), mailVariables, "new-request.html", Helper.getLocale(company),
+                        null));
 
         Collection<Workflow> workflows =
                 workflowService.findByMainConditionAndCompany(WFMainCondition.REQUEST_CREATED,
@@ -261,8 +273,9 @@ public class RequestController {
                 put("workOrderTitle", result.getTitle());
             }};
             String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
-            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
-                    title, mailVariables, "approved-request.html", Helper.getLocale(user), null));
+            AfterCommit.run(() -> externalSendService.mail(auditTarget(savedRequest), () -> mailServiceFactory
+                    .getMailService().sendMessageUsingThymeleafTemplate(recipients, title, mailVariables,
+                            "approved-request.html", Helper.getLocale(user), null)));
 
             return result;
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);
@@ -328,8 +341,9 @@ public class RequestController {
                 put("requestTitle", savedRequest.getTitle());
             }};
             String[] recipients = usersToMail.stream().map(User::getEmail).toArray(String[]::new);
-            AfterCommit.run(() -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
-                    title, mailVariables, "rejected-request.html", Helper.getLocale(user), null));
+            AfterCommit.run(() -> externalSendService.mail(auditTarget(savedRequest), () -> mailServiceFactory
+                    .getMailService().sendMessageUsingThymeleafTemplate(recipients, title, mailVariables,
+                            "rejected-request.html", Helper.getLocale(user), null)));
 
             return requestMapper.toShowDto(requestService.save(savedRequest));
         } else throw new CustomException("Request not found", HttpStatus.NOT_FOUND);

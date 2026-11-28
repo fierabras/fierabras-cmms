@@ -4,8 +4,11 @@ import com.grash.factory.MailServiceFactory;
 import com.grash.model.User;
 import com.grash.model.PreventiveMaintenance;
 import com.grash.model.Schedule;
+import com.grash.model.enums.EntityType;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.repository.ScheduleRepository;
+import com.grash.service.AuditTarget;
+import com.grash.service.ExternalSendService;
 import com.grash.service.ScheduleService;
 import com.grash.service.UserService;
 import com.grash.utils.Helper;
@@ -32,6 +35,7 @@ public class PreventiveMaintenanceNotificationJob extends QuartzJobBean {
     private final ScheduleRepository scheduleRepository;
     private final UserService userService;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final MessageSource messageSource;
     private final ScheduleService scheduleService;
 
@@ -75,12 +79,17 @@ public class PreventiveMaintenanceNotificationJob extends QuartzJobBean {
             put("pmTitle", preventiveMaintenance.getTitle());
         }};
 
-        mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
+        // P-23 (H-1): the six-argument method, off the thread of the job
+        AuditTarget origin = new AuditTarget(EntityType.PREVENTIVE_MAINTENANCE, preventiveMaintenance.getId(),
+                preventiveMaintenance.getCustomId(), preventiveMaintenance.getName(),
+                preventiveMaintenance.getCompany().getId());
+        externalSendService.mail(origin, () -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
                 usersToMail.stream().map(User::getEmail).toArray(String[]::new),
                 title,
                 mailVariables,
                 "coming-work-order.html",
-                locale
-        );
+                locale,
+                null
+        ));
     }
 }

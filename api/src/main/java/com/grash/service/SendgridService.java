@@ -2,6 +2,7 @@ package com.grash.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.configuration.ExternalSendConfig;
 import com.grash.dto.EmailAttachmentDTO;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
@@ -28,6 +29,7 @@ import jakarta.transaction.Transactional;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -284,13 +286,13 @@ public class SendgridService implements MailService {
     /**
      * Send email using Thymeleaf template
      */
-    @Async
-    public void sendMessageUsingThymeleafTemplate(
+    @Async(ExternalSendConfig.EXECUTOR)
+    public CompletableFuture<Void> sendMessageUsingThymeleafTemplate(
             String[] to, String subject, Map<String, Object> templateModel,
             String template, Locale locale, List<EmailAttachmentDTO> attachmentDTOS) {
-        if (to.length == 0) return;
+        if (to.length == 0) return CompletableFuture.completedFuture(null);
         if (shouldSkipSendingEmail())
-            return;
+            return CompletableFuture.completedFuture(null);
         Context thymeleafContext = new Context();
         thymeleafContext.setLocale(locale);
         thymeleafContext.setVariables(templateModel);
@@ -305,7 +307,12 @@ public class SendgridService implements MailService {
         } catch (IOException e) {
             log.error("Error sending templated email", e);
             throw new CustomException("Can't send the mail", HttpStatus.INTERNAL_SERVER_ERROR);
+        } catch (RuntimeException e) {
+            // P-23: written here too, without addresses, for the callers that do not look at the result
+            log.error("P-23: the mail {} could not be sent: {}", template, e.getClass().getSimpleName());
+            throw e;
         }
+        return CompletableFuture.completedFuture(null);
     }
 
     /**

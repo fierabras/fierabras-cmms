@@ -61,6 +61,7 @@ public class PartService {
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final DeletionService deletionService;
     private final PartLedgerService partLedgerService;
 
@@ -193,14 +194,18 @@ public class PartService {
                     put("partLink", frontendUrl + "/app/inventory/parts/" + part.getId());
                 }};
                 if (!uniqueUsersMap.isEmpty()) {
-                    mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
-                            uniqueUsersMap.values().stream().map(User::getEmail).toArray(String[]::new),
-                            messageSource.getMessage("low_stock", null, locale),
-                            mailVariables,
-                            "low-stock.html",
-                            locale,
-                            null
-                    );
+                    String[] recipients = uniqueUsersMap.values().stream().map(User::getEmail).toArray(String[]::new);
+                    AuditTarget origin = new AuditTarget(EntityType.PART, part.getId(), null, part.getName(),
+                            part.getCompany().getId());
+                    externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
+                            .sendMessageUsingThymeleafTemplate(
+                                    recipients,
+                                    messageSource.getMessage("low_stock", null, locale),
+                                    mailVariables,
+                                    "low-stock.html",
+                                    locale,
+                                    null
+                            ));
                 }
             }
         }

@@ -6,6 +6,7 @@ import com.grash.model.enums.AuditSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -17,8 +18,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Supplier;
 
 /**
  * P-23: the door of mail, notifications and webhooks. A send that fails or does not fit never fails the operation
@@ -57,22 +60,47 @@ public class ExternalSendService {
     private final TaskExecutor executor;
     private final AuditLogService auditLogService;
     private final TransactionTemplate newTransaction;
+    private final boolean mailEnabled;
     private final Clock clock;
     private final Map<Key, Instant> lastRecorded = new ConcurrentHashMap<>();
 
     @Autowired
     public ExternalSendService(@Qualifier(ExternalSendConfig.EXECUTOR) TaskExecutor executor,
-                               AuditLogService auditLogService, PlatformTransactionManager transactionManager) {
-        this(executor, auditLogService, transactionManager, Clock.systemUTC());
+                               AuditLogService auditLogService, PlatformTransactionManager transactionManager,
+                               @Value("${mail.enable:false}") boolean mailEnabled) {
+        this(executor, auditLogService, transactionManager, mailEnabled, Clock.systemUTC());
     }
 
     ExternalSendService(TaskExecutor executor, AuditLogService auditLogService,
-                        PlatformTransactionManager transactionManager, Clock clock) {
+                        PlatformTransactionManager transactionManager, boolean mailEnabled, Clock clock) {
         this.executor = executor;
         this.auditLogService = auditLogService;
         this.newTransaction = new TransactionTemplate(transactionManager);
         this.newTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.mailEnabled = mailEnabled;
         this.clock = clock;
+    }
+
+    /**
+     * Sends a mail through the asynchronous six-argument method of {@code MailService}, given as {@code send}. A
+     * mail that does not fit is dropped and a failed one is recorded, against {@code origin}; neither reaches the
+     * caller (CA-P23-01, CA-P23-03, CA-P23-04).
+     */
+    public void mail(AuditTarget origin, Supplier<CompletableFuture<Void>> send) {
+        AuditSource source = currentSource();
+        CompletableFuture<Void> sent;
+        try {
+            sent = send.get();
+        } catch (RejectedExecutionException e) {
+            discarded(Channel.MAIL, origin, source);
+            return;
+        } catch (RuntimeException e) {
+            failed(Channel.MAIL, origin, source, e);
+            return;
+        }
+        if (sent != null) sent.whenComplete((result, failure) -> {
+            if (failure != null) failed(Channel.MAIL, origin, source, failure);
+        });
     }
 
     /**
@@ -114,6 +142,8 @@ public class ExternalSendService {
      * Records that a send about {@code origin} was dropped because the sends were full. Never throws.
      */
     public void discarded(Channel channel, AuditTarget origin, AuditSource source) {
+        // CA-P23-06: with mail disabled, a mail that does not fit would not have been sent: no false alarm
+        if (channel == Channel.MAIL && !mailEnabled) return;
         log.warn("P-23: {} about {} {} discarded: the sends are full", channel, origin.type(), origin.id());
         record(channel.discarded, origin, source);
     }

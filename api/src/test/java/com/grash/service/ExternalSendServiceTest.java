@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -79,7 +80,7 @@ class ExternalSendServiceTest {
         transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         clock = new TestClock();
-        service = new ExternalSendService(new SyncTaskExecutor(), auditLogService, transactionManager, clock);
+        service = new ExternalSendService(new SyncTaskExecutor(), auditLogService, transactionManager, true, clock);
     }
 
     @Test
@@ -97,7 +98,7 @@ class ExternalSendServiceTest {
         TaskExecutor full = task -> {
             throw new TaskRejectedException("full");
         };
-        service = new ExternalSendService(full, auditLogService, transactionManager, clock);
+        service = new ExternalSendService(full, auditLogService, transactionManager, true, clock);
         boolean[] ran = {false};
 
         assertDoesNotThrow(() -> service.submit(Channel.NOTIFICATION, WORK_ORDER, () -> ran[0] = true));
@@ -105,6 +106,59 @@ class ExternalSendServiceTest {
         assertFalse(ran[0]);
         verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.NOTIFICATION_DISCARDED),
                 eq(AuditSource.JOB), eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void mailThatFailsLater_recordedAsFailed() {
+        CompletableFuture<Void> sending = new CompletableFuture<>();
+
+        service.mail(WORK_ORDER, () -> sending);
+        verify(auditLogService, never()).record(any(), any(), any(), any(), any(), eq(0));
+        sending.completeExceptionally(new IllegalStateException("smtp down"));
+
+        verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.MAIL_FAILED), eq(AuditSource.JOB),
+                eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void mailThatDoesNotFit_recordedAsDropped_neverReachesTheCaller() {
+        assertDoesNotThrow(() -> service.mail(WORK_ORDER, () -> {
+            throw new TaskRejectedException("full");
+        }));
+
+        verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.MAIL_DISCARDED),
+                eq(AuditSource.JOB), eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void mailThatThrowsAtOnce_recordedAsFailed_neverReachesTheCaller() {
+        assertDoesNotThrow(() -> service.mail(WORK_ORDER, () -> {
+            throw new IllegalStateException("double armed");
+        }));
+
+        verify(auditLogService).record(eq(WORK_ORDER), isNull(), eq(AuditAction.MAIL_FAILED), eq(AuditSource.JOB),
+                eq(Map.of()), eq(0));
+    }
+
+    @Test
+    void mailDisabled_aMailThatDoesNotFitIsNoFalseAlarm() {
+        service = new ExternalSendService(new SyncTaskExecutor(), auditLogService, transactionManager, false, clock);
+
+        service.mail(WORK_ORDER, () -> {
+            throw new TaskRejectedException("full");
+        });
+        service.submit(Channel.MAIL, WORK_ORDER, () -> {
+        });
+
+        verify(auditLogService, never()).record(any(), any(), any(), any(), any(), eq(0));
+    }
+
+    @Test
+    void mailThatWorks_orWithoutResult_recordsNothing() {
+        service.mail(WORK_ORDER, () -> CompletableFuture.completedFuture(null));
+        service.mail(WORK_ORDER, () -> null);
+
+        verify(auditLogService, never()).record(any(), any(), any(), any(), any(), eq(0));
     }
 
     @Test

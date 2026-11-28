@@ -41,6 +41,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.concurrent.TimeUnit;
 
 import com.grash.dto.ReportConfig;
@@ -77,6 +78,34 @@ class WorkOrderServiceTest {
     private EntityManager em;
     @Mock
     private MailServiceFactory mailServiceFactory;
+
+    /**
+     * P-23: runs each send at once, so the tests still see the calls to the mail service. As the real one, it
+     * never lets the failure of a send reach the caller.
+     */
+    @Mock
+    private ExternalSendService externalSendService;
+
+    @BeforeEach
+    void runSendsAtOnce() {
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Supplier<?>>getArgument(1).get();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).mail(any(), any());
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Runnable>getArgument(2).run();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).submit(any(), any(), any());
+    }
+
     @Mock
     private MailService mailService;
     @Mock
@@ -1966,7 +1995,7 @@ class WorkOrderServiceTest {
             workOrderService.notify(wo, java.util.Locale.ENGLISH);
 
             verify(mailService).sendMessageUsingThymeleafTemplate(
-                    eq(new String[]{enabled.getEmail()}), any(), anyMap(), anyString(), any());
+                    eq(new String[]{enabled.getEmail()}), any(), anyMap(), anyString(), any(), isNull());
         }
 
         @Test
@@ -1981,7 +2010,7 @@ class WorkOrderServiceTest {
             workOrderService.notify(wo, java.util.Locale.ENGLISH);
 
             verify(mailService, never()).sendMessageUsingThymeleafTemplate(
-                    any(), any(), anyMap(), anyString(), any());
+                    any(), any(), anyMap(), anyString(), any(), any());
         }
 
         @Test
@@ -2057,7 +2086,7 @@ class WorkOrderServiceTest {
             workOrderService.patchNotify(oldWo, newWo, java.util.Locale.ENGLISH);
 
             verify(mailService).sendMessageUsingThymeleafTemplate(
-                    eq(new String[]{enabled.getEmail()}), any(), anyMap(), anyString(), any());
+                    eq(new String[]{enabled.getEmail()}), any(), anyMap(), anyString(), any(), isNull());
         }
     }
 
