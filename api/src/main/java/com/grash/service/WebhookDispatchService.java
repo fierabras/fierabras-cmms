@@ -16,12 +16,16 @@ import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.CompanyRepository;
 import com.grash.repository.WebhookEndpointRepository;
 import com.grash.utils.WebhookUrlValidator;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -42,6 +46,29 @@ public class WebhookDispatchService {
     private final ObjectMapper objectMapper;
     private final LicenseService licenseService;
     private final ExternalSendService externalSendService;
+
+    @Value("${external-http.connect-timeout-ms:10000}")
+    private int connectTimeoutMs;
+    @Value("${external-http.read-timeout-ms:20000}")
+    private int readTimeoutMs;
+
+    /**
+     * P-23 (E-1): a destination that does not answer never holds a dispatch for longer than these limits.
+     */
+    @PostConstruct
+    void limitTheTimeOfTheRequests() {
+        restTemplate.setRequestFactory(requestFactory(connectTimeoutMs, readTimeoutMs));
+    }
+
+    /**
+     * P-23 (E-1): the HTTP client of the webhooks, with its time limits in milliseconds.
+     */
+    public static ClientHttpRequestFactory requestFactory(int connectTimeoutMs, int readTimeoutMs) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(connectTimeoutMs);
+        factory.setReadTimeout(readTimeoutMs);
+        return factory;
+    }
 
     /**
      * P-23 (E-2, E-3): dispatches the event through {@link ExternalSendService}, off the thread of the caller. A

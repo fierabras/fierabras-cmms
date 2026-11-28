@@ -15,6 +15,8 @@ import com.sendgrid.helpers.mail.objects.Personalization;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.impl.client.HttpClients;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
@@ -67,10 +69,26 @@ public class SendgridService implements MailService {
     private boolean cloudVersion;
     @Value("${sendgrid.contact-list-id}")
     private String contactListId;
+    @Value("${external-http.connect-timeout-ms:10000}")
+    private int connectTimeoutMs;
+    @Value("${external-http.read-timeout-ms:20000}")
+    private int readTimeoutMs;
 
     @PostConstruct
     public void init() {
         fromName = brandingService.getBrandConfig().getName();
+    }
+
+    /**
+     * P-23 (E-1): the SendGrid client of the mails, whose HTTP client has time limits; the default one has none.
+     */
+    SendGrid sendGrid() {
+        RequestConfig limits = RequestConfig.custom()
+                .setConnectTimeout(connectTimeoutMs)
+                .setConnectionRequestTimeout(connectTimeoutMs)
+                .setSocketTimeout(readTimeoutMs)
+                .build();
+        return new SendGrid(sendGridApiKey, new Client(HttpClients.custom().setDefaultRequestConfig(limits).build()));
     }
 
     /**
@@ -209,7 +227,7 @@ public class SendgridService implements MailService {
             }
             mail.addPersonalization(personalization);
 
-            SendGrid sg = new SendGrid(sendGridApiKey);
+            SendGrid sg = sendGrid();
             Request request = new Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
@@ -258,7 +276,7 @@ public class SendgridService implements MailService {
             attachments.setDisposition("attachment");
             mail.addAttachments(attachments);
 
-            SendGrid sg = new SendGrid(sendGridApiKey);
+            SendGrid sg = sendGrid();
             Request request = new Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
@@ -353,7 +371,7 @@ public class SendgridService implements MailService {
             }
         }
 
-        SendGrid sg = new SendGrid(sendGridApiKey);
+        SendGrid sg = sendGrid();
         Request request = new Request();
         request.setMethod(Method.POST);
         request.setEndpoint("mail/send");

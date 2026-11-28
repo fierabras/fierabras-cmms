@@ -351,7 +351,7 @@ class UserServiceTest {
 
         @Test
         void newCompanyNotLocalhostWithoutInvitationEmail_success() {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", false);
             ReflectionTestUtils.setField(userService, "enableInvitationViaEmail", false);
             when(userMapper.toModel(signupRequest)).thenReturn(mappedUser);
@@ -520,7 +520,7 @@ class UserServiceTest {
 
         @Test
         void newCompanyInProduction_cloudVersionTrue_publishesEvent() {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", true);
             ReflectionTestUtils.setField(userService, "enableInvitationViaEmail", false);
             when(userMapper.toModel(signupRequest)).thenReturn(mappedUser);
@@ -698,7 +698,7 @@ class UserServiceTest {
 
         @Test
         void newCompanyNonLocalhost_enableInvitationViaEmail() {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", false);
             ReflectionTestUtils.setField(userService, "enableInvitationViaEmail", true);
             when(userMapper.toModel(signupRequest)).thenReturn(mappedUser);
@@ -822,7 +822,7 @@ class UserServiceTest {
 
         @Test
         void newCompanyNonLocalhost_enableInvitationViaEmail_skipMailSending() {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", false);
             ReflectionTestUtils.setField(userService, "enableInvitationViaEmail", true);
             signupRequest.setSkipMailSending(true);
@@ -853,7 +853,7 @@ class UserServiceTest {
 
         @Test
         void newCompanyNonLocalhost_enableInvitationViaEmail_demoUser() {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", false);
             ReflectionTestUtils.setField(userService, "enableInvitationViaEmail", true);
             signupRequest.setDemo(true);
@@ -886,7 +886,7 @@ class UserServiceTest {
         @Test
         void newCompanyNonLocalhost_roleSetOnRequest_notNullBranch() throws jakarta.mail.MessagingException,
                 java.io.IOException {
-            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://app.test.com");
+            ReflectionTestUtils.setField(userService, "PUBLIC_API_URL", "https://203.0.113.10");
             ReflectionTestUtils.setField(userService, "cloudVersion", false);
             signupRequest.setRole(role);
 

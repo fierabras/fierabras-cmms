@@ -17,10 +17,22 @@ import com.grash.model.enums.EntityType;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.WorkOrderRepository;
+import com.grash.integration.support.SilentServer;
 import com.grash.service.AuditTarget;
 import com.grash.service.ExternalSendService;
 import com.grash.service.ExternalSendService.Channel;
+import com.grash.service.NotificationService;
+import com.grash.service.SendgridService;
+import com.grash.service.WebhookDispatchService;
 import com.grash.utils.AfterCommit;
+import com.sendgrid.Method;
+import com.sendgrid.Request;
+import com.sendgrid.SendGrid;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.client.RestTemplate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -35,10 +47,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +60,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -245,6 +260,83 @@ class ExternalServicesIntegrationTest extends AbstractIntegrationTest {
     void theDefaultApplicationExecutorIsAbsent() {
         assertFalse(context.containsBean("applicationTaskExecutor"));
         assertFalse(context.containsBean("taskExecutor"));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // E-1: the time limits (CA-P23-01, CA-P23-02 run them against silent servers)
+    // ---------------------------------------------------------------------------------------------------------
+
+    /**
+     * The tests do not load the main {@code application.yml}; it is read here as the application reads it.
+     */
+    @Test
+    void e1_theProductionConfiguration_hasTheTimeLimitsAndTheirVariables() {
+        YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new FileSystemResource("src/main/resources/application.yml"));
+        Properties production = yaml.getObject();
+
+        assertEquals(Map.of(
+                        "spring.mail.properties.mail.smtp.connectiontimeout", "${SMTP_CONNECTION_TIMEOUT_MS:15000}",
+                        "spring.mail.properties.mail.smtp.timeout", "${SMTP_TIMEOUT_MS:30000}",
+                        "spring.mail.properties.mail.smtp.writetimeout", "${SMTP_WRITE_TIMEOUT_MS:30000}",
+                        "external-http.connect-timeout-ms", "${EXTERNAL_HTTP_CONNECT_TIMEOUT_MS:10000}",
+                        "external-http.read-timeout-ms", "${EXTERNAL_HTTP_READ_TIMEOUT_MS:20000}"),
+                Map.of(
+                        "spring.mail.properties.mail.smtp.connectiontimeout",
+                        production.getProperty("spring.mail.properties.mail.smtp.connectiontimeout"),
+                        "spring.mail.properties.mail.smtp.timeout",
+                        production.getProperty("spring.mail.properties.mail.smtp.timeout"),
+                        "spring.mail.properties.mail.smtp.writetimeout",
+                        production.getProperty("spring.mail.properties.mail.smtp.writetimeout"),
+                        "external-http.connect-timeout-ms", production.getProperty("external-http.connect-timeout-ms"),
+                        "external-http.read-timeout-ms", production.getProperty("external-http.read-timeout-ms")));
+    }
+
+    @Test
+    void e1_theWebhookClientAndThePush_useTheLimitsOfTheConfiguration() {
+        Object dispatcher = AopTestUtils.getUltimateTargetObject(context.getBean(WebhookDispatchService.class));
+        Object notifications = AopTestUtils.getUltimateTargetObject(context.getBean(NotificationService.class));
+        WebhookDispatchService fresh = new WebhookDispatchService(null, null, null, null, null);
+        ReflectionTestUtils.setField(fresh, "connectTimeoutMs", 1234);
+        ReflectionTestUtils.setField(fresh, "readTimeoutMs", 5678);
+
+        ReflectionTestUtils.invokeMethod(fresh, "limitTheTimeOfTheRequests");
+
+        RestTemplate client = (RestTemplate) ReflectionTestUtils.getField(fresh, "restTemplate");
+        Object factory = client.getRequestFactory();
+        assertEquals(List.of(1234, 5678), List.of(ReflectionTestUtils.getField(factory, "connectTimeout"),
+                ReflectionTestUtils.getField(factory, "readTimeout")));
+        assertEquals(List.of(10000, 20000), List.of(ReflectionTestUtils.getField(dispatcher, "connectTimeoutMs"),
+                ReflectionTestUtils.getField(dispatcher, "readTimeoutMs")), "the defaults of G-1");
+        assertEquals(List.of(10000L, 20000L), List.of(
+                ReflectionTestUtils.getField(notifications, "pushConnectTimeoutMs"),
+                ReflectionTestUtils.getField(notifications, "pushReadTimeoutMs")), "the defaults of G-1");
+    }
+
+    @Test
+    void e1_theSendGridClient_endsAtItsTimeLimit() throws Exception {
+        Object sendgrid = AopTestUtils.getUltimateTargetObject(context.getBean(SendgridService.class));
+        assertEquals(List.of(10000, 20000), List.of(ReflectionTestUtils.getField(sendgrid, "connectTimeoutMs"),
+                ReflectionTestUtils.getField(sendgrid, "readTimeoutMs")), "the defaults of G-1");
+        try (SilentServer silent = new SilentServer()) {
+            ReflectionTestUtils.setField(sendgrid, "connectTimeoutMs", 1000);
+            ReflectionTestUtils.setField(sendgrid, "readTimeoutMs", 1000);
+            SendGrid client = ReflectionTestUtils.invokeMethod(sendgrid, "sendGrid");
+            client.setHost("127.0.0.1:" + silent.port());
+            Request request = new Request();
+            request.setMethod(Method.POST);
+            request.setEndpoint("mail/send");
+            request.setBody("{}");
+            long start = System.nanoTime();
+
+            assertThrows(IOException.class, () -> client.api(request));
+
+            assertEquals(1, silent.accepted(), "the request reached the silent server, on this machine");
+            assertTrue(System.nanoTime() - start < WAIT.toNanos(), "it ended at its limit");
+        } finally {
+            ReflectionTestUtils.setField(sendgrid, "connectTimeoutMs", 10000);
+            ReflectionTestUtils.setField(sendgrid, "readTimeoutMs", 20000);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------

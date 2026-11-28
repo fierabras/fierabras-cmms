@@ -32,7 +32,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.test.util.AopTestUtils;
@@ -46,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -104,6 +104,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     private String mailHost;
     private int mailPort;
     private Object mailEnabled;
+    private Properties mailProperties;
 
     @Autowired
     ExternalServicesCharacterizationIntegrationTest(TestOrganizations organizations, TestRecords records,
@@ -139,6 +140,8 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         destination = new SilentServer();
         mailHost = mailSender.getHost();
         mailPort = mailSender.getPort();
+        mailProperties = new Properties();
+        mailProperties.putAll(mailSender.getJavaMailProperties());
         mailSender.setHost("127.0.0.1");
         mailSender.setPort(smtp.port());
         mailEnabled = ReflectionTestUtils.getField(mailTarget(), "enableEmails");
@@ -155,6 +158,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         destination.close();
         mailSender.setHost(mailHost);
         mailSender.setPort(mailPort);
+        mailSender.setJavaMailProperties(mailProperties);
         ReflectionTestUtils.setField(mailTarget(), "enableEmails", mailEnabled);
         ReflectionTestUtils.setField(intercom, "intercomToken", intercomToken);
         ReflectionTestUtils.setField(externalSend, "mailEnabled", externalSendMailEnabled);
@@ -187,7 +191,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     }
 
     private void routeWebhooksToSilentServer() {
-        webhookClient.setRequestFactory(new LoopbackRequestFactory(new SimpleClientHttpRequestFactory(),
+        webhookClient.setRequestFactory(new LoopbackRequestFactory(WebhookDispatchService.requestFactory(1000, 1000),
                 destination.port()));
     }
 
@@ -289,17 +293,46 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     }
 
     @Test
-    void silentWebhookDestination_theWorkOrderIsCreated_butTheWebhookWaitsWithoutLimit() {
+    void ca01_silentMailServer_theMailEndsByItsTimeLimit_andIsRecorded() {
+        CommonData data = data();
+        useRealMail();
+        Properties limits = new Properties();
+        limits.putAll(mailProperties);
+        limits.setProperty("mail.smtp.connectiontimeout", "1000");
+        limits.setProperty("mail.smtp.timeout", "1000");
+        limits.setProperty("mail.smtp.writetimeout", "1000");
+        mailSender.setJavaMailProperties(limits);
+        String title = TestRecords.unique("P-23 WO");
+
+        Response response = createWorkOrder(data, title);
+
+        assertEquals(200, response.status(), response.toString());
+        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ?", Long.class, title);
+        assertTrue(smtp.awaitAccepted(1, WAIT), "the mail of the new work order reached the server");
+        // before P-23: no time limit, the mail kept its thread while the server was silent
+        assertTrue(smtp.awaitClosedByClient(1, WAIT), "the mail gave up at its time limit");
+        long deadline = System.nanoTime() + WAIT.toNanos();
+        while (auditRecords(data) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
+        assertEquals(List.of("MAIL_FAILED WORK_ORDER " + id), auditActions(data));
+    }
+
+    @Test
+    void ca02_silentWebhookDestination_theWorkOrderIsCreated_theWebhookEndsByItsTimeLimit_andIsRecorded() {
         CommonData data = data();
         records.endpoint(data.o1().company(), WebhookEvent.NEW_WORK_ORDER);
         routeWebhooksToSilentServer();
+        String title = TestRecords.unique("P-23 WO");
 
-        Response response = createWorkOrder(data, TestRecords.unique("P-23 WO"));
+        Response response = createWorkOrder(data, title);
 
         assertEquals(200, response.status(), response.toString());
+        Long id = jdbc.queryForObject("SELECT id FROM work_order WHERE title = ?", Long.class, title);
         assertTrue(destination.awaitAccepted(1, WAIT), "the webhook reached the destination");
-        // before P-23: no time limit, the dispatch thread keeps waiting
-        assertFalse(destination.awaitClosedByClient(1, HANGS), "the webhook gave up");
+        // before P-23: no time limit, the dispatch thread kept waiting
+        assertTrue(destination.awaitClosedByClient(1, WAIT), "the webhook gave up at its time limit");
+        long deadline = System.nanoTime() + WAIT.toNanos();
+        while (auditRecords(data) == 0 && System.nanoTime() < deadline) pause(Duration.ofMillis(50));
+        assertEquals(List.of("WEBHOOK_FAILED WORK_ORDER " + id), auditActions(data));
     }
 
     // ---------------------------------------------------------------------------------------------------------

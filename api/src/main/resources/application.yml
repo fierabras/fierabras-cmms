@@ -70,6 +70,10 @@ spring:
       auth: true
       starttls.enable: true
       ssl.trust: ${SMTP_HOST:smtp.gmail.com}
+      # P-23 (E-1): a slow mail server never holds a send for longer than this (milliseconds)
+      connectiontimeout: ${SMTP_CONNECTION_TIMEOUT_MS:15000}
+      timeout: ${SMTP_TIMEOUT_MS:30000}
+      writetimeout: ${SMTP_WRITE_TIMEOUT_MS:30000}
   cache:
     type: caffeine
 server:
@@ -104,6 +108,10 @@ mail:
   recipients: ${MAIL_RECIPIENTS}
   enable: ${ENABLE_EMAIL_NOTIFICATIONS:false}
   type: ${MAIL_TYPE:SMTP}
+# P-23 (E-1): time limits of webhooks, SendGrid and push notifications (milliseconds)
+external-http:
+  connect-timeout-ms: ${EXTERNAL_HTTP_CONNECT_TIMEOUT_MS:10000}
+  read-timeout-ms: ${EXTERNAL_HTTP_READ_TIMEOUT_MS:20000}
 management:
   health:
     mail:

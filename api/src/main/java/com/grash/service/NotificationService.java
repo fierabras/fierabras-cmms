@@ -12,6 +12,7 @@ import com.grash.model.enums.EntityType;
 import com.grash.repository.NotificationRepository;
 import io.github.jav.exposerversdk.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -23,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,6 +37,11 @@ public class NotificationService {
     private final PushNotificationTokenService pushNotificationTokenService;
     private final SimpMessageSendingOperations messagingTemplate;
     private final ExternalSendService externalSendService;
+
+    @Value("${external-http.connect-timeout-ms:10000}")
+    private long pushConnectTimeoutMs;
+    @Value("${external-http.read-timeout-ms:20000}")
+    private long pushReadTimeoutMs;
 
     /**
      * P-23 (E-2, E-3): creates the notification through {@link ExternalSendService}, off the thread of the caller;
@@ -165,8 +173,10 @@ public class NotificationService {
         List<ExpoPushTicket> allTickets = new ArrayList<>();
         for (CompletableFuture<List<ExpoPushTicket>> messageReplyFuture : messageRepliesFutures) {
             try {
-                allTickets.addAll(messageReplyFuture.get());
-            } catch (InterruptedException | ExecutionException e) {
+                // P-23 (E-1): the push service never holds the thread of the sends for longer than its limits
+                allTickets.addAll(messageReplyFuture.get(pushConnectTimeoutMs + pushReadTimeoutMs,
+                        TimeUnit.MILLISECONDS));
+            } catch (InterruptedException | ExecutionException | TimeoutException e) {
                 e.printStackTrace();
             }
         }
