@@ -326,14 +326,7 @@ export default function RequestDetails({
                   }}
                 >
                   <Alert severity={'info'}>
-                    {t('requested_from_portal')}{' '}
-                    {
-                      <Link
-                        href={`/app/settings/features/request-portals/${request.requestPortal.id}`}
-                      >
-                        {request.requestPortal.title}
-                      </Link>
-                    }
+                    {t('requested_from_portal')} {request.requestPortal.title}
                   </Alert>
                 </Box>
               )}
