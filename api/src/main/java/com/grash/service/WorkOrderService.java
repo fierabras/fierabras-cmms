@@ -88,6 +88,7 @@ public class WorkOrderService {
     private final WorkOrderMapper workOrderMapper;
     private final EntityManager em;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final WorkOrderCategoryService workOrderCategoryService;
     private WorkflowService workflowService;
     private final MessageSource messageSource;
@@ -223,8 +224,10 @@ public class WorkOrderService {
             Map<String, Object> webhookPayload = new HashMap<>();
             webhookPayload.put("workOrderId", updatedWorkOrder.getId());
             webhookPayload.put("workOrderTitle", updatedWorkOrder.getTitle());
-            webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.WORK_ORDER_CHANGE, webhookPayload,
-                    "changedWorkOrder", serializedWorkOrder, changedFields, null, null, null, null);
+            // P-23 (E-4, R-01): the webhooks of an edit run once it is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                    WebhookEvent.WORK_ORDER_CHANGE, webhookPayload, "changedWorkOrder", serializedWorkOrder,
+                    changedFields, null, null, null, null));
 
             Long newCategoryId = updatedWorkOrder.getCategory() != null ? updatedWorkOrder.getCategory().getId() : null;
             if ((previousCategoryId == null && newCategoryId != null) ||
@@ -236,9 +239,9 @@ public class WorkOrderService {
                 WorkOrderCategory newCategory = updatedWorkOrder.getCategory();
                 Collection<WorkOrderCategory> categories = newCategory != null ?
                         Collections.singletonList(newCategory) : Collections.emptyList();
-                webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.NEW_CATEGORY_ON_WORK_ORDER,
-                        webhookPayload,
-                        "changedWorkOrder", serializedWorkOrder, changedFields, null, null, categories, null);
+                AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(),
+                        WebhookEvent.NEW_CATEGORY_ON_WORK_ORDER, webhookPayload,
+                        "changedWorkOrder", serializedWorkOrder, changedFields, null, null, categories, null));
             }
 
             return updatedWorkOrder;
@@ -289,8 +292,11 @@ public class WorkOrderService {
 
                 boolean shouldNotify =
                         !user.getCompany().getCompanySettings().getGeneralPreferences().isDisableClosedWorkOrdersNotif() || !patchedWorkOrder.getStatus().equals(Status.COMPLETE);
-                if (shouldNotify)
-                    patchNotify(savedWorkOrder, patchedWorkOrder, Helper.getLocale(user));
+                if (shouldNotify) {
+                    // P-23 (E-4, R-01): the notices of the new assignees run once the edit is committed
+                    Locale locale = Helper.getLocale(user);
+                    AfterCommit.run(() -> patchNotify(savedWorkOrder, patchedWorkOrder, locale));
+                }
                 return patchedWorkOrder;
             } else throw new CustomException("Forbidden", HttpStatus.FORBIDDEN);
         } else throw new CustomException("WorkOrder not found", HttpStatus.NOT_FOUND);
@@ -382,7 +388,9 @@ public class WorkOrderService {
         Collection<User> usersToMail =
                 users.stream().filter(user -> user.isEnabled() && user.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
         if (!usersToMail.isEmpty()) {
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(users.stream().findFirst().get()));
+            // P-23 (H-1): the six-argument method, off the thread of the request
+            externalSendService.mail(auditTarget(workOrder), () -> mailServiceFactory.getMailService()
+                    .sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(users.stream().findFirst().get()), null));
         }
     }
 
@@ -401,7 +409,9 @@ public class WorkOrderService {
         Collection<User> usersToMail =
                 usersToNotify.stream().filter(user -> user.isEnabled() && user.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
         if (!usersToMail.isEmpty()) {
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(usersToMail.stream().findFirst().get()));
+            // P-23 (H-1): the six-argument method, off the thread of the request
+            externalSendService.mail(auditTarget(newWorkOrder), () -> mailServiceFactory.getMailService()
+                    .sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_wo", null, locale), mailVariables, "new-work-order.html", Helper.getLocale(usersToMail.stream().findFirst().get()), null));
         }
     }
 
@@ -482,13 +492,15 @@ public class WorkOrderService {
         webhookPayload.put("previousStatus", originalWorkOrder.getStatus());
         webhookPayload.put("newStatus", updatedWorkOrder.getStatus());
 
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.WORK_ORDER_CHANGE, webhookPayload,
-                "changedWorkOrder", serializedWorkOrder, changedFields, null, null, null, null);
+        // P-23 (E-4, R-02): the webhooks of a change of status run once it is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.WORK_ORDER_CHANGE,
+                webhookPayload, "changedWorkOrder", serializedWorkOrder, changedFields, null, null, null, null));
 
         if (statusChanged) {
-            webhookDispatchService.dispatchWebhook(company, WebhookEvent.WORK_ORDER_STATUS_CHANGE, webhookPayload,
-                    "changedWorkOrder", serializedWorkOrder, changedFields, null,
-                    updatedWorkOrder.getStatus(), null, null);
+            Status newStatus = updatedWorkOrder.getStatus();
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company,
+                    WebhookEvent.WORK_ORDER_STATUS_CHANGE, webhookPayload, "changedWorkOrder", serializedWorkOrder,
+                    changedFields, null, newStatus, null, null));
         }
 
         if (categoryChanged) {
@@ -499,8 +511,9 @@ public class WorkOrderService {
             WorkOrderCategory newCategory = updatedWorkOrder.getCategory();
             Collection<WorkOrderCategory> categories = newCategory != null ? Collections.singletonList(newCategory) :
                     Collections.emptyList();
-            webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_CATEGORY_ON_WORK_ORDER, webhookPayload,
-                    "changedWorkOrder", serializedWorkOrder, changedFields, null, null, categories, null);
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company,
+                    WebhookEvent.NEW_CATEGORY_ON_WORK_ORDER, webhookPayload, "changedWorkOrder", serializedWorkOrder,
+                    changedFields, null, null, categories, null));
         }
 
         return updatedWorkOrder;
@@ -970,9 +983,11 @@ public class WorkOrderService {
             if (closes) {
                 List<User> admins =
                         userService.findWorkersByCompany(user.getCompany().getId()).stream().filter(ownUser -> ownUser.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS) && ownUser.isEnabled() && ownUser.getUserSettings().shouldEmailUpdatesForWorkOrders()).collect(Collectors.toList());
-                notificationService.createMultiple(admins.stream().map(admin -> new Notification(messageSource.getMessage("complete_work_order_content", new String[]{patchedWorkOrder.getTitle(), user.getFullName()}, Helper.getLocale(admin)), admin,
-                                NotificationType.WORK_ORDER, id)).collect(Collectors.toList()), true,
-                        messageSource.getMessage("complete_work_order", null, Helper.getLocale(user)));
+                List<Notification> closingNotifications = admins.stream().map(admin -> new Notification(messageSource.getMessage("complete_work_order_content", new String[]{patchedWorkOrder.getTitle(), user.getFullName()}, Helper.getLocale(admin)), admin,
+                        NotificationType.WORK_ORDER, id)).collect(Collectors.toList());
+                String closingTitle = messageSource.getMessage("complete_work_order", null, Helper.getLocale(user));
+                // P-23 (E-4, R-02): the notices of a closing run once it is committed
+                AfterCommit.run(() -> notificationService.createMultiple(closingNotifications, true, closingTitle));
                 Collection<Workflow> workflows =
                         workflowService.findByMainConditionAndCompany(WFMainCondition.WORK_ORDER_CLOSED,
                                 user.getCompany().getId());
@@ -1003,17 +1018,20 @@ public class WorkOrderService {
                                 messageSource.getMessage(patchedWorkOrder.getStatus().toString(), null, locale)},
                         locale);
                 if (requester != null) {
-                    notificationService.create(new Notification(message, requester,
-                            NotificationType.WORK_ORDER, id));
+                    Notification requesterNotification = new Notification(message, requester,
+                            NotificationType.WORK_ORDER, id);
+                    AfterCommit.run(() -> notificationService.create(requesterNotification));
                 }
                 if ((requester != null && requester.getUserSettings().shouldEmailUpdatesForRequests() && requester.isEnabled()) || requesterEmail != null) {
                     Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                         put("workOrderLink", frontendUrl + "/app/work-orders/" + id);
                         put("message", message);
                     }};
-                    mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(new String[]{requesterEmail},
-                            messageSource.getMessage("request_update", null, locale), mailVariables, "requester" +
-                                    "-update.html", Helper.getLocale(user), null);
+                    String[] recipients = {requesterEmail};
+                    AfterCommit.run(() -> externalSendService.mail(auditTarget(patchedWorkOrder),
+                            () -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(recipients,
+                                    messageSource.getMessage("request_update", null, locale), mailVariables,
+                                    "requester-update.html", Helper.getLocale(user), null)));
                 }
             }
             return patchedWorkOrder;
@@ -1320,14 +1338,15 @@ public class WorkOrderService {
                         .build()
         );
 
-        mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
-                allRecipients.toArray(new String[0]),
-                subject,
-                mailVariables,
-                "work-order-report-email.html",
-                locale,
-                attachments
-        );
+        externalSendService.mail(auditTarget(savedWorkOrder), () -> mailServiceFactory.getMailService()
+                .sendMessageUsingThymeleafTemplate(
+                        allRecipients.toArray(new String[0]),
+                        subject,
+                        mailVariables,
+                        "work-order-report-email.html",
+                        locale,
+                        attachments
+                ));
     }
 
     public Collection<CalendarEvent<WorkOrderBaseMiniDTO>> getEvents(@Valid DateRange dateRange, Long companyId,

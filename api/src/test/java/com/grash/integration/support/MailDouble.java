@@ -7,6 +7,7 @@ import com.grash.service.MailService;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Mail double: records every call, named after the {@link MailService} method, and never sends anything.
@@ -25,10 +26,12 @@ public class MailDouble extends CallRecorder implements MailService {
     }
 
     @Override
-    public void sendMessageUsingThymeleafTemplate(String[] to, String subject, Map<String, Object> templateModel,
-                                                  String template, Locale locale,
-                                                  List<EmailAttachmentDTO> attachmentDTOS) {
+    public CompletableFuture<Void> sendMessageUsingThymeleafTemplate(String[] to, String subject,
+                                                                     Map<String, Object> templateModel,
+                                                                     String template, Locale locale,
+                                                                     List<EmailAttachmentDTO> attachmentDTOS) {
         record("sendMessageUsingThymeleafTemplate", to, subject, templateModel, template, locale, attachmentDTOS);
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override

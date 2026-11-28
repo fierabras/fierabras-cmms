@@ -112,7 +112,8 @@ sendgrid:
   from:
     email: test@example.com
 intercom:
-  token: test-intercom-token
+  # P-23: empty, so that no test calls Intercom (the service skips its events without a token)
+  token: ""
 springdoc:
   api-docs:
     version: openapi_3_1

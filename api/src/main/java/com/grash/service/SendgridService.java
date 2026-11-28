@@ -2,6 +2,7 @@ package com.grash.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.grash.configuration.ExternalSendConfig;
 import com.grash.dto.EmailAttachmentDTO;
 import com.grash.exception.CustomException;
 import com.grash.model.User;
@@ -14,6 +15,8 @@ import com.sendgrid.helpers.mail.objects.Personalization;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.impl.client.HttpClients;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.Resource;
@@ -28,6 +31,7 @@ import jakarta.transaction.Transactional;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
 @Service
@@ -65,10 +69,26 @@ public class SendgridService implements MailService {
     private boolean cloudVersion;
     @Value("${sendgrid.contact-list-id}")
     private String contactListId;
+    @Value("${external-http.connect-timeout-ms:10000}")
+    private int connectTimeoutMs;
+    @Value("${external-http.read-timeout-ms:20000}")
+    private int readTimeoutMs;
 
     @PostConstruct
     public void init() {
         fromName = brandingService.getBrandConfig().getName();
+    }
+
+    /**
+     * P-23 (E-1): the SendGrid client of the mails, whose HTTP client has time limits; the default one has none.
+     */
+    SendGrid sendGrid() {
+        RequestConfig limits = RequestConfig.custom()
+                .setConnectTimeout(connectTimeoutMs)
+                .setConnectionRequestTimeout(connectTimeoutMs)
+                .setSocketTimeout(readTimeoutMs)
+                .build();
+        return new SendGrid(sendGridApiKey, new Client(HttpClients.custom().setDefaultRequestConfig(limits).build()));
     }
 
     /**
@@ -207,7 +227,7 @@ public class SendgridService implements MailService {
             }
             mail.addPersonalization(personalization);
 
-            SendGrid sg = new SendGrid(sendGridApiKey);
+            SendGrid sg = sendGrid();
             Request request = new Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
@@ -256,7 +276,7 @@ public class SendgridService implements MailService {
             attachments.setDisposition("attachment");
             mail.addAttachments(attachments);
 
-            SendGrid sg = new SendGrid(sendGridApiKey);
+            SendGrid sg = sendGrid();
             Request request = new Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
@@ -284,13 +304,13 @@ public class SendgridService implements MailService {
     /**
      * Send email using Thymeleaf template
      */
-    @Async
-    public void sendMessageUsingThymeleafTemplate(
+    @Async(ExternalSendConfig.EXECUTOR)
+    public CompletableFuture<Void> sendMessageUsingThymeleafTemplate(
             String[] to, String subject, Map<String, Object> templateModel,
             String template, Locale locale, List<EmailAttachmentDTO> attachmentDTOS) {
-        if (to.length == 0) return;
+        if (to.length == 0) return CompletableFuture.completedFuture(null);
         if (shouldSkipSendingEmail())
-            return;
+            return CompletableFuture.completedFuture(null);
         Context thymeleafContext = new Context();
         thymeleafContext.setLocale(locale);
         thymeleafContext.setVariables(templateModel);
@@ -305,7 +325,12 @@ public class SendgridService implements MailService {
         } catch (IOException e) {
             log.error("Error sending templated email", e);
             throw new CustomException("Can't send the mail", HttpStatus.INTERNAL_SERVER_ERROR);
+        } catch (RuntimeException e) {
+            // P-23: written here too, without addresses, for the callers that do not look at the result
+            log.error("P-23: the mail {} could not be sent: {}", template, e.getClass().getSimpleName());
+            throw e;
         }
+        return CompletableFuture.completedFuture(null);
     }
 
     /**
@@ -346,7 +371,7 @@ public class SendgridService implements MailService {
             }
         }
 
-        SendGrid sg = new SendGrid(sendGridApiKey);
+        SendGrid sg = sendGrid();
         Request request = new Request();
         request.setMethod(Method.POST);
         request.setEndpoint("mail/send");

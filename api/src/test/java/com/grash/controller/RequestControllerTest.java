@@ -56,6 +56,8 @@ class RequestControllerTest extends AbstractControllerTest {
     private RequestPortalService requestPortalService;
     @MockBean
     private WebhookDispatchService webhookDispatchService;
+    @MockBean
+    private ExternalSendService externalSendService;
 
     @Test
     void getPendingCount_withViewRequests_success() throws Exception {

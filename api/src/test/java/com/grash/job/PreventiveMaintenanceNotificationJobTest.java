@@ -12,6 +12,7 @@ import com.grash.model.User;
 import com.grash.model.UserSettings;
 import com.grash.model.enums.PermissionEntity;
 import com.grash.repository.ScheduleRepository;
+import com.grash.service.ExternalSendService;
 import com.grash.service.MailService;
 import com.grash.service.ScheduleService;
 import com.grash.service.UserService;
@@ -35,6 +36,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -58,6 +61,34 @@ class PreventiveMaintenanceNotificationJobTest {
     private UserService userService;
     @Mock
     private MailServiceFactory mailServiceFactory;
+
+    /**
+     * P-23: runs each send at once, so the tests still see the calls to the mail service. As the real one, it
+     * never lets the failure of a send reach the caller.
+     */
+    @Mock
+    private ExternalSendService externalSendService;
+
+    @BeforeEach
+    void runSendsAtOnce() {
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Supplier<?>>getArgument(1).get();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).mail(any(), any());
+        lenient().doAnswer(invocation -> {
+            try {
+                invocation.<Runnable>getArgument(2).run();
+            } catch (RuntimeException e) {
+                // recorded by the real ExternalSendService
+            }
+            return null;
+        }).when(externalSendService).submit(any(), any(), any());
+    }
+
     @Mock
     private MessageSource messageSource;
     @Mock
@@ -144,7 +175,7 @@ class PreventiveMaintenanceNotificationJobTest {
 
         verify(mailServiceFactory, never()).getMailService();
         verify(mailService, never()).sendMessageUsingThymeleafTemplate(
-                any(String[].class), anyString(), anyMap(), anyString(), any());
+                any(String[].class), anyString(), anyMap(), anyString(), any(), any());
     }
 
     @Test
@@ -181,7 +212,7 @@ class PreventiveMaintenanceNotificationJobTest {
 
         ArgumentCaptor<String[]> captor = ArgumentCaptor.forClass(String[].class);
         verify(mailService).sendMessageUsingThymeleafTemplate(
-                captor.capture(), eq("Upcoming WO"), anyMap(), eq("coming-work-order.html"), any());
+                captor.capture(), eq("Upcoming WO"), anyMap(), eq("coming-work-order.html"), any(), isNull());
         assertEquals(Set.of("u1@test.com", "u2@test.com"), new HashSet<>(List.of(captor.getValue())));
     }
 
@@ -200,7 +231,7 @@ class PreventiveMaintenanceNotificationJobTest {
 
         ArgumentCaptor<String[]> captor = ArgumentCaptor.forClass(String[].class);
         verify(mailService).sendMessageUsingThymeleafTemplate(
-                captor.capture(), eq("Upcoming WO"), anyMap(), eq("coming-work-order.html"), any());
+                captor.capture(), eq("Upcoming WO"), anyMap(), eq("coming-work-order.html"), any(), isNull());
         assertEquals(1, captor.getValue().length);
         assertEquals("u3@test.com", captor.getValue()[0]);
     }
@@ -219,7 +250,7 @@ class PreventiveMaintenanceNotificationJobTest {
         ArgumentCaptor<Map<String, Object>> variablesCaptor = ArgumentCaptor.forClass(Map.class);
         verify(mailService).sendMessageUsingThymeleafTemplate(
                 any(String[].class), eq("Upcoming WO"), variablesCaptor.capture(), eq("coming-work-order.html"),
-                eq(Locale.getDefault()));
+                eq(Locale.getDefault()), isNull());
         assertEquals("http://localhost:3000/app/preventive-maintenances/1",
                 variablesCaptor.getValue().get("pmLink"));
         assertEquals("Engine Check", variablesCaptor.getValue().get("pmTitle"));
@@ -236,6 +267,6 @@ class PreventiveMaintenanceNotificationJobTest {
 
         verify(scheduleRepository, never()).findById(any());
         verify(mailService, never()).sendMessageUsingThymeleafTemplate(
-                any(String[].class), anyString(), anyMap(), anyString(), any());
+                any(String[].class), anyString(), anyMap(), anyString(), any(), any());
     }
 }

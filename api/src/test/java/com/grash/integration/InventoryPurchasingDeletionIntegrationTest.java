@@ -706,7 +706,14 @@ class InventoryPurchasingDeletionIntegrationTest extends AbstractIntegrationTest
 
             assertEquals(200, response.status(), response.toString());
             assertEquals(0, rows("part", p7.getId()), "the failure does not bring the part back");
-            assertEquals("PART", onlyAuditRecord(data).get("entity_type"));
+            // P-23 (D-1): before, only the deletion was recorded; the failure of the webhook is now recorded too,
+            // against the part, from the thread of the send
+            String records = "SELECT action || ' ' || entity_type || ' ' || entity_id FROM audit_log "
+                    + "WHERE company_id = ? ORDER BY id";
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (auditRecords(data) < 2 && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertEquals(List.of("DELETE PART " + p7.getId(), "WEBHOOK_FAILED PART " + p7.getId()),
+                    jdbc.queryForList(records, String.class, company.getId()));
             assertEquals(1, failures.size(), appender.list.toString());
             String logged = failures.get(0).getFormattedMessage() + " "
                     + (failures.get(0).getThrowableProxy() == null ? "" : failures.get(0).getThrowableProxy()

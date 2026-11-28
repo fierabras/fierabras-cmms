@@ -42,7 +42,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -75,6 +74,7 @@ public class UserService {
     private final AuthenticationManager authenticationManager;
     private final MessageSource messageSource;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final RoleService roleService;
     private final CompanyService companyService;
     private final CurrencyService currencyService;
@@ -252,10 +252,15 @@ public class UserService {
                     user = userRepository.save(user);
                     VerificationToken newUserToken = new VerificationToken(token, user, null);
                     verificationTokenRepository.save(newUserToken);
-                    if (!Boolean.TRUE.equals(userReq.getSkipMailSending()))
-                        mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(new String[]{user.getEmail()},
-                                messageSource.getMessage("confirmation_email", null, Helper.getLocale(user)), variables,
-                                "signup.html", Helper.getLocale(user), null);
+                    if (!Boolean.TRUE.equals(userReq.getSkipMailSending())) {
+                        User signedUp = user;
+                        // P-23 (E-4, R-11): once the signup is committed
+                        AfterCommit.run(() -> externalSendService.mail(auditTarget(signedUp), () -> mailServiceFactory
+                                .getMailService().sendMessageUsingThymeleafTemplate(new String[]{signedUp.getEmail()},
+                                        messageSource.getMessage("confirmation_email", null,
+                                                Helper.getLocale(signedUp)), variables,
+                                        "signup.html", Helper.getLocale(signedUp), null)));
+                    }
                 } else {
                     return enableAndReturnToken(user, true, userReq);
                 }
@@ -502,12 +507,19 @@ public class UserService {
                 put("inviter", inviter.getFirstName() + " " + inviter.getLastName());
                 put("company", inviter.getCompany().getName());
             }};
-            if (!Boolean.TRUE.equals(disableSendingMails))
-                mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(new String[]{email},
-                        messageSource.getMessage(
-                                "invitation_to_use", new String[]{brandingService.getBrandConfig().getName()},
-                                Helper.getLocale(inviter)), variables, "invite.html",
-                        Helper.getLocale(inviter), null);
+            if (!Boolean.TRUE.equals(disableSendingMails)) {
+                // P-23: an invitation has no record of its own yet; it is recorded against the organization
+                Company company = inviter.getCompany();
+                AuditTarget origin = new AuditTarget(EntityType.COMPANY, company.getId(), null, company.getName(),
+                        company.getId());
+                // P-23 (E-4, R-12): once the invitation is committed
+                AfterCommit.run(() -> externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
+                        .sendMessageUsingThymeleafTemplate(new String[]{email},
+                                messageSource.getMessage(
+                                        "invitation_to_use", new String[]{brandingService.getBrandConfig().getName()},
+                                        Helper.getLocale(inviter)), variables, "invite.html",
+                                Helper.getLocale(inviter), null)));
+            }
         } else throw new CustomException("Email already in use", HttpStatus.NOT_ACCEPTABLE);
     }
 
@@ -546,7 +558,10 @@ public class UserService {
         return userRepository.findAll(builder.build(), page);
     }
 
-    @Async
+    /**
+     * P-23 (H-1): {@code @Async} did not apply (called on itself), so this mail went out in the thread of the
+     * signup; it goes through {@link ExternalSendService} now.
+     */
     void sendRegistrationMailToSuperAdmins(User user, UserSignupRequest userSignupRequest) {
         if (user.getRole() != null && user.getRole().getRoleType() == RoleType.ROLE_SUPER_ADMIN) return;
         if (user.getCompany() != null && user.getCompany().isDemo()) return;
@@ -554,13 +569,26 @@ public class UserService {
             return;
 //            throw new CustomException("MAIL_RECIPIENTS env variable not set", HttpStatus.INTERNAL_SERVER_ERROR);
         }
-        try {
-            String subject = buildRegistrationEmailSubject(userSignupRequest, brandingService);
-            String body = buildRegistrationEmailBody(user, userSignupRequest);
-            mailServiceFactory.getMailService().sendHtmlMessage(recipients, subject, body, null);
-        } catch (MessagingException | IOException e) {
-            e.printStackTrace();
-        }
+        String subject = buildRegistrationEmailSubject(userSignupRequest, brandingService);
+        String body = buildRegistrationEmailBody(user, userSignupRequest);
+        MailService mailService = mailServiceFactory.getMailService();
+        AuditTarget origin = auditTarget(user);
+        // P-23 (E-4, R-11): once the signup is committed
+        AfterCommit.run(() -> externalSendService.submit(ExternalSendService.Channel.MAIL, origin, () -> {
+            try {
+                mailService.sendHtmlMessage(recipients, subject, body, null);
+            } catch (MessagingException | IOException e) {
+                throw new IllegalStateException("The registration mail could not be sent");
+            }
+        }));
+    }
+
+    /**
+     * P-23: the user in the audit log, by name, never by email.
+     */
+    private static AuditTarget auditTarget(User user) {
+        return new AuditTarget(EntityType.USER, user.getId(), null, user.getFirstName() + " " + user.getLastName(),
+                user.getCompany() == null ? null : user.getCompany().getId());
     }
 
     private String buildRegistrationEmailSubject(UserSignupRequest request, BrandingService brandingService) {

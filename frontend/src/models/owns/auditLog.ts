@@ -6,7 +6,13 @@ export const auditActions = [
   'PURGE',
   'SKIP_ARCHIVED_ASSET',
   'GENERATION_FAILED',
-  'SCHEDULING_FAILED'
+  'SCHEDULING_FAILED',
+  'MAIL_FAILED',
+  'NOTIFICATION_FAILED',
+  'WEBHOOK_FAILED',
+  'MAIL_DISCARDED',
+  'NOTIFICATION_DISCARDED',
+  'WEBHOOK_DISCARDED'
 ] as const;
 export type AuditAction = typeof auditActions[number];
 

@@ -48,6 +48,7 @@ public class PurchaseOrderController {
     private final PartQuantityMapper partQuantityMapper;
     private final PurchaseOrderMapper purchaseOrderMapper;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final NotificationService notificationService;
     private final WorkflowService workflowService;
 
@@ -126,7 +127,9 @@ public class PurchaseOrderController {
                     NotificationType.PURCHASE_ORDER, result.getId())).collect(Collectors.toList()), true, title);
             Collection<User> usersToMail =
                     usersToNotify.stream().filter(user1 -> user1.getUserSettings().shouldEmailUpdatesForPurchaseOrders()).collect(Collectors.toList());
-            mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_po", null, Helper.getLocale(user)), mailVariables, "new-purchase-order.html", Helper.getLocale(user), null);
+            AuditTarget origin = new AuditTarget(EntityType.PURCHASE_ORDER, savedPurchaseOrder.getId(), null,
+                    savedPurchaseOrder.getName(), user.getCompany().getId());
+            externalSendService.mail(origin, () -> mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(usersToMail.stream().map(User::getEmail).toArray(String[]::new), messageSource.getMessage("new_po", null, Helper.getLocale(user)), mailVariables, "new-purchase-order.html", Helper.getLocale(user), null));
             return result;
         } else throw new
 

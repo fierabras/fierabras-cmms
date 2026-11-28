@@ -35,5 +35,29 @@ public enum AuditAction {
     /**
      * P-24 (E-5): the next occurrence of a preventive maintenance could not be scheduled.
      */
-    SCHEDULING_FAILED
+    SCHEDULING_FAILED,
+    /**
+     * P-23 (D-1): a mail about the record could not be sent; the operation stays committed.
+     */
+    MAIL_FAILED,
+    /**
+     * P-23 (D-1): an in-app notification about the record could not be created.
+     */
+    NOTIFICATION_FAILED,
+    /**
+     * P-23 (D-1): a webhook about the record could not be delivered to one of its endpoints.
+     */
+    WEBHOOK_FAILED,
+    /**
+     * P-23 (D-2): a mail about the record was not sent because the sends were full.
+     */
+    MAIL_DISCARDED,
+    /**
+     * P-23 (D-2): a notification about the record was not created because the sends were full.
+     */
+    NOTIFICATION_DISCARDED,
+    /**
+     * P-23 (D-2): a webhook about the record was not dispatched because the sends were full.
+     */
+    WEBHOOK_DISCARDED
 }

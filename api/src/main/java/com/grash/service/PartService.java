@@ -61,6 +61,7 @@ public class PartService {
     private final WebhookDispatchService webhookDispatchService;
     private final CustomFieldValueService customFieldValueService;
     private final MailServiceFactory mailServiceFactory;
+    private final ExternalSendService externalSendService;
     private final DeletionService deletionService;
     private final PartLedgerService partLedgerService;
 
@@ -93,8 +94,9 @@ public class PartService {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("partId", savedPart.getId());
         Object serializedPart = partMapper.toShowDto(savedPart);
-        webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.NEW_PART, webhookPayload,
-                "newPart", serializedPart, null, null, null, null, null);
+        // P-23 (E-4, R-07): once the new part is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(user.getCompany(), WebhookEvent.NEW_PART,
+                webhookPayload, "newPart", serializedPart, null, null, null, null, null));
         return savedPart;
     }
 
@@ -134,8 +136,10 @@ public class PartService {
             Map<String, Object> webhookPayload = new HashMap<>();
             webhookPayload.put("partId", patchedPart.getId());
             Object serializedPart = partMapper.toShowDto(patchedPart);
-            webhookDispatchService.dispatchWebhook(patchedPart.getCompany(), WebhookEvent.PART_CHANGE, webhookPayload,
-                    "changedPart", serializedPart, null, null, null, null, changedFields);
+            // P-23 (E-4, R-07): once the edit is committed
+            AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(patchedPart.getCompany(),
+                    WebhookEvent.PART_CHANGE, webhookPayload, "changedPart", serializedPart, null, null, null, null,
+                    changedFields));
 
             if (changedFields.contains(PartField.QUANTITY)) {
                 dispatchPartQuantityChangeWebhook(patchedPart, originalPartQuantity, patchedPart.getQuantity(),
@@ -184,23 +188,29 @@ public class PartService {
                     if (user.isEnabled()) uniqueUsersMap.put(user.getId(), user);
                 });
 
-                notificationService.createMultiple(uniqueUsersMap.values().stream().map(user ->
+                List<Notification> notifications = uniqueUsersMap.values().stream().map(user ->
                         new Notification(message, user, NotificationType.PART, part.getId())
-                ).collect(Collectors.toList()), true, message);
+                ).collect(Collectors.toList());
+                // P-23 (E-4, R-08): the low stock notices run once the consumption is committed
+                AfterCommit.run(() -> notificationService.createMultiple(notifications, true, message));
 
                 Map<String, Object> mailVariables = new HashMap<String, Object>() {{
                     put("partName", part.getName());
                     put("partLink", frontendUrl + "/app/inventory/parts/" + part.getId());
                 }};
                 if (!uniqueUsersMap.isEmpty()) {
-                    mailServiceFactory.getMailService().sendMessageUsingThymeleafTemplate(
-                            uniqueUsersMap.values().stream().map(User::getEmail).toArray(String[]::new),
-                            messageSource.getMessage("low_stock", null, locale),
-                            mailVariables,
-                            "low-stock.html",
-                            locale,
-                            null
-                    );
+                    String[] recipients = uniqueUsersMap.values().stream().map(User::getEmail).toArray(String[]::new);
+                    AuditTarget origin = new AuditTarget(EntityType.PART, part.getId(), null, part.getName(),
+                            part.getCompany().getId());
+                    AfterCommit.run(() -> externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
+                            .sendMessageUsingThymeleafTemplate(
+                                    recipients,
+                                    messageSource.getMessage("low_stock", null, locale),
+                                    mailVariables,
+                                    "low-stock.html",
+                                    locale,
+                                    null
+                            )));
                 }
             }
         }
