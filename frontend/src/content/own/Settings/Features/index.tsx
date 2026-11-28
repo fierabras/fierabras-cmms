@@ -20,8 +20,7 @@ import {
   GroupsTwoTone,
   Inventory,
   LocationOn,
-  Settings,
-  WebAssetTwoTone
+  Settings
 } from '@mui/icons-material';
 import useAuth from '../../../../hooks/useAuth';
 import { Formik } from 'formik';
@@ -91,14 +90,6 @@ function FeaturesSettings() {
       descriptionKey: 'locations_settings_description',
       preferencesPath: '/app/settings/features/location',
       toggleKey: 'locations'
-    },
-    {
-      id: 'request-portals',
-      icon: WebAssetTwoTone,
-      titleKey: 'request_portals',
-      preferencesTitleKey: 'go_to_request_portals',
-      descriptionKey: 'request_portals_settings_description',
-      preferencesPath: '/app/settings/features/request-portals'
     },
     {
       id: 'parts-inventory',
