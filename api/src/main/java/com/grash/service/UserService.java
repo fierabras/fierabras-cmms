@@ -254,11 +254,12 @@ public class UserService {
                     verificationTokenRepository.save(newUserToken);
                     if (!Boolean.TRUE.equals(userReq.getSkipMailSending())) {
                         User signedUp = user;
-                        externalSendService.mail(auditTarget(signedUp), () -> mailServiceFactory.getMailService()
-                                .sendMessageUsingThymeleafTemplate(new String[]{signedUp.getEmail()},
+                        // P-23 (E-4, R-11): once the signup is committed
+                        AfterCommit.run(() -> externalSendService.mail(auditTarget(signedUp), () -> mailServiceFactory
+                                .getMailService().sendMessageUsingThymeleafTemplate(new String[]{signedUp.getEmail()},
                                         messageSource.getMessage("confirmation_email", null,
                                                 Helper.getLocale(signedUp)), variables,
-                                        "signup.html", Helper.getLocale(signedUp), null));
+                                        "signup.html", Helper.getLocale(signedUp), null)));
                     }
                 } else {
                     return enableAndReturnToken(user, true, userReq);
@@ -511,12 +512,13 @@ public class UserService {
                 Company company = inviter.getCompany();
                 AuditTarget origin = new AuditTarget(EntityType.COMPANY, company.getId(), null, company.getName(),
                         company.getId());
-                externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
+                // P-23 (E-4, R-12): once the invitation is committed
+                AfterCommit.run(() -> externalSendService.mail(origin, () -> mailServiceFactory.getMailService()
                         .sendMessageUsingThymeleafTemplate(new String[]{email},
                                 messageSource.getMessage(
                                         "invitation_to_use", new String[]{brandingService.getBrandConfig().getName()},
                                         Helper.getLocale(inviter)), variables, "invite.html",
-                                Helper.getLocale(inviter), null));
+                                Helper.getLocale(inviter), null)));
             }
         } else throw new CustomException("Email already in use", HttpStatus.NOT_ACCEPTABLE);
     }
@@ -570,13 +572,15 @@ public class UserService {
         String subject = buildRegistrationEmailSubject(userSignupRequest, brandingService);
         String body = buildRegistrationEmailBody(user, userSignupRequest);
         MailService mailService = mailServiceFactory.getMailService();
-        externalSendService.submit(ExternalSendService.Channel.MAIL, auditTarget(user), () -> {
+        AuditTarget origin = auditTarget(user);
+        // P-23 (E-4, R-11): once the signup is committed
+        AfterCommit.run(() -> externalSendService.submit(ExternalSendService.Channel.MAIL, origin, () -> {
             try {
                 mailService.sendHtmlMessage(recipients, subject, body, null);
             } catch (MessagingException | IOException e) {
                 throw new IllegalStateException("The registration mail could not be sent");
             }
-        });
+        }));
     }
 
     /**

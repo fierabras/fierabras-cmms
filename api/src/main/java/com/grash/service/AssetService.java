@@ -23,6 +23,7 @@ import com.grash.repository.AssetRepository;
 import com.grash.repository.DeprecationRepository;
 import com.grash.repository.WorkOrderRepository;
 import com.grash.service.CustomFieldValueService;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,8 +112,9 @@ public class AssetService {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("assetId", savedAsset.getId());
         Object serializedAsset = assetMapper.toShowDto(savedAsset, this);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_ASSET, webhookPayload,
-                "newAsset", serializedAsset, null, null, null, null, null);
+        // P-23 (E-4, R-04): once the new asset is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_ASSET, webhookPayload,
+                "newAsset", serializedAsset, null, null, null, null, null));
         return savedAsset;
     }
 
@@ -332,8 +334,10 @@ public class AssetService {
     }
 
     public void notify(Asset asset, String title, String message) {
-        notificationService.createMultiple(asset.getUsers().stream().map(user -> new Notification(message, user,
-                NotificationType.ASSET, asset.getId())).collect(Collectors.toList()), true, title);
+        List<Notification> notifications = asset.getUsers().stream().map(user -> new Notification(message, user,
+                NotificationType.ASSET, asset.getId())).collect(Collectors.toList());
+        // P-23 (E-4, R-03): once the change is committed; at once without a transaction
+        AfterCommit.run(() -> notificationService.createMultiple(notifications, true, title));
     }
 
     public void patchNotify(Asset oldAsset, Asset newAsset, Locale locale) {
@@ -682,8 +686,10 @@ public class AssetService {
         webhookPayload.put("previousStatus", previousStatus);
         webhookPayload.put("newStatus", newStatus);
         Object serializedAsset = assetMapper.toShowDto(asset, this);
-        webhookDispatchService.dispatchWebhook(asset.getCompany(), WebhookEvent.ASSET_STATUS_CHANGE, webhookPayload,
-                "changedAsset", serializedAsset, null, newStatus, null, null, null);
+        // P-23 (E-4, R-03, R-05): once the change of status is committed; at once without a transaction
+        Company company = asset.getCompany();
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.ASSET_STATUS_CHANGE,
+                webhookPayload, "changedAsset", serializedAsset, null, newStatus, null, null, null));
     }
 }
 

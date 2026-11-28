@@ -1,6 +1,10 @@
 package com.grash.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.grash.dto.AssetPatchDTO;
+import com.grash.dto.PartPatchDTO;
+import com.grash.dto.UserSignupRequest;
 import com.grash.configuration.ExternalSendConfig;
 import com.grash.integration.support.CallRecorder;
 import com.grash.integration.support.FaultInjector;
@@ -10,23 +14,34 @@ import com.grash.integration.support.TestApi.Response;
 import com.grash.integration.support.TestOrganizations;
 import com.grash.integration.support.TestOrganizations.CommonData;
 import com.grash.integration.support.TestRecords;
+import com.grash.integration.support.TestWorkOrders;
+import com.grash.model.Asset;
+import com.grash.model.Part;
+import com.grash.model.Request;
+import com.grash.model.RequestPortal;
 import com.grash.model.User;
 import com.grash.model.WorkOrder;
+import com.grash.model.enums.AssetStatus;
 import com.grash.model.enums.AuditSource;
 import com.grash.model.enums.EntityType;
 import com.grash.model.enums.Status;
 import com.grash.model.enums.webhook.WebhookEvent;
+import com.grash.repository.AssetRepository;
+import com.grash.repository.PartRepository;
 import com.grash.repository.WorkOrderRepository;
+import com.grash.service.AssetService;
 import com.grash.integration.support.SilentServer;
 import com.grash.service.AuditTarget;
 import com.grash.service.ExternalSendService;
 import com.grash.service.ExternalSendService.Channel;
 import com.grash.service.NotificationService;
+import com.grash.service.PartService;
+import com.grash.service.RequestService;
 import com.grash.service.SendgridService;
+import com.grash.service.UserService;
 import com.grash.service.WebhookDispatchService;
 import com.grash.utils.AfterCommit;
 import com.sendgrid.Method;
-import com.sendgrid.Request;
 import com.sendgrid.SendGrid;
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.core.io.FileSystemResource;
@@ -53,6 +68,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -113,6 +129,7 @@ class ExternalServicesIntegrationTest extends AbstractIntegrationTest {
     void cleanUp() {
         release.countDown();
         faults.removeAll();
+        created.forEach(records::deleteRequestPortals);
         created.forEach(organizations::delete);
         created.clear();
     }
@@ -323,7 +340,7 @@ class ExternalServicesIntegrationTest extends AbstractIntegrationTest {
             ReflectionTestUtils.setField(sendgrid, "readTimeoutMs", 1000);
             SendGrid client = ReflectionTestUtils.invokeMethod(sendgrid, "sendGrid");
             client.setHost("127.0.0.1:" + silent.port());
-            Request request = new Request();
+            com.sendgrid.Request request = new com.sendgrid.Request();
             request.setMethod(Method.POST);
             request.setEndpoint("mail/send");
             request.setBody("{}");
@@ -421,5 +438,249 @@ class ExternalServicesIntegrationTest extends AbstractIntegrationTest {
 
         assertEquals(200, response.status(), response.toString());
         assertEquals(List.of("NOTIFICATION_FAILED WORK_ORDER " + workOrderId(title) + " - API"), found);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // CA-P23-05: an operation that is rolled back sends nothing (routes R-01 to R-12 of G-1)
+    // ---------------------------------------------------------------------------------------------------------
+
+    /**
+     * Gives the asynchronous sends time to happen, then checks that none did: no webhook, no mail and no
+     * notification of the organization.
+     */
+    private void assertNothingSent(CommonData data) {
+        pause(Duration.ofSeconds(1));
+        assertEquals(List.of(), webhookDouble.calls(), "no webhook");
+        assertEquals(List.of(), mailDouble.calls(), "no mail");
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM notification n JOIN own_user u ON u.id = n.user_id "
+                + "WHERE u.company_id = ?", Long.class, data.o1().company().getId()), "no notification");
+    }
+
+    private void forgetEarlierSends() {
+        pause(Duration.ofSeconds(1));
+        webhookDouble.reset();
+        mailDouble.reset();
+        jdbc.update("DELETE FROM notification WHERE user_id IN (SELECT id FROM own_user WHERE company_id = ?)",
+                created.get(created.size() - 1).o1().company().getId());
+    }
+
+    /**
+     * Runs {@code operation} in a transaction that is rolled back.
+     */
+    private void rolledBack(Runnable operation) {
+        transaction.executeWithoutResult(status -> {
+            operation.run();
+            status.setRollbackOnly();
+        });
+    }
+
+    private Response failingAtCommit(String table, Operation operation, MockHttpServletRequestBuilder request,
+                                     Object body, User user) {
+        try (FaultInjector.Fault fault = faults.failAtCommit(table, operation)) {
+            Response response = send(request, body, user);
+            assertEquals(1, fault.hits(), "the commit failed");
+            assertFalse(response.is2xx(), response.toString());
+            return response;
+        }
+    }
+
+    @Test
+    void ca05_r01_workOrderEdit_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.WORK_ORDER_CHANGE);
+        WorkOrder workOrder = openWorkOrder(data);
+        String token = api.login(data.o1().admin());
+        ObjectNode body = new TestWorkOrders(api, objectMapper, records, workOrderRepository, null, null)
+                .shown(workOrder.getId(), token);
+        body.put("title", TestRecords.unique("P-23 edited"));
+        body.putArray("assignedTo").addObject().put("id", data.o1().admin().getId());
+
+        failingAtCommit("work_order", Operation.UPDATE, patch("/work-orders/" + workOrder.getId()), body,
+                data.o1().admin());
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r02_r03_closingAWorkOrderOfARequest_withItsAssetDown_rolledBack_nothingSent() {
+        CommonData data = data();
+        Response request = send(post("/requests"), Map.of("title", TestRecords.unique("P-23 request")),
+                data.o1().admin());
+        assertEquals(200, request.status(), request.toString());
+        Long requestId = jdbc.queryForObject("SELECT id FROM request WHERE company_id = ?", Long.class,
+                data.o1().company().getId());
+        // the technician asked for it: closing its work order notifies and mails the technician
+        jdbc.update("UPDATE request SET created_by = ? WHERE id = ?", data.o1().technician().getId(), requestId);
+        Asset asset = records.asset(data.o1().company());
+        asset.setStatus(AssetStatus.DOWN);
+        context.getBean(AssetRepository.class).saveAndFlush(asset);
+        WorkOrder workOrder = records.workOrder(data.o1().company(), asset, Status.OPEN, false);
+        jdbc.update("UPDATE work_order SET parent_request_id = ? WHERE id = ?", requestId, workOrder.getId());
+        for (WebhookEvent event : List.of(WebhookEvent.WORK_ORDER_CHANGE, WebhookEvent.WORK_ORDER_STATUS_CHANGE,
+                WebhookEvent.ASSET_STATUS_CHANGE)) {
+            records.endpoint(data.o1().company(), event);
+        }
+        forgetEarlierSends();
+
+        failingAtCommit("work_order", Operation.UPDATE, patch("/work-orders/" + workOrder.getId()
+                + "/change-status"), Map.of("status", "COMPLETE"), data.o1().admin());
+
+        assertNothingSent(data);
+        assertEquals(Status.OPEN.ordinal(), jdbc.queryForObject("SELECT status FROM work_order WHERE id = ?",
+                Integer.class, workOrder.getId()));
+    }
+
+    @Test
+    void ca05_r04_assetCreation_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.NEW_ASSET);
+
+        failingAtCommit("asset", Operation.INSERT, post("/assets"), Map.of("name", TestRecords.unique("P-23 asset")),
+                data.o1().admin());
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r05_assetStatusChange_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.ASSET_STATUS_CHANGE);
+        Asset asset = records.asset(data.o1().company());
+        AssetPatchDTO change = new AssetPatchDTO();
+        change.setName(asset.getName());
+        change.setStatus(AssetStatus.DOWN);
+
+        rolledBack(() -> context.getBean(AssetService.class).update(asset.getId(), change, data.o1().company()));
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r06_locationCreation_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.NEW_LOCATION);
+
+        failingAtCommit("location", Operation.INSERT, post("/locations"),
+                Map.of("name", TestRecords.unique("P-23 location")), data.o1().admin());
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r07_partCreationAndEdit_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.NEW_PART);
+        records.endpoint(data.o1().company(), WebhookEvent.PART_CHANGE);
+        Part part = records.part(data.o1().company(), data.o1().admin());
+        PartPatchDTO change = new PartPatchDTO();
+        change.setName(TestRecords.unique("P-23 part edited"));
+
+        failingAtCommit("part", Operation.INSERT, post("/parts"), Map.of("name", TestRecords.unique("P-23 part")),
+                data.o1().admin());
+        rolledBack(() -> context.getBean(PartService.class).update(part.getId(), change, data.o1().company(),
+                data.o1().admin()));
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r08_consumptionBelowTheMinimum_rolledBack_nothingSent() {
+        CommonData data = data();
+        Part part = records.part(data.o1().company(), data.o1().admin());
+        part.setQuantity(1);
+        part.setMinQuantity(5);
+        context.getBean(PartRepository.class).saveAndFlush(part);
+        WorkOrder workOrder = openWorkOrder(data);
+
+        failingAtCommit("part_transaction", Operation.INSERT, patch("/part-quantities/work-order/"
+                + workOrder.getId()), List.of(part.getId()), data.o1().admin());
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r09_requestOfAPortal_rolledBack_nothingSent() {
+        CommonData data = data();
+        records.endpoint(data.o1().company(), WebhookEvent.NEW_REQUEST);
+        RequestPortal portal = records.portalCiting(data.o1().company(), records.location(data.o1().company()), null);
+        Request request = new Request();
+        request.setTitle(TestRecords.unique("P-23 portal request"));
+
+        rolledBack(() -> context.getBean(RequestService.class).create(request, data.o1().company(), portal));
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r10_comment_rolledBack_nothingSent() {
+        CommonData data = data();
+        WorkOrder workOrder = openWorkOrder(data);
+
+        failingAtCommit("comment", Operation.INSERT, post("/comments"), Map.of("workOrder",
+                Map.of("id", workOrder.getId()), "content", TestRecords.unique("P-23 comment")), data.o1().admin());
+
+        assertNothingSent(data);
+    }
+
+    @Test
+    void ca05_r11_signupWithConfirmationMail_rolledBack_nothingSent() {
+        assertSignupRolledBackSendsNothing(true);
+    }
+
+    @Test
+    void ca05_r11_signupWithTheMailToTheSuperAdministrators_rolledBack_nothingSent() {
+        assertSignupRolledBackSendsNothing(false);
+    }
+
+    /**
+     * A signup of a new organization by the allowed administrator of the test configuration, in a transaction that
+     * is rolled back, so it leaves nothing. Not on this machine's address, so that it sends its mails.
+     */
+    private void assertSignupRolledBackSendsNothing(boolean invitationViaEmail) {
+        Object users = AopTestUtils.getUltimateTargetObject(context.getBean(UserService.class));
+        Map<String, Object> saved = Map.of(
+                "PUBLIC_API_URL", ReflectionTestUtils.getField(users, "PUBLIC_API_URL"),
+                "enableInvitationViaEmail", ReflectionTestUtils.getField(users, "enableInvitationViaEmail"),
+                "enableMails", ReflectionTestUtils.getField(users, "enableMails"));
+        UserSignupRequest signup = new UserSignupRequest();
+        signup.setEmail("admin@test.com");
+        signup.setPassword("P23-Passw0rd!");
+        signup.setFirstName("P-23");
+        signup.setLastName("Signup");
+        signup.setPhone("5550000000");
+        signup.setCompanyName("P-23 signup");
+        signup.setEmployeesCount(5);
+        try {
+            ReflectionTestUtils.setField(users, "PUBLIC_API_URL", "https://203.0.113.10");
+            ReflectionTestUtils.setField(users, "enableInvitationViaEmail", invitationViaEmail);
+            ReflectionTestUtils.setField(users, "enableMails", true);
+
+            rolledBack(() -> context.getBean(UserService.class).signup(signup));
+
+            pause(Duration.ofSeconds(1));
+            assertEquals(List.of(), mailDouble.calls(), "no mail");
+        } finally {
+            saved.forEach((field, value) -> ReflectionTestUtils.setField(users, field, value));
+        }
+    }
+
+    @Test
+    void ca05_r12_invitation_rolledBack_nothingSent() {
+        CommonData data = data();
+        Object users = AopTestUtils.getUltimateTargetObject(context.getBean(UserService.class));
+        Object invitationViaEmail = ReflectionTestUtils.getField(users, "enableInvitationViaEmail");
+        Object mails = ReflectionTestUtils.getField(users, "enableMails");
+        try {
+            ReflectionTestUtils.setField(users, "enableInvitationViaEmail", true);
+            ReflectionTestUtils.setField(users, "enableMails", true);
+
+            rolledBack(() -> context.getBean(UserService.class).invite("p23-" + UUID.randomUUID() + "@example.com",
+                    data.o1().technician().getRole(), data.o1().admin(), false));
+
+            assertNothingSent(data);
+        } finally {
+            ReflectionTestUtils.setField(users, "enableInvitationViaEmail", invitationViaEmail);
+            ReflectionTestUtils.setField(users, "enableMails", mails);
+        }
     }
 }

@@ -18,6 +18,7 @@ import com.grash.model.enums.NotificationType;
 import com.grash.model.enums.webhook.WebhookEvent;
 import com.grash.repository.LocationRepository;
 import com.grash.service.CustomFieldValueService;
+import com.grash.utils.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.MessageSource;
 import org.springframework.data.domain.Page;
@@ -75,8 +76,9 @@ public class LocationService {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("locationId", savedLocation.getId());
         Object serializedLocation = locationMapper.toShowDto(savedLocation, this);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_LOCATION, webhookPayload,
-                "newLocation", serializedLocation, null, null, null, null, null);
+        // P-23 (E-4, R-06): once the new location is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_LOCATION,
+                webhookPayload, "newLocation", serializedLocation, null, null, null, null, null));
         return savedLocation;
     }
 

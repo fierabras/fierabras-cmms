@@ -137,19 +137,21 @@ public class RequestController {
         List<User> usersToNotify = userService.findByCompany(company.getId()).stream()
                 .filter(user1 -> user1.isEnabled() && user1.getRole().getViewPermissions().contains(PermissionEntity.SETTINGS)
                         || user1.getRole().getCode().equals(RoleCode.LIMITED_ADMIN)).collect(Collectors.toList());
-        notificationService.createMultiple(usersToNotify
+        List<Notification> notifications = usersToNotify
                 .stream().map(user1 -> new Notification(message, user1, NotificationType.REQUEST,
-                        createdRequest.getId())).collect(Collectors.toList()), true, title);
+                        createdRequest.getId())).collect(Collectors.toList());
+        // P-23 (E-4, R-09): the notices of a new request run once it is committed
+        AfterCommit.run(() -> notificationService.createMultiple(notifications, true, title));
         Map<String, Object> mailVariables = new HashMap<String, Object>() {{
             put("requestLink", frontendUrl + "/app/requests/" + createdRequest.getId());
             put("requestTitle", createdRequest.getTitle());
             put("requester", requesterName);
         }};
-        externalSendService.mail(auditTarget(createdRequest), () -> mailServiceFactory.getMailService()
-                .sendMessageUsingThymeleafTemplate(usersToNotify.stream().map(User::getEmail)
+        AfterCommit.run(() -> externalSendService.mail(auditTarget(createdRequest), () -> mailServiceFactory
+                .getMailService().sendMessageUsingThymeleafTemplate(usersToNotify.stream().map(User::getEmail)
                         .toArray(String[]::new), messageSource.getMessage("new_request", null,
                         Helper.getLocale(company)), mailVariables, "new-request.html", Helper.getLocale(company),
-                        null));
+                        null)));
 
         Collection<Workflow> workflows =
                 workflowService.findByMainConditionAndCompany(WFMainCondition.REQUEST_CREATED,

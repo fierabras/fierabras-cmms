@@ -25,6 +25,7 @@ import com.grash.model.enums.webhook.WebhookEvent;
 
 import com.grash.repository.FieldConfigurationRepository;
 import com.grash.repository.RequestRepository;
+import com.grash.utils.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.data.domain.Page;
@@ -90,8 +91,9 @@ public class RequestService {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("requestId", savedRequest.getId());
         Object serializedRequest = requestMapper.toShowDto(savedRequest);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST, webhookPayload,
-                "newRequest", serializedRequest, null, null, null, null, null);
+        // P-23 (E-4, R-09): once the new request is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST,
+                webhookPayload, "newRequest", serializedRequest, null, null, null, null, null));
         return savedRequest;
     }
 
@@ -120,8 +122,9 @@ public class RequestService {
         Map<String, Object> webhookPayload = new HashMap<>();
         webhookPayload.put("requestId", savedRequest.getId());
         Object serializedRequest2 = requestMapper.toShowDto(savedRequest);
-        webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST, webhookPayload,
-                "newRequest", serializedRequest2, null, null, null, null, null);
+        // P-23 (E-4, R-09): once the new request of the portal is committed
+        AfterCommit.run(() -> webhookDispatchService.dispatchWebhook(company, WebhookEvent.NEW_REQUEST,
+                webhookPayload, "newRequest", serializedRequest2, null, null, null, null, null));
         return savedRequest;
     }
 

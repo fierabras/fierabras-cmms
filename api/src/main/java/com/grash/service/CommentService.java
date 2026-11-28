@@ -12,6 +12,7 @@ import com.grash.model.enums.EntityType;
 import com.grash.model.enums.NotificationType;
 import com.grash.repository.CommentRepository;
 import com.grash.repository.UserRepository;
+import com.grash.utils.AfterCommit;
 import com.grash.utils.Helper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.criteria.Predicate;
@@ -60,7 +61,8 @@ public class CommentService {
         em.refresh(savedComment);
 
         Set<User> notifiedUsers = getNotifiedUsers(savedComment, workOrder, user);
-        sendCommentNotifications(savedComment, workOrder, notifiedUsers, user, false);
+        // P-23 (E-4, R-10): the notices of a new comment run once it is committed
+        AfterCommit.run(() -> sendCommentNotifications(savedComment, workOrder, notifiedUsers, user, false));
 
         return savedComment;
     }
@@ -104,7 +106,8 @@ public class CommentService {
         em.refresh(updatedComment);
 
         Set<User> notifiedUsers = getNotifiedUsers(updatedComment, workOrder, user);
-        sendCommentNotifications(updatedComment, workOrder, notifiedUsers, user, true);
+        // P-23 (E-4, R-10): the notices of an edited comment run once it is committed
+        AfterCommit.run(() -> sendCommentNotifications(updatedComment, workOrder, notifiedUsers, user, true));
 
         return updatedComment;
     }

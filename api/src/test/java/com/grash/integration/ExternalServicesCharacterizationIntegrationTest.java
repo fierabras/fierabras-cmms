@@ -476,7 +476,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    void workOrderEditRolledBack_theWebhookAndTheMailWereAlreadySent() {
+    void ca05_r01_workOrderEditRolledBack_nothingWasSent() {
         CommonData data = data();
         records.endpoint(data.o1().company(), WebhookEvent.WORK_ORDER_CHANGE);
         WorkOrder workOrder = workOrders.workOrder(data.o1().company(), data.o1().technician());
@@ -494,13 +494,14 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
         assertFalse(response.is2xx(), response.toString());
         assertEquals(workOrder.getTitle(), jdbc.queryForObject("SELECT title FROM work_order WHERE id = ?",
                 String.class, workOrder.getId()), "the edit was rolled back");
-        // before P-23: sent before the commit
-        webhookDouble.awaitCalls("WORK_ORDER_CHANGE", 1, WAIT);
-        assertEquals(1, mailDouble.calls("sendMessageUsingThymeleafTemplate").size(), "the new assignee's mail");
+        // before P-23: the webhook and the mail of the new assignee were sent before the commit
+        pause(Duration.ofSeconds(1));
+        assertEquals(List.of(), webhookDouble.calls(), "no webhook");
+        assertEquals(List.of(), mailDouble.calls(), "no mail");
     }
 
     @Test
-    void requestCreationRolledBack_theWebhookAndTheMailWereAlreadySent() {
+    void ca05_r09_requestCreationRolledBack_nothingWasSent() {
         CommonData data = data();
         records.endpoint(data.o1().company(), WebhookEvent.NEW_REQUEST);
         String title = TestRecords.unique("P-23 request");
@@ -513,9 +514,10 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
 
         assertFalse(response.is2xx(), response.toString());
         assertEquals(0, count("SELECT count(*) FROM request WHERE title = ?", title), "nothing was created");
-        // before P-23: sent before the commit
-        webhookDouble.awaitCalls("NEW_REQUEST", 1, WAIT);
-        assertEquals(1, mailDouble.calls("sendMessageUsingThymeleafTemplate").size(), "the administrators' mail");
+        // before P-23: the webhook and the mail of the administrators were sent before the commit
+        pause(Duration.ofSeconds(1));
+        assertEquals(List.of(), webhookDouble.calls(), "no webhook");
+        assertEquals(List.of(), mailDouble.calls(), "no mail");
     }
 
     // ---------------------------------------------------------------------------------------------------------
