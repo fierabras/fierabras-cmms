@@ -84,9 +84,6 @@ const WorkflowsSettings = Loader(
   lazy(() => import('../content/own/Settings/Features/Workflows'))
 );
 
-const RequestPortalSettings = Loader(
-  lazy(() => import('../content/own/Settings/Features/RequestPortal'))
-);
 const IntegrationsSettings = Loader(
   lazy(() => import('../content/own/Settings/Integrations'))
 );
@@ -235,8 +232,6 @@ const appRoutes = [
               { path: 'custom-fields', element: <VendorsCustomFields /> }
             ]
           },
-          { path: 'request-portals', element: <RequestPortalSettings /> },
-          { path: 'request-portals/:id', element: <RequestPortalSettings /> },
           { path: 'workflows', element: <WorkflowsSettings /> }
         ]
       },
