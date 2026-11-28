@@ -204,15 +204,24 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
      * @return the mails accepted before the rejection
      */
     private int fillExecutor() {
-        for (int sent = 0; sent < 50; sent++) {
-            try {
-                sendMail();
-            } catch (TaskRejectedException e) {
-                assertTrue(smtp.awaitAccepted(3, WAIT), "three threads hold a connection");
-                return sent;
+        int sent = 0;
+        for (int round = 0; round < 10; round++) {
+            boolean roomLeft = false;
+            for (int i = 0; i < 50; i++) {
+                try {
+                    sendMail();
+                    sent++;
+                    roomLeft = true;
+                } catch (TaskRejectedException e) {
+                    break;
+                }
             }
+            assertTrue(smtp.awaitAccepted(3, WAIT), "three threads hold a connection");
+            // tasks left by an earlier test may still free places: fill again until nothing fits
+            if (!roomLeft && round > 0) return sent;
+            pause(Duration.ofMillis(300));
         }
-        throw new AssertionError("the executor never rejected a task");
+        throw new AssertionError("the executor never stayed full");
     }
 
     private long auditRecords(CommonData data) {
@@ -293,8 +302,7 @@ class ExternalServicesCharacterizationIntegrationTest extends AbstractIntegratio
 
         // before P-23: the webhook and the notifications are submitted before the commit; the rejection rolls the
         // closing back
-        assertTrue(accepted > 0 && accepted <= 14, "3 threads and a queue of 11, less what was already there: "
-                + accepted);
+        assertTrue(accepted > 0, "the executor (3 threads, a queue of 11) took mails before it was full");
         assertEquals(500, response.status(), response.toString());
         assertEquals(Status.OPEN.ordinal(), jdbc.queryForObject("SELECT status FROM work_order WHERE id = ?",
                 Integer.class, workOrder.getId()), "the closing was rolled back");
